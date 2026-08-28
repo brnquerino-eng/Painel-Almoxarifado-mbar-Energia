@@ -283,23 +283,36 @@ export default function PainelInventarios({ data }) {
     }
     const totalLinhas = dfInv.length
     const skusUnicos = new Set(dfInv.map((r) => r.codigo_produto).filter(Boolean)).size
-    const valCongelado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || 0), 0)
+    
+    // Robustez nos campos de valores e congelados
+    const valCongelado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0)
+    
     const locaisSet = new Set(dfInv.map(r => limparIdLocal(r.id_local_estoque || r.local_estoque_id || r.local_estoque || r.local || r.deposito || r.codigo_local)).filter(Boolean))
     
     const qtdeLocaisEstoque = locaisSet.size > 0 ? locaisSet.size : uniqueInvs.size
     const linhasContadas = totalLinhas
     const skusContados = skusUnicos
-    const valContado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || 0) + (r.diferenca_val || 0), 0)
+    const valContado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0) + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
     const locaisContados = qtdeLocaisEstoque
-    const itensDivergentes = dfInv.filter((r) => (r.diferenca_qtd || 0) !== 0).length
-    const qtdSobras = dfInv.filter((r) => (r.diferenca_qtd || 0) > 0).reduce((s, r) => s + r.diferenca_qtd, 0)
-    const valSobras = dfInv.filter((r) => (r.diferenca_val || 0) > 0).reduce((s, r) => s + r.diferenca_val, 0)
-    const qtdPerdas = dfInv.filter((r) => (r.diferenca_qtd || 0) < 0).reduce((s, r) => s + r.diferenca_qtd, 0)
-    const valPerdas = dfInv.filter((r) => (r.diferenca_val || 0) < 0).reduce((s, r) => s + r.diferenca_val, 0)
+    
+    // Contagem de itens divergentes com suporte a múltiplos nomes de campos
+    const itensDivergentes = dfInv.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0).length
+    
+    const qtdSobrasRaw = dfInv.filter((r) => (r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0).reduce((s, r) => s + Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0), 0)
+    const qtdSobras = qtdSobrasRaw > 0 ? qtdSobrasRaw : dfInv.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) > 0).length
+    
+    const valSobras = dfInv.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) > 0).reduce((s, r) => s + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
+    
+    const qtdPerdasRaw = dfInv.filter((r) => (r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) < 0).reduce((s, r) => s + Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0), 0)
+    const qtdPerdas = qtdPerdasRaw > 0 ? qtdPerdasRaw : dfInv.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) < 0).length
+    
+    const valPerdas = dfInv.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) < 0).reduce((s, r) => s + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
+    
     const diffLiquida = valSobras + valPerdas
     const linhasSemDiv = totalLinhas - itensDivergentes
     const acuraciaItens = totalLinhas > 0 ? (linhasSemDiv / totalLinhas) * 100 : 100
-    const divergAbs = dfInv.reduce((s, r) => s + Math.abs(r.diferenca_val || 0), 0)
+    
+    const divergAbs = dfInv.reduce((s, r) => s + Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
     const acuraciaValor = valCongelado > 0 ? Math.max(0, (1 - divergAbs / valCongelado) * 100) : (divergAbs === 0 ? 100 : 0)
 
     return {
@@ -389,6 +402,10 @@ export default function PainelInventarios({ data }) {
     
     return anns
   }, [chartEvolucao, vis, mesClicado])
+
+  // 🔥 CORES DINÂMICAS PARA A ACURÁCIA FINANCEIRA (Verde se alta, Laranja se média, Vermelho se baixa)
+  const corAcuFin = stats.acuraciaValor >= 95 ? '#2ecc71' : stats.acuraciaValor >= 80 ? '#f58220' : '#e74c3c'
+  const corAcuFinBg = stats.acuraciaValor >= 95 ? '#111c16' : stats.acuraciaValor >= 80 ? '#1c1612' : '#2a1616'
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
@@ -697,6 +714,7 @@ export default function PainelInventarios({ data }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 relative z-10">
         
+        {/* ACURÁCIA FÍSICA (ITENS) */}
         <div 
           onClick={() => handleCardClick('acuracia_fisica')}
           className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
@@ -750,28 +768,30 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
+        {/* ACURÁCIA FINANCEIRA (VALOR) COM CORES DINÂMICAS */}
         <div 
           onClick={() => handleCardClick('acuracia_financeira')}
+          style={isAcuFinSel ? { backgroundColor: corAcuFinBg, borderColor: corAcuFin, boxShadow: `0 0 25px ${corAcuFin}55` } : {}}
           className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
-            isAcuFinSel ? 'border-[#3498db] shadow-[0_0_25px_rgba(52,152,219,0.35)] bg-[#121c24] -translate-y-1.5 ring-1 ring-[#3498db]/50' : 'border-[#2A2A2A] hover:border-[#3498db]/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(52,152,219,0.18)]'
+            isAcuFinSel ? 'border-opacity-100 -translate-y-1.5 ring-1' : 'border-[#2A2A2A] hover:-translate-y-1'
           }`}
         >
           {isAcuFinSel && (
             <div className="absolute top-3 right-3 flex items-center justify-center z-20">
-              <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3498db] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#3498db] shadow-[0_0_10px_rgba(52,152,219,0.8)]"></span></span>
+              <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: corAcuFin }}></span><span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ backgroundColor: corAcuFin, boxShadow: `0 0 10px ${corAcuFin}` }}></span></span>
             </div>
           )}
-          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#3498db]/50 to-transparent pointer-events-none" />
+          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent to-transparent pointer-events-none" style={{ backgroundImage: `linear-gradient(to right, transparent, ${corAcuFin}, transparent)` }} />
 
           <div className="w-full sm:w-1/2 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-[#161c24] text-[#3498db] mb-3 shadow-inner border border-[#3498db]/30">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 shadow-inner border" style={{ backgroundColor: `${corAcuFin}15`, color: corAcuFin, borderColor: `${corAcuFin}40` }}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             </div>
             <h3 className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase mb-1.5">ACURÁCIA FINANCEIRA (VALOR)</h3>
             <p className="text-[11px] text-muted leading-relaxed max-w-xs mb-3">Avalia a saúde financeira da contagem, refletindo a exatidão monetária.</p>
             
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#3498db]/15 border border-[#3498db]/30 text-[#3498db] text-[10px] font-bold">
-               <span className="w-1.5 h-1.5 rounded-full bg-[#3498db] animate-pulse"></span>
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg text-[10px] font-bold border" style={{ backgroundColor: `${corAcuFin}15`, borderColor: `${corAcuFin}35`, color: corAcuFin }}>
+               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: corAcuFin }}></span>
                <span>CONFIABILIDADE</span>
             </div>
           </div>
@@ -787,13 +807,13 @@ export default function PainelInventarios({ data }) {
                 rotation: 90,
                 textinfo: 'none',
                 hoverinfo: 'none',
-                marker: { colors: ['#3498db', '#222222'], line: { width: 0 } }
+                marker: { colors: [corAcuFin, '#222222'], line: { width: 0 } }
               }]}
               layout={{
                 ...DONUT_LAYOUT,
                 annotations: [{
                   text: `${stats.acuraciaValor.toFixed(2)}%`,
-                  font: { size: 22, color: '#3498db', family: 'Inter', weight: 900 },
+                  font: { size: 22, color: corAcuFin, family: 'Inter', weight: 900 },
                   showarrow: false,
                   x: 0.5, y: 0.5
                 }]
@@ -812,7 +832,7 @@ export default function PainelInventarios({ data }) {
         >
           <span className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-inner">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2v0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
             </span>
             DETALHAMENTO E GERENCIAMENTO DOS INVENTÁRIOS POR UNIDADE
           </span>
