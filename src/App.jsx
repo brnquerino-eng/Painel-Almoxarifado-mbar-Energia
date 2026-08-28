@@ -63,7 +63,12 @@ export default function App() {
   if (loading && buscando) {
     return (
       <div className="min-h-screen bg-[#080808] p-6 text-white">
-        <Header />
+        {/* Header recebendo as informações na tela de loading também! */}
+        <Header 
+          ultimaAtualizacao={ultimaAtualizacao} 
+          onAtualizar={handleAtualizarDados} 
+          loading={buscando} 
+        />
         <LoadingScreen
           progress={progress}
           label="Sincronizando e atualizando base de dados..."
@@ -74,40 +79,28 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#080808] p-4 md:p-6 text-white">
-      <Header />
-
-      {/* 🚀 Painel de Controle com Data da Atualização */}
-      <div className="my-4 flex flex-col sm:flex-row items-center justify-between bg-[#141414] p-4 rounded-xl border border-[#2A2A2A] gap-4">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-200">Sincronização de Banco de Dados</h2>
-          <p className="text-xs text-amber-500 mt-1">
-            {ultimaAtualizacao 
-              ? `Última atualização feita em: ${ultimaAtualizacao}` 
-              : 'Os dados ainda não foram puxados do banco. Clique para sincronizar.'}
-          </p>
-        </div>
-        <button
-          onClick={handleAtualizarDados}
-          disabled={loading}
-          className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md cursor-pointer text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-        >
-          {loading ? 'Atualizando...' : '🔄 Carregar / Atualizar Dados'}
-        </button>
-      </div>
+      {/* 🚀 Header executivo com o nosso botão embutido lá no canto */}
+      <Header 
+        ultimaAtualizacao={ultimaAtualizacao} 
+        onAtualizar={handleAtualizarDados} 
+        loading={buscando} 
+      />
 
       {(errorEstoque || errorInventario) && (
-        <div className="bg-red-900/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
+        <div className="bg-red-900/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200 mt-4">
           <strong>Erro ao carregar dados:</strong>{' '}
           {errorEstoque || errorInventario}
         </div>
       )}
 
-      <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+      <div className="mt-4">
+        <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+      </div>
 
       {/* Se não tem data salva e não tem dado nenhum, avisa para clicar */}
       {!ultimaAtualizacao && estoqueData.length === 0 ? (
         <div className="text-center py-20 text-gray-500 italic bg-[#111] rounded-xl border border-[#222] mt-4">
-          O cache está vazio. Clique no botão acima para puxar os dados do Supabase pela primeira vez.
+          O cache está vazio. Clique no botão de atualizar lá no topo para puxar os dados do Supabase pela primeira vez.
         </div>
       ) : (
         <div className="mt-4">
