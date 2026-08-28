@@ -284,9 +284,7 @@ export default function PainelInventarios({ data }) {
     const totalLinhas = dfInv.length
     const skusUnicos = new Set(dfInv.map((r) => r.codigo_produto).filter(Boolean)).size
     
-    // Robustez nos campos de valores e congelados
     const valCongelado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0)
-    
     const locaisSet = new Set(dfInv.map(r => limparIdLocal(r.id_local_estoque || r.local_estoque_id || r.local_estoque || r.local || r.deposito || r.codigo_local)).filter(Boolean))
     
     const qtdeLocaisEstoque = locaisSet.size > 0 ? locaisSet.size : uniqueInvs.size
@@ -295,7 +293,6 @@ export default function PainelInventarios({ data }) {
     const valContado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0) + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
     const locaisContados = qtdeLocaisEstoque
     
-    // Contagem de itens divergentes com suporte a múltiplos nomes de campos
     const itensDivergentes = dfInv.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0).length
     
     const qtdSobrasRaw = dfInv.filter((r) => (r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0).reduce((s, r) => s + Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0), 0)
@@ -337,7 +334,7 @@ export default function PainelInventarios({ data }) {
 
   const ResultRow = ({ label, resVal, baseVal, isCurrency = false }) => {
     const isMatch = resVal === baseVal
-    const colorClass = isMatch ? 'text-[#3498db]' : 'text-accent'
+    const colorClass = isMatch ? 'text-white' : 'text-accent'
     const icon = isMatch ? '✓' : '✕'
     const displayVal = isCurrency ? fmtBRL(resVal) : fmtInt(resVal)
     
@@ -403,9 +400,17 @@ export default function PainelInventarios({ data }) {
     return anns
   }, [chartEvolucao, vis, mesClicado])
 
-  // 🔥 CORES DINÂMICAS PARA A ACURÁCIA FINANCEIRA (Verde se alta, Laranja se média, Vermelho se baixa)
+  // Cores dinâmicas para Acurácia Física e Financeira
+  const corAcuFis = stats.acuraciaItens >= 95 ? '#2ecc71' : stats.acuraciaItens >= 80 ? '#f58220' : '#e74c3c'
+  const corAcuFisBg = stats.acuraciaItens >= 95 ? '#111c16' : stats.acuraciaItens >= 80 ? '#1c1612' : '#2a1616'
+
   const corAcuFin = stats.acuraciaValor >= 95 ? '#2ecc71' : stats.acuraciaValor >= 80 ? '#f58220' : '#e74c3c'
   const corAcuFinBg = stats.acuraciaValor >= 95 ? '#111c16' : stats.acuraciaValor >= 80 ? '#1c1612' : '#2a1616'
+
+  // Dinâmica do valor contado
+  const diffValContado = stats.valContado - stats.valCongelado
+  const corValContado = diffValContado > 0 ? 'text-accent' : diffValContado < 0 ? 'text-danger' : 'text-white'
+  const iconeValContado = diffValContado === 0 ? '✓' : '✕'
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
@@ -569,8 +574,10 @@ export default function PainelInventarios({ data }) {
         </div>
       )}
 
+      {/* BLOCOS SUPERIORES */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-4 relative z-10">
         
+        {/* BLOCO 1: FOTO INICIAL (Números em Azul #3498db) */}
         <div 
           onClick={() => handleCardClick('foto_inicial')}
           className={`lg:col-span-1 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -593,21 +600,22 @@ export default function PainelInventarios({ data }) {
             </div>
             
             <div className="divide-y divide-[#222222] border-y border-[#222222] py-1 my-2 space-y-0.5">
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Total Inventário:</span><span className="font-mono font-bold text-white text-xs">{stats.totalInvs}</span></div>
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Rotativo:</span><span className="font-mono font-bold text-white text-xs">{stats.invsRotativos}</span></div>
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Geral:</span><span className="font-mono font-bold text-white text-xs">{stats.invsGeral}</span></div>
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Local Estoque:</span><span className="font-mono font-bold text-white text-xs">{stats.qtdeLocaisEstoque}</span></div>
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Total de Linhas:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.totalLinhas)}</span></div>
-              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">SKUs Únicos:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.skusUnicos)}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Total Inventário:</span><span className="font-mono font-bold text-[#3498db] text-xs">{stats.totalInvs}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Rotativo:</span><span className="font-mono font-bold text-[#3498db] text-xs">{stats.invsRotativos}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Geral:</span><span className="font-mono font-bold text-[#3498db] text-xs">{stats.invsGeral}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Local Estoque:</span><span className="font-mono font-bold text-[#3498db] text-xs">{stats.qtdeLocaisEstoque}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">Total de Linhas:</span><span className="font-mono font-bold text-[#3498db] text-xs">{fmtInt(stats.totalLinhas)}</span></div>
+              <div className="flex justify-between items-center py-1.5"><span className="text-xs text-[#8c9ba5]">SKUs Únicos:</span><span className="font-mono font-bold text-[#3498db] text-xs">{fmtInt(stats.skusUnicos)}</span></div>
             </div>
           </div>
 
           <div className="mt-3 pt-3 border-t border-[#222222]">
             <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-1">VALOR TOTAL DO INVENTÁRIO</span>
-            <span className="block text-base lg:text-lg font-black text-white font-mono tracking-tight">{fmtBRL(stats.valCongelado)}</span>
+            <span className="block text-base lg:text-lg font-black text-[#3498db] font-mono tracking-tight">{fmtBRL(stats.valCongelado)}</span>
           </div>
         </div>
 
+        {/* BLOCO 2: INVENTÁRIO - RESULTADO */}
         <div 
           onClick={() => handleCardClick('execucao')}
           className={`lg:col-span-1 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -641,69 +649,65 @@ export default function PainelInventarios({ data }) {
 
           <div className="mt-3 pt-3 border-t border-[#222222]">
             <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-1">VALOR TOTAL CONTADO</span>
-            {(() => {
-              const match = stats.valContado === stats.valCongelado
-              return (
-                <span className={`block text-base lg:text-lg font-black font-mono tracking-tight flex items-center gap-2 ${match ? 'text-[#3498db]' : 'text-accent'}`}>
-                  {fmtBRL(stats.valContado)} <span className="text-xs font-black">{match ? '✓' : '✕'}</span>
-                </span>
-              )
-            })()}
+            <span className={`block text-base lg:text-lg font-black font-mono tracking-tight flex items-center gap-2 ${corValContado}`}>
+              {fmtBRL(stats.valContado)} <span className="text-xs font-black">{iconeValContado}</span>
+            </span>
           </div>
         </div>
 
+        {/* BLOCO 3: BALANÇO DE DIVERGÊNCIAS (Mais encorpado e espaçado) */}
         <div 
           onClick={() => handleCardClick('divergencias')}
-          className={`lg:col-span-2 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
+          className={`lg:col-span-2 bg-[#161616] border rounded-2xl p-6 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
             isDivSel ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'
           }`}
         >
           {isDivSel && (
-            <div className="absolute top-2.5 right-2.5 flex items-center justify-center">
+            <div className="absolute top-3 right-3 flex items-center justify-center">
               <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span>
             </div>
           )}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
           <div>
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-9 h-9 rounded-xl bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>
               </div>
-              <span className="text-[10px] font-bold tracking-[0.18em] text-[#8c9ba5] uppercase">BALANÇO DE DIVERGÊNCIAS</span>
+              <span className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase">BALANÇO DE DIVERGÊNCIAS</span>
             </div>
             
-            <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-[#101010] border border-[#222222] rounded-xl flex flex-col shadow-inner overflow-hidden">
-                <div className="px-3 py-2 border-b border-[#222222] bg-[#161616]">
-                  <span className="block text-[10px] text-[#2ecc71] font-bold tracking-widest uppercase flex items-center gap-1"><span>▲</span> Sobras (Para Mais)</span>
+                <div className="px-3.5 py-2.5 border-b border-[#222222] bg-[#161616]">
+                  <span className="block text-[11px] text-[#2ecc71] font-bold tracking-widest uppercase flex items-center gap-1.5"><span>▲</span> Sobras (Para Mais)</span>
                 </div>
-                <div className="p-3 flex flex-col justify-center gap-1.5 divide-y divide-[#222222]">
-                  <div className="flex justify-between items-end pb-1"><span className="text-xs text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdSobras)} UN</span></div>
-                  <div className="flex justify-between items-end pt-1"><span className="text-xs text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#2ecc71] text-xs">{fmtBRL(stats.valSobras)}</span></div>
+                <div className="p-3.5 flex flex-col justify-center gap-2 divide-y divide-[#222222]">
+                  <div className="flex justify-between items-end pb-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdSobras)} UN</span></div>
+                  <div className="flex justify-between items-end pt-1.5"><span className="text-xs text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#2ecc71] text-xs sm:text-sm">{fmtBRL(stats.valSobras)}</span></div>
                 </div>
               </div>
               
               <div className="bg-[#101010] border border-[#222222] rounded-xl flex flex-col shadow-inner overflow-hidden">
-                <div className="px-3 py-2 border-b border-[#222222] bg-[#161616]">
-                  <span className="block text-[10px] text-[#e74c3c] font-bold tracking-widest uppercase flex items-center gap-1"><span>▼</span> Perdas (Para Menos)</span>
+                <div className="px-3.5 py-2.5 border-b border-[#222222] bg-[#161616]">
+                  <span className="block text-[11px] text-[#e74c3c] font-bold tracking-widest uppercase flex items-center gap-1.5"><span>▼</span> Perdas (Para Menos)</span>
                 </div>
-                <div className="p-3 flex flex-col justify-center gap-1.5 divide-y divide-[#222222]">
-                  <div className="flex justify-between items-end pb-1"><span className="text-xs text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdPerdas)} UN</span></div>
-                  <div className="flex justify-between items-end pt-1"><span className="text-xs text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#e74c3c] text-xs">{fmtBRL(stats.valPerdas)}</span></div>
+                <div className="p-3.5 flex flex-col justify-center gap-2 divide-y divide-[#222222]">
+                  <div className="flex justify-between items-end pb-1.5"><span className="text-xs text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdPerdas)} UN</span></div>
+                  <div className="flex justify-between items-end pt-1.5"><span className="text-xs text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#e74c3c] text-xs sm:text-sm">{fmtBRL(stats.valPerdas)}</span></div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-[#101010] rounded-xl border border-[#222222] p-3 shadow-inner flex items-center justify-between divide-x divide-[#222222]">
+          <div className="bg-[#101010] rounded-xl border border-[#222222] p-4 shadow-inner flex items-center justify-between divide-x divide-[#222222]">
              <div className="flex-1 pr-4">
-               <span className="block text-[9px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-0.5">ITENS DIVERGENTES</span>
-               <span className="block text-xs font-bold text-white font-mono">{fmtInt(stats.itensDivergentes)} <span className="text-[10px] text-muted">registros</span></span>
+               <span className="block text-[10px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-1">ITENS DIVERGENTES</span>
+               <span className="block text-xs sm:text-sm font-bold text-white font-mono">{fmtInt(stats.itensDivergentes)} <span className="text-[10px] text-muted">registros</span></span>
              </div>
              <div className="flex-1 pl-4 text-right">
-               <span className="block text-[9px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-0.5">DIFERENÇA LÍQUIDA</span>
-               <span className={`block text-xs lg:text-sm font-black font-mono tracking-tight ${stats.diffLiquida > 0 ? 'text-[#2ecc71]' : stats.diffLiquida < 0 ? 'text-[#e74c3c]' : 'text-white'}`}>
+               <span className="block text-[10px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-1">DIFERENÇA LÍQUIDA</span>
+               <span className={`block text-sm sm:text-base font-black font-mono tracking-tight ${stats.diffLiquida > 0 ? 'text-[#2ecc71]' : stats.diffLiquida < 0 ? 'text-[#e74c3c]' : 'text-white'}`}>
                  {stats.diffLiquida > 0 ? '+' : ''}{fmtBRL(stats.diffLiquida)}
                </span>
              </div>
@@ -712,31 +716,33 @@ export default function PainelInventarios({ data }) {
 
       </div>
 
+      {/* BLOCOS INFERIORES DE ACURÁCIA COM CORES DINÂMICAS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 relative z-10">
         
-        {/* ACURÁCIA FÍSICA (ITENS) */}
+        {/* ACURÁCIA FÍSICA (ITENS) - DINÂMICA */}
         <div 
           onClick={() => handleCardClick('acuracia_fisica')}
+          style={isAcuFisSel ? { backgroundColor: corAcuFisBg, borderColor: corAcuFis, boxShadow: `0 0 25px ${corAcuFis}55` } : {}}
           className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
-            isAcuFisSel ? 'border-[#2ecc71] shadow-[0_0_25px_rgba(46,204,113,0.35)] bg-[#111c16] -translate-y-1.5 ring-1 ring-[#2ecc71]/50' : 'border-[#2A2A2A] hover:border-[#2ecc71]/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(46,204,113,0.18)]'
+            isAcuFisSel ? 'border-opacity-100 -translate-y-1.5 ring-1' : 'border-[#2A2A2A] hover:-translate-y-1'
           }`}
         >
           {isAcuFisSel && (
             <div className="absolute top-3 right-3 flex items-center justify-center z-20">
-              <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#2ecc71] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#2ecc71] shadow-[0_0_10px_rgba(46,204,113,0.8)]"></span></span>
+              <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: corAcuFis }}></span><span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ backgroundColor: corAcuFis, boxShadow: `0 0 10px ${corAcuFis}` }}></span></span>
             </div>
           )}
-          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#2ecc71]/50 to-transparent pointer-events-none" />
+          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent to-transparent pointer-events-none" style={{ backgroundImage: `linear-gradient(to right, transparent, ${corAcuFis}, transparent)` }} />
 
           <div className="w-full sm:w-1/2 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-[#16221d] text-[#2ecc71] mb-3 shadow-inner border border-[#2ecc71]/30">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3 shadow-inner border" style={{ backgroundColor: `${corAcuFis}15`, color: corAcuFis, borderColor: `${corAcuFis}40` }}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
             <h3 className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase mb-1.5">ACURÁCIA FÍSICA (ITENS)</h3>
             <p className="text-[11px] text-muted leading-relaxed max-w-xs mb-3">Mede a precisão da contagem física linha a linha, demonstrando a assertividade.</p>
             
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#2ecc71]/15 border border-[#2ecc71]/30 text-[#2ecc71] text-[10px] font-bold">
-               <span className="w-1.5 h-1.5 rounded-full bg-[#2ecc71] animate-pulse"></span>
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg text-[10px] font-bold border" style={{ backgroundColor: `${corAcuFis}15`, borderColor: `${corAcuFis}35`, color: corAcuFis }}>
+               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: corAcuFis }}></span>
                <span>CONFIABILIDADE</span>
             </div>
           </div>
@@ -752,13 +758,13 @@ export default function PainelInventarios({ data }) {
                 rotation: 90,
                 textinfo: 'none',
                 hoverinfo: 'none',
-                marker: { colors: ['#2ecc71', '#222222'], line: { width: 0 } }
+                marker: { colors: [corAcuFis, '#222222'], line: { width: 0 } }
               }]}
               layout={{
                 ...DONUT_LAYOUT,
                 annotations: [{
                   text: `${stats.acuraciaItens.toFixed(2)}%`,
-                  font: { size: 22, color: '#2ecc71', family: 'Inter', weight: 900 },
+                  font: { size: 22, color: corAcuFis, family: 'Inter', weight: 900 },
                   showarrow: false,
                   x: 0.5, y: 0.5
                 }]
@@ -768,7 +774,7 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* ACURÁCIA FINANCEIRA (VALOR) COM CORES DINÂMICAS */}
+        {/* ACURÁCIA FINANCEIRA (VALOR) - DINÂMICA */}
         <div 
           onClick={() => handleCardClick('acuracia_financeira')}
           style={isAcuFinSel ? { backgroundColor: corAcuFinBg, borderColor: corAcuFin, boxShadow: `0 0 25px ${corAcuFin}55` } : {}}
@@ -825,6 +831,7 @@ export default function PainelInventarios({ data }) {
 
       </div>
 
+      {/* LISTAGEM DE UNIDADES (TABELA) */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-5 shadow-xl mt-6 relative z-10">
         <button
           onClick={() => setExpanded(!expanded)}
