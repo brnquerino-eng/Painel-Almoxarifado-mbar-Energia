@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react' // useEffect removido daqui!
 import { supabase, TABLE_INVENTARIO } from '../lib/supabase'
 
 // --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
@@ -79,7 +79,7 @@ function normalizeRow(row) {
 
 export function useInventarioData() {
   const [data, setData] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // <-- ALTERADO PARA FALSE PARA FICAR EM REPOUSO
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
 
@@ -162,9 +162,8 @@ export function useInventarioData() {
     }
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
+  // O useEffect FOI TOTALMENTE REMOVIDO DAQUI TAMBÉM!
+  // A busca agora é 100% comandada pelo botão do App.jsx
 
   return { data, loading, error, progress, reload: () => load(true) }
 }

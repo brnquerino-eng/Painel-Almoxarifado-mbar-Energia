@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react' // Removi o useEffect daqui!
 import { supabase, TABLE_ESTOQUE } from '../lib/supabase'
 
 // --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
@@ -93,7 +93,7 @@ function normalizeRow(row) {
 
 export function useEstoqueData() {
   const [data, setData] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // <-- ALTERADO PARA FALSE PARA FICAR EM REPOUSO
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
 
@@ -177,9 +177,8 @@ export function useEstoqueData() {
     }
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
+  // O useEffect FOI TOTALMENTE REMOVIDO DAQUI!
+  // Agora ele só busca quando o botão do App.jsx chamar a função 'reload'
 
   return { data, loading, error, progress, reload: () => load(true) }
 }
