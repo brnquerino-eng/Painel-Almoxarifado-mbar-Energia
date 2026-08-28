@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react' // Removi o useEffect daqui!
+import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLE_ESTOQUE } from '../lib/supabase'
 
 // --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
@@ -93,7 +93,7 @@ function normalizeRow(row) {
 
 export function useEstoqueData() {
   const [data, setData] = useState([])
-  const [loading, setLoading] = useState(false) // <-- ALTERADO PARA FALSE PARA FICAR EM REPOUSO
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
 
@@ -102,17 +102,18 @@ export function useEstoqueData() {
     setError(null)
     setProgress(0)
 
-    // 1. Busca no super cache do navegador
+    // 1. Ao iniciar, só vai olhar o Cache e PARAR. Não toca no Supabase!
     if (!forceReload) {
       const cachedData = await getCache('estoqueData')
       if (cachedData) {
         setData(cachedData)
         setProgress(100)
-        setLoading(false)
-        return 
       }
+      setLoading(false)
+      return // ESSE É O SEGREDO! O código morre aqui se você só deu F5.
     }
 
+    // 2. Se for forceReload (Clico no Botão), ignora cache e vai pro Supabase
     try {
       const { count, error: countErr } = await supabase
         .from(TABLE_ESTOQUE)
@@ -164,8 +165,6 @@ export function useEstoqueData() {
       }
 
       setData(all)
-
-      // 2. Salva no super cache sem medo do limite de tamanho!
       await setCache('estoqueData', all)
 
     } catch (err) {
@@ -177,8 +176,10 @@ export function useEstoqueData() {
     }
   }, [])
 
-  // O useEffect FOI TOTALMENTE REMOVIDO DAQUI!
-  // Agora ele só busca quando o botão do App.jsx chamar a função 'reload'
+  // 3. Volta o useEffect, mas passando FALSE para ele só ler o cache ao abrir!
+  useEffect(() => {
+    load(false)
+  }, [load])
 
-  return { data, loading, error, progress, reload: () => load(true) }
+  return { data, loading, error, progress, reload: async () => await load(true) }
 }

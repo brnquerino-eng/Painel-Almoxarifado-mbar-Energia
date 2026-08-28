@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react' // useEffect removido daqui!
+import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLE_INVENTARIO } from '../lib/supabase'
 
 // --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
@@ -79,7 +79,7 @@ function normalizeRow(row) {
 
 export function useInventarioData() {
   const [data, setData] = useState([])
-  const [loading, setLoading] = useState(false) // <-- ALTERADO PARA FALSE PARA FICAR EM REPOUSO
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
 
@@ -88,15 +88,15 @@ export function useInventarioData() {
     setError(null)
     setProgress(0)
 
-    // 1. Busca no super cache do navegador
+    // 1. Só verifica o cache se não tiver forçado a busca
     if (!forceReload) {
       const cachedData = await getCache('inventarioData')
       if (cachedData) {
-        setData(cachedData) // IndexedDB já devolve o objeto pronto, mais rápido!
+        setData(cachedData)
         setProgress(100)
-        setLoading(false)
-        return 
       }
+      setLoading(false)
+      return // Morre aqui também! Sem Supabase!
     }
 
     try {
@@ -149,8 +149,6 @@ export function useInventarioData() {
       }
 
       setData(all)
-
-      // 2. Salva no super cache sem medo do limite de tamanho!
       await setCache('inventarioData', all)
 
     } catch (err) {
@@ -162,8 +160,10 @@ export function useInventarioData() {
     }
   }, [])
 
-  // O useEffect FOI TOTALMENTE REMOVIDO DAQUI TAMBÉM!
-  // A busca agora é 100% comandada pelo botão do App.jsx
+  // Volta o useEffect para puxar automático do cache ao abrir a página
+  useEffect(() => {
+    load(false)
+  }, [load])
 
-  return { data, loading, error, progress, reload: () => load(true) }
+  return { data, loading, error, progress, reload: async () => await load(true) }
 }

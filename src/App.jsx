@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Header from './components/Header'
 import Tabs from './components/Tabs'
 import LoadingScreen from './components/LoadingScreen'
@@ -14,15 +14,15 @@ const TABS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('geral')
-  // Nova variável para saber se você já apertou o botão
-  const [dadosCarregados, setDadosCarregados] = useState(false)
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
+  const [buscando, setBuscando] = useState(false)
 
   const {
     data: estoqueData,
     loading: loadingEstoque,
     error: errorEstoque,
     progress: progressEstoque,
-    reload: carregarEstoque // Usando a sua função nativa do hook!
+    reload: carregarEstoque,
   } = useEstoqueData()
 
   const {
@@ -30,27 +30,43 @@ export default function App() {
     loading: loadingInventario,
     error: errorInventario,
     progress: progressInventario,
-    reload: carregarInventario // Usando a sua função nativa do hook!
+    reload: carregarInventario,
   } = useInventarioData()
 
-  const loading = loadingEstoque || loadingInventario
+  const loading = loadingEstoque || loadingInventario || buscando
   const progress = Math.round((progressEstoque * 0.7 + progressInventario * 0.3)) || 0
 
-  // Função que o botão vai chamar
-  const handleAtualizarDados = () => {
-    setDadosCarregados(true)
-    carregarEstoque()
-    carregarInventario()
+  // 1. Ao abrir o painel, recupera a data do último clique
+  useEffect(() => {
+    const dataSalva = localStorage.getItem('dataUltimaAtualizacao')
+    if (dataSalva) {
+      setUltimaAtualizacao(dataSalva)
+    }
+  }, [])
+
+  // 2. Função mágica do botão
+  const handleAtualizarDados = async () => {
+    setBuscando(true)
+    
+    // Força a busca no Supabase
+    await Promise.all([carregarEstoque(), carregarInventario()])
+    
+    // Carimba a hora exata que terminou de puxar
+    const agora = new Date().toLocaleString('pt-BR')
+    localStorage.setItem('dataUltimaAtualizacao', agora)
+    setUltimaAtualizacao(agora)
+    
+    setBuscando(false)
   }
 
-  // Sua tela de carregamento original, acionada só após o clique
-  if (loading && dadosCarregados) {
+  // Só mostra a tela preta de loading se você tiver CLICADO no botão
+  if (loading && buscando) {
     return (
       <div className="min-h-screen bg-[#080808] p-6 text-white">
         <Header />
         <LoadingScreen
           progress={progress}
-          label="Carregando e normalizando base de dados..."
+          label="Sincronizando e atualizando base de dados..."
         />
       </div>
     )
@@ -60,17 +76,22 @@ export default function App() {
     <div className="min-h-screen bg-[#080808] p-4 md:p-6 text-white">
       <Header />
 
-      {/* 🚀 Painel com o Botão de Carga Manual */}
+      {/* 🚀 Painel de Controle com Data da Atualização */}
       <div className="my-4 flex flex-col sm:flex-row items-center justify-between bg-[#141414] p-4 rounded-xl border border-[#2A2A2A] gap-4">
         <div>
-          <h2 className="text-sm font-semibold text-gray-200">Controle Manual de Dados</h2>
-          <p className="text-xs text-gray-400">O painel permanece em repouso até que você clique no botão ao lado.</p>
+          <h2 className="text-sm font-semibold text-gray-200">Sincronização de Banco de Dados</h2>
+          <p className="text-xs text-amber-500 mt-1">
+            {ultimaAtualizacao 
+              ? `Última atualização feita em: ${ultimaAtualizacao}` 
+              : 'Os dados ainda não foram puxados do banco. Clique para sincronizar.'}
+          </p>
         </div>
         <button
           onClick={handleAtualizarDados}
-          className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md cursor-pointer text-sm flex items-center justify-center gap-2"
+          disabled={loading}
+          className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-md cursor-pointer text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
         >
-          🔄 Carregar / Atualizar Dados
+          {loading ? 'Atualizando...' : '🔄 Carregar / Atualizar Dados'}
         </button>
       </div>
 
@@ -83,17 +104,15 @@ export default function App() {
 
       <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
-      {/* Só exibe os gráficos se o botão já foi apertado alguma vez */}
-      {!dadosCarregados && estoqueData.length === 0 ? (
+      {/* Se não tem data salva e não tem dado nenhum, avisa para clicar */}
+      {!ultimaAtualizacao && estoqueData.length === 0 ? (
         <div className="text-center py-20 text-gray-500 italic bg-[#111] rounded-xl border border-[#222] mt-4">
-          Nenhum dado carregado. Clique no botão acima para puxar as informações, meu caro.
+          O cache está vazio. Clique no botão acima para puxar os dados do Supabase pela primeira vez.
         </div>
       ) : (
         <div className="mt-4">
           {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
-          {activeTab === 'inventarios' && (
-            <PainelInventarios data={inventarioData} />
-          )}
+          {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
         </div>
       )}
 
