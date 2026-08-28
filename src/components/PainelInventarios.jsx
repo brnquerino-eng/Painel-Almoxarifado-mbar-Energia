@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import Plot from 'react-plotly.js'
 import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
 
@@ -28,6 +28,11 @@ const formatMesAno = (mes, ano) => {
   return `${nomeMes.split(' - ')[1].substring(0,3).toUpperCase()}/${String(ano).slice(-2)}`
 }
 
+const getMesAtualTag = () => {
+  const dataDeHoje = new Date()
+  return formatMesAno(String(dataDeHoje.getMonth() + 1), String(dataDeHoje.getFullYear()))
+}
+
 const PLOT_LAYOUT = {
   paper_bgcolor: 'rgba(0,0,0,0)',
   plot_bgcolor: 'rgba(0,0,0,0)',
@@ -39,7 +44,7 @@ const PLOT_LAYOUT = {
 }
 
 // ------------------------------------------------------------------------
-// Componente CyberMultiSelect (Padronizado Visão Geral - text-xs, h-[34px])
+// Componente CyberMultiSelect 
 // ------------------------------------------------------------------------
 const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }) => {
   const [isOpen, setIsOpen] = useState(false)
@@ -184,11 +189,32 @@ export default function PainelInventarios({ data }) {
     }
   }, [dfMaster])
 
+  useEffect(() => {
+    if (data && data.length > 0 && chartEvolucao.x.length > 0) {
+      const mesAtual = getMesAtualTag()
+      if (chartEvolucao.x.includes(mesAtual)) {
+        setMesClicado(mesAtual)
+      } else {
+        setMesClicado(chartEvolucao.x[chartEvolucao.x.length - 1]) 
+      }
+    }
+  }, [data, chartEvolucao.x])
+
   const handleChartClick = useCallback((event) => {
     if (event.points && event.points.length > 0) {
-      setMesClicado(event.points[0].x)
+      const clickedX = event.points[0].x
+      setMesClicado(prev => prev === clickedX ? null : clickedX) 
     }
   }, [])
+
+  const handleGoToCurrent = () => {
+    const mesAtual = getMesAtualTag()
+    if (chartEvolucao.x.includes(mesAtual)) setMesClicado(mesAtual)
+    else if (chartEvolucao.x.length > 0) setMesClicado(chartEvolucao.x[chartEvolucao.x.length - 1])
+  }
+
+  const mesAtualTag = getMesAtualTag()
+  const isCurrentMonth = mesClicado === mesAtualTag || (!chartEvolucao.x.includes(mesAtualTag) && mesClicado === chartEvolucao.x[chartEvolucao.x.length - 1])
 
   const dfPainel = useMemo(() => {
     let df = dfMaster
@@ -326,16 +352,40 @@ export default function PainelInventarios({ data }) {
 
   const chartAnnotations = useMemo(() => {
     let anns = []
-    const createAnns = (yData, color, yOffset, isClicadoDestacado) => chartEvolucao.x.map((xVal, index) => ({
-       x: xVal, y: yData[index], text: `<b>${yData[index]}</b>`, showarrow: true, arrowhead: 0, arrowcolor: 'rgba(0,0,0,0)',
-       ax: 0, ay: yOffset, font: { size: 10, color: '#ffffff', family: 'Inter' },
-       bgcolor: mesClicado === xVal && isClicadoDestacado ? color : 'rgba(22, 22, 22, 0.85)',
-       bordercolor: color, borderwidth: 1, borderpad: 4
-    }))
     
-    if (vis.total) anns.push(...createAnns(chartEvolucao.total, 'rgba(245,130,32,0.6)', -22, true))
-    if (vis.geral) anns.push(...createAnns(chartEvolucao.geral, 'rgba(231,76,60,0.8)', 24, false))
-    if (vis.rotativo) anns.push(...createAnns(chartEvolucao.rotativo, 'rgba(46,204,113,0.8)', 24, false))
+    if (vis.total) {
+      anns.push(...chartEvolucao.x.map((xVal, index) => ({
+        x: xVal, y: chartEvolucao.total[index], text: `<b>${chartEvolucao.total[index]}</b>`, showarrow: false,
+        ax: 0, ay: -26, font: { size: 10, color: '#ffffff', family: 'Inter' },
+        bgcolor: mesClicado === xVal ? 'rgba(245,130,32,0.9)' : 'rgba(22, 22, 22, 0.85)',
+        bordercolor: '#f58220', borderwidth: 1, borderpad: 4
+      })))
+    }
+
+    if (vis.rotativo) {
+      anns.push(...chartEvolucao.x.map((xVal, index) => ({
+        x: xVal, y: chartEvolucao.rotativo[index], text: `<b>${chartEvolucao.rotativo[index]}</b>`, showarrow: false,
+        ax: 0, ay: 18, font: { size: 10, color: '#ffffff', family: 'Inter' },
+        bgcolor: mesClicado === xVal ? 'rgba(46,204,113,0.9)' : 'rgba(22, 22, 22, 0.85)',
+        bordercolor: '#2ecc71', borderwidth: 1, borderpad: 4
+      })))
+    }
+
+    if (vis.geral) {
+      anns.push(...chartEvolucao.x.map((xVal, index) => ({
+        x: xVal, y: chartEvolucao.geral[index], text: `<b>${chartEvolucao.geral[index]}</b>`, showarrow: false,
+        ax: 0, ay: 36, font: { size: 10, color: '#ffffff', family: 'Inter' },
+        bgcolor: mesClicado === xVal ? 'rgba(231,76,60,0.9)' : 'rgba(22, 22, 22, 0.85)',
+        bordercolor: '#e74c3c', borderwidth: 1, borderpad: 4
+      })))
+    }
+
+    anns.push(...chartEvolucao.x.map((xVal, index) => ({
+      x: xVal, y: 0, yref: 'paper', yanchor: 'top', text: `<b>${xVal}</b>`, showarrow: false,
+      ay: 22, font: { size: 10, color: mesClicado === xVal ? '#ffffff' : '#8c9ba5', family: 'Inter' },
+      bgcolor: mesClicado === xVal ? 'rgba(245,130,32,0.85)' : 'rgba(0,0,0,0)',
+      bordercolor: mesClicado === xVal ? '#f58220' : 'rgba(0,0,0,0)', borderwidth: mesClicado === xVal ? 1 : 0, borderpad: 3
+    })))
     
     return anns
   }, [chartEvolucao, vis, mesClicado])
@@ -343,7 +393,6 @@ export default function PainelInventarios({ data }) {
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       
-      {/* CABEÇALHO DA PÁGINA */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shadow-inner">
@@ -359,7 +408,6 @@ export default function PainelInventarios({ data }) {
         </div>
       </div>
 
-      {/* 1. MESTRE: GRÁFICO EVOLUÇÃO TEMPORAL COM FILTROS EMBUTIDOS */}
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative z-40 flex flex-col hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] transition-all duration-300 group">
          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
          
@@ -388,13 +436,12 @@ export default function PainelInventarios({ data }) {
             </div>
          </div>
 
-         {/* BOTÕES TOGGLE PREMIUM (Estilo idêntico ao Visão Geral) */}
          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             {[ 
-              { key: 'total', label: 'Total Inventários', color: '#f58220' }, 
-              { key: 'geral', label: 'Inventários Gerais', color: '#e74c3c' }, 
-              { key: 'rotativo', label: 'Inventários Rotativos', color: '#2ecc71' } 
-            ].map(({ key, label, color }) => {
+              { key: 'total', label: 'Total Inventários', color: '#f58220', bg: 'rgba(245,130,32,0.15)', shadow: 'rgba(245,130,32,0.3)' }, 
+              { key: 'geral', label: 'Inventários Gerais', color: '#e74c3c', bg: 'rgba(231,76,60,0.15)', shadow: 'rgba(231,76,60,0.3)' }, 
+              { key: 'rotativo', label: 'Inventários Rotativos', color: '#2ecc71', bg: 'rgba(46,204,113,0.15)', shadow: 'rgba(46,204,113,0.3)' } 
+            ].map(({ key, label, color, bg, shadow }) => {
               const isActive = vis[key]
               const hasData = chartEvolucao[key] && chartEvolucao[key].some(v => v > 0)
               
@@ -403,15 +450,20 @@ export default function PainelInventarios({ data }) {
                   key={key} 
                   onClick={() => hasData && toggleVis(key)} 
                   disabled={!hasData} 
-                  className={`relative flex items-center justify-center gap-2 px-4 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border border-transparent ${
-                    !hasData ? 'opacity-30 grayscale cursor-not-allowed text-dark-400 bg-transparent' : 
-                    !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]/40' : 
-                    'text-white font-bold bg-[#2A2A2A]/30 border-[#2A2A2A]'
+                  className={`relative flex items-center justify-center gap-2 px-4 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border ${
+                    !hasData ? 'opacity-30 grayscale cursor-not-allowed border-transparent text-dark-400 bg-transparent' : 
+                    !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]' : 
+                    'font-bold text-white'
                   }`}
+                  style={isActive && hasData ? {
+                    borderColor: color,
+                    backgroundColor: bg,
+                    boxShadow: `0 0 15px ${shadow}, inset 0 0 10px ${bg}`
+                  } : {}}
                 >
-                  {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[2px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 8px ${color}` }} />}
-                  <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 10px ${color}` } : {}} />
-                  <span className={isActive ? 'drop-shadow-md tracking-wide' : 'tracking-wide'}>{label}</span>
+                  {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[3px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 10px ${color}` }} />}
+                  <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 12px ${color}` } : {}} />
+                  <span className={isActive ? 'drop-shadow-md tracking-wide text-white' : 'tracking-wide'}>{label}</span>
                 </button>
               )
             })}
@@ -450,7 +502,7 @@ export default function PainelInventarios({ data }) {
                height: 350,
                bargap: 0,
                margin: { l: 20, r: 20, t: 40, b: 45 },
-               xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: chartEvolucao.x, ticktext: chartEvolucao.x },
+               xaxis: { showgrid: false, zeroline: false, showticklabels: false, automargin: true },
                yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxGrafico * 0.15), maxGrafico * 1.3] },
                shapes: chartShapes,
                annotations: chartAnnotations
@@ -462,7 +514,6 @@ export default function PainelInventarios({ data }) {
          </div>
       </div>
 
-      {/* BANNER DE PERÍODO ATIVO OU DICA */}
       {mesClicado ? (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 p-3.5 bg-gradient-to-r from-accent/15 via-[#161616] to-accent/10 rounded-xl border border-accent/40 shadow-[0_4px_20px_rgba(245,130,32,0.15)] animate-fade-in z-30 relative mb-6">
           <div className="flex items-center gap-2.5">
@@ -471,14 +522,20 @@ export default function PainelInventarios({ data }) {
             </div>
             <span className="text-xs text-white tracking-wide font-medium">Filtro ativo por snapshot temporal: <b className="text-accent font-mono text-xs px-2 py-0.5 bg-[#080808] border border-accent/30 rounded shadow-inner ml-1">{mesClicado}</b></span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
              <div className="items-center gap-2 border-r border-[#333] pr-3 hidden lg:flex">
                 <span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase text-right">Nº ID</span>
                 <CyberMultiSelect options={idsInventariosDisponiveis} selected={idInvSel} onChange={setIdInvSel} placeholder="Todos IDs" />
              </div>
-             <button onClick={() => setMesClicado(null)} className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-accent hover:bg-accent/90 text-dark-900 font-bold text-xs transition-all duration-300 shadow-lg hover:shadow-accent/20 transform hover:-translate-y-0.5">
-               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-               <span>Retornar ao Período Atual</span>
+             
+             {!isCurrentMonth && (
+               <button onClick={handleGoToCurrent} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/90 text-dark-900 font-bold text-xs transition-all duration-300 shadow-md">
+                 <span>Voltar ao Atual</span>
+               </button>
+             )}
+             
+             <button onClick={() => setMesClicado(null)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-transparent border border-danger/50 hover:bg-danger/10 text-danger font-bold text-xs transition-all duration-300 shadow-md">
+               <span>✖ Remover Filtro</span>
              </button>
           </div>
         </div>
@@ -495,10 +552,8 @@ export default function PainelInventarios({ data }) {
         </div>
       )}
 
-      {/* BLOCOS INDICADORES (Escala compacta idêntica ao Visão Geral) */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-4 relative z-10">
         
-        {/* BLOCO 1: FOTO INICIAL */}
         <div 
           onClick={() => handleCardClick('foto_inicial')}
           className={`lg:col-span-1 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -536,7 +591,6 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* BLOCO 2: INVENTÁRIO - RESULTADO */}
         <div 
           onClick={() => handleCardClick('execucao')}
           className={`lg:col-span-1 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -581,7 +635,6 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* BLOCO 3: BALANÇO DE DIVERGÊNCIAS (2 COLUNAS) */}
         <div 
           onClick={() => handleCardClick('divergencias')}
           className={`lg:col-span-2 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -642,10 +695,8 @@ export default function PainelInventarios({ data }) {
 
       </div>
 
-      {/* BLOCOS 4 E 5: ACURÁCIAS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 relative z-10">
         
-        {/* ACURÁCIA DE ITENS (FÍSICA) */}
         <div 
           onClick={() => handleCardClick('acuracia_fisica')}
           className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
@@ -699,7 +750,6 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* ACURÁCIA DE VALOR (FINANCEIRA) */}
         <div 
           onClick={() => handleCardClick('acuracia_financeira')}
           className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
@@ -755,7 +805,6 @@ export default function PainelInventarios({ data }) {
 
       </div>
 
-      {/* LISTAGEM DE UNIDADES (TABELA) */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-5 shadow-xl mt-6 relative z-10">
         <button
           onClick={() => setExpanded(!expanded)}
@@ -763,7 +812,7 @@ export default function PainelInventarios({ data }) {
         >
           <span className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-inner">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2v0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
             </span>
             DETALHAMENTO E GERENCIAMENTO DOS INVENTÁRIOS POR UNIDADE
           </span>
