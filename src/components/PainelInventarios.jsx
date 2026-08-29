@@ -157,26 +157,50 @@ export default function PainelInventarios({ data }) {
     if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
   }, [listasMaster])
 
+  // 🔥 EVOLUÇÃO TEMPORAL (LIMITADA ATÉ O MÊS ATUAL DO ANO CORRENTE PARA EVITAR MESES FUTUROS VAZIOS)
   const chartEvolucao = useMemo(() => {
+    let anosAlvo = anoSel.length > 0 ? anoSel.map(String) : null
+    if (!anosAlvo || anosAlvo.length === 0) {
+      let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
+      if (empresaSel.length) dfBaseAnos = dfBaseAnos.filter(r => empresaSel.includes(r.empresa_nome))
+      if (tipoSel.length) dfBaseAnos = dfBaseAnos.filter(r => tipoSel.map(t => MAPA_TIPOS_INV[t] || t).includes(String(r.tipo_inventario)))
+      anosAlvo = [...new Set(dfBaseAnos.map(r => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
+    }
+    if (!anosAlvo.length) {
+      anosAlvo = [String(new Date().getFullYear())]
+    }
+
+    const agora = new Date()
+    const anoAtualNum = agora.getFullYear()
+    const mesAtualNum = agora.getMonth() + 1
+
     const grupos = {}
-    
+    anosAlvo.sort().forEach(ano => {
+      const numAno = Number(ano)
+      // Se for o ano corrente, vai apenas até o mês atual. Anos anteriores vão até 12.
+      const limiteMes = numAno === anoAtualNum ? mesAtualNum : (numAno < anoAtualNum ? 12 : 0)
+
+      for (let m = 1; m <= limiteMes; m++) {
+        const mesStr = String(m)
+        const mesFormatado = mesStr.padStart(2, '0')
+        const chave = `${ano}-${mesFormatado}`
+        const label = formatMesAno(mesStr, ano)
+        grupos[chave] = { label, order: chave, total: new Set(), rotativo: new Set(), geral: new Set() }
+      }
+    })
+
     dfMaster.forEach(r => {
       if (!r.mes_referencia || !r.ano_referencia) return
-      
       const mesFormatado = String(r.mes_referencia).padStart(2, '0')
       const anoFormatado = String(r.ano_referencia)
       const chave = `${anoFormatado}-${mesFormatado}`
-      const label = formatMesAno(r.mes_referencia, r.ano_referencia)
 
-      if (!grupos[chave]) {
-        grupos[chave] = { label, order: chave, total: new Set(), rotativo: new Set(), geral: new Set() }
+      if (grupos[chave]) {
+        const uid = limparId(r.id_inventario)
+        grupos[chave].total.add(uid)
+        if (isRotativo(r.tipo_inventario)) grupos[chave].rotativo.add(uid)
+        else grupos[chave].geral.add(uid)
       }
-      
-      const uid = limparId(r.id_inventario)
-      grupos[chave].total.add(uid)
-      
-      if (isRotativo(r.tipo_inventario)) grupos[chave].rotativo.add(uid)
-      else grupos[chave].geral.add(uid)
     })
 
     const sorted = Object.values(grupos).sort((a, b) => a.order.localeCompare(b.order))
@@ -187,7 +211,7 @@ export default function PainelInventarios({ data }) {
       geral: sorted.map(g => g.geral.size),
       rotativo: sorted.map(g => g.rotativo.size)
     }
-  }, [dfMaster])
+  }, [data, dfMaster, empresaSel, tipoSel, anoSel])
 
   useEffect(() => {
     if (data && data.length > 0 && chartEvolucao.x.length > 0) {
@@ -348,7 +372,7 @@ export default function PainelInventarios({ data }) {
     )
   }
 
-  const maxGrafico = Math.max(...(chartEvolucao.total.length ? chartEvolucao.total : [10]))
+  const maxGrafico = Math.max(...(chartEvolucao.total.length ? chartEvolucao.total : [10]), 10)
 
   const chartShapes = useMemo(() => {
     if (!mesClicado || !chartEvolucao.x.length) return []
@@ -400,14 +424,12 @@ export default function PainelInventarios({ data }) {
     return anns
   }, [chartEvolucao, vis, mesClicado])
 
-  // Cores dinâmicas para Acurácia Física e Financeira
   const corAcuFis = stats.acuraciaItens >= 95 ? '#2ecc71' : stats.acuraciaItens >= 80 ? '#f58220' : '#e74c3c'
   const corAcuFisBg = stats.acuraciaItens >= 95 ? '#111c16' : stats.acuraciaItens >= 80 ? '#1c1612' : '#2a1616'
 
   const corAcuFin = stats.acuraciaValor >= 95 ? '#2ecc71' : stats.acuraciaValor >= 80 ? '#f58220' : '#e74c3c'
   const corAcuFinBg = stats.acuraciaValor >= 95 ? '#111c16' : stats.acuraciaValor >= 80 ? '#1c1612' : '#2a1616'
 
-  // Dinâmica do valor contado
   const diffValContado = stats.valContado - stats.valCongelado
   const corValContado = diffValContado > 0 ? 'text-accent' : diffValContado < 0 ? 'text-danger' : 'text-white'
   const iconeValContado = diffValContado === 0 ? '✓' : '✕'
@@ -577,7 +599,7 @@ export default function PainelInventarios({ data }) {
       {/* BLOCOS SUPERIORES */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-4 relative z-10">
         
-        {/* BLOCO 1: FOTO INICIAL (Números em Azul #3498db) */}
+        {/* BLOCO 1: FOTO INICIAL */}
         <div 
           onClick={() => handleCardClick('foto_inicial')}
           className={`lg:col-span-1 bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -655,7 +677,7 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* BLOCO 3: BALANÇO DE DIVERGÊNCIAS (Mais encorpado e espaçado) */}
+        {/* BLOCO 3: BALANÇO DE DIVERGÊNCIAS */}
         <div 
           onClick={() => handleCardClick('divergencias')}
           className={`lg:col-span-2 bg-[#161616] border rounded-2xl p-6 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -716,10 +738,10 @@ export default function PainelInventarios({ data }) {
 
       </div>
 
-      {/* BLOCOS INFERIORES DE ACURÁCIA COM CORES DINÂMICAS */}
+      {/* BLOCOS INFERIORES DE ACURÁCIA */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 relative z-10">
         
-        {/* ACURÁCIA FÍSICA (ITENS) - DINÂMICA */}
+        {/* ACURÁCIA FÍSICA (ITENS) */}
         <div 
           onClick={() => handleCardClick('acuracia_fisica')}
           style={isAcuFisSel ? { backgroundColor: corAcuFisBg, borderColor: corAcuFis, boxShadow: `0 0 25px ${corAcuFis}55` } : {}}
@@ -774,7 +796,7 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* ACURÁCIA FINANCEIRA (VALOR) - DINÂMICA */}
+        {/* ACURÁCIA FINANCEIRA (VALOR) */}
         <div 
           onClick={() => handleCardClick('acuracia_financeira')}
           style={isAcuFinSel ? { backgroundColor: corAcuFinBg, borderColor: corAcuFin, boxShadow: `0 0 25px ${corAcuFin}55` } : {}}
