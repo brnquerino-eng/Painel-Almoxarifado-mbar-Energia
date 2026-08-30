@@ -140,10 +140,9 @@ export default function PainelInventarios({ data }) {
   const dfMaster = useMemo(() => {
     let df = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
     if (empresaSel.length) df = df.filter((r) => empresaSel.includes(r.empresa_nome))
-    if (tipoSel.length) df = df.filter((r) => tipoSel.map(t => MAPA_TIPOS_INV[t] || t).includes(String(r.tipo_inventario)))
     if (anoSel.length) df = df.filter((r) => anoSel.includes(String(r.ano_referencia)))
     return df
-  }, [data, empresaSel, tipoSel, anoSel])
+  }, [data, empresaSel, anoSel])
 
   const listasMaster = useMemo(() => {
     const empresas = [...new Set(dfMaster.map((r) => r.empresa_nome).filter(Boolean))].sort()
@@ -157,13 +156,11 @@ export default function PainelInventarios({ data }) {
     if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
   }, [listasMaster])
 
-  // 🔥 EVOLUÇÃO TEMPORAL (LIMITADA ATÉ O MÊS ATUAL DO ANO CORRENTE PARA EVITAR MESES FUTUROS VAZIOS)
   const chartEvolucao = useMemo(() => {
     let anosAlvo = anoSel.length > 0 ? anoSel.map(String) : null
     if (!anosAlvo || anosAlvo.length === 0) {
       let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
       if (empresaSel.length) dfBaseAnos = dfBaseAnos.filter(r => empresaSel.includes(r.empresa_nome))
-      if (tipoSel.length) dfBaseAnos = dfBaseAnos.filter(r => tipoSel.map(t => MAPA_TIPOS_INV[t] || t).includes(String(r.tipo_inventario)))
       anosAlvo = [...new Set(dfBaseAnos.map(r => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
     }
     if (!anosAlvo.length) {
@@ -177,7 +174,6 @@ export default function PainelInventarios({ data }) {
     const grupos = {}
     anosAlvo.sort().forEach(ano => {
       const numAno = Number(ano)
-      // Se for o ano corrente, vai apenas até o mês atual. Anos anteriores vão até 12.
       const limiteMes = numAno === anoAtualNum ? mesAtualNum : (numAno < anoAtualNum ? 12 : 0)
 
       for (let m = 1; m <= limiteMes; m++) {
@@ -211,7 +207,7 @@ export default function PainelInventarios({ data }) {
       geral: sorted.map(g => g.geral.size),
       rotativo: sorted.map(g => g.rotativo.size)
     }
-  }, [data, dfMaster, empresaSel, tipoSel, anoSel])
+  }, [data, dfMaster, empresaSel, anoSel])
 
   useEffect(() => {
     if (data && data.length > 0 && chartEvolucao.x.length > 0) {
@@ -243,15 +239,17 @@ export default function PainelInventarios({ data }) {
   const dfPainel = useMemo(() => {
     let df = dfMaster
     if (mesClicado) df = df.filter(r => formatMesAno(r.mes_referencia, r.ano_referencia) === mesClicado)
+    if (tipoSel.length) df = df.filter(r => tipoSel.map(t => MAPA_TIPOS_INV[t] || t).includes(String(r.tipo_inventario)))
     if (idInvSel.length) df = df.filter(r => idInvSel.includes(limparId(r.id_inventario)))
     return df
-  }, [dfMaster, mesClicado, idInvSel])
+  }, [dfMaster, mesClicado, tipoSel, idInvSel])
 
   const idsInventariosDisponiveis = useMemo(() => {
     let dfParaIds = dfMaster
     if (mesClicado) dfParaIds = dfParaIds.filter(r => formatMesAno(r.mes_referencia, r.ano_referencia) === mesClicado)
+    if (tipoSel.length) dfParaIds = dfParaIds.filter(r => tipoSel.map(t => MAPA_TIPOS_INV[t] || t).includes(String(r.tipo_inventario)))
     return [...new Set(dfParaIds.map((r) => limparId(r.id_inventario)).filter(Boolean))].sort((a, b) => (Number(a) || 0) - (Number(b) || 0))
-  }, [dfMaster, mesClicado])
+  }, [dfMaster, mesClicado, tipoSel])
 
   const { empresasDisponiveis, dictEmpresas, dfInv } = useMemo(() => {
     const empresas = [...new Set(dfPainel.map((r) => r.empresa_nome).filter(Boolean))].sort()
@@ -437,6 +435,7 @@ export default function PainelInventarios({ data }) {
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       
+      {/* CABEÇALHO SUPERIOR */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shadow-inner">
@@ -452,152 +451,208 @@ export default function PainelInventarios({ data }) {
         </div>
       </div>
 
-      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative z-40 flex flex-col hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] transition-all duration-300 group">
+      {/* 🌟 BLOCO MESTRE UNIFICADO (COM OVERFLOW VISÍVEL PARA O DROPDOWN ESCAPAR) */}
+      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative z-40 flex flex-col hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] transition-all duration-300 group space-y-6">
          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
          
-         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
-            <div>
-               <div className="text-[10px] font-bold text-accent tracking-[0.2em] uppercase mb-1">Painel Gerencial Âmbar Energia</div>
-               <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide uppercase">
-                 <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-                 Evolução Temporal dos Inventários
-               </h2>
+         {/* 1. SEÇÃO DO GRÁFICO */}
+         <div>
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
+               <div>
+                  <div className="text-[10px] font-bold text-accent tracking-[0.2em] uppercase mb-1">Painel Gerencial Âmbar Energia</div>
+                  <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide uppercase">
+                    <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                    Evolução Temporal dos Inventários
+                  </h2>
+               </div>
+
+               <div className="flex flex-wrap items-end gap-3 z-30">
+                  <div>
+                     <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Empresa</label>
+                     <CyberMultiSelect options={listasMaster.empresas} selected={empresaSel} onChange={setEmpresaSel} placeholder="Todas" />
+                  </div>
+                  <div>
+                     <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Ano</label>
+                     <CyberMultiSelect options={listasMaster.anos} selected={anoSel} onChange={setAnoSel} placeholder="Todos" />
+                  </div>
+               </div>
             </div>
 
-            <div className="flex flex-wrap items-end gap-3 z-30">
-               <div>
-                  <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Empresa</label>
-                  <CyberMultiSelect options={listasMaster.empresas} selected={empresaSel} onChange={setEmpresaSel} placeholder="Todas" />
-               </div>
-               <div>
-                  <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Tipo</label>
-                  <CyberMultiSelect options={listasMaster.tiposVisual} selected={tipoSel} onChange={setTipoSel} placeholder="Todos" />
-               </div>
-               <div>
-                  <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Ano</label>
-                  <CyberMultiSelect options={listasMaster.anos} selected={anoSel} onChange={setAnoSel} placeholder="Todos" />
-               </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+               {[ 
+                 { key: 'total', label: 'Total Inventários', color: '#f58220', bg: 'rgba(245,130,32,0.15)', shadow: 'rgba(245,130,32,0.3)' }, 
+                 { key: 'geral', label: 'Inventários Gerais', color: '#e74c3c', bg: 'rgba(231,76,60,0.15)', shadow: 'rgba(231,76,60,0.3)' }, 
+                 { key: 'rotativo', label: 'Inventários Rotativos', color: '#2ecc71', bg: 'rgba(46,204,113,0.15)', shadow: 'rgba(46,204,113,0.3)' } 
+               ].map(({ key, label, color, bg, shadow }) => {
+                 const isActive = vis[key]
+                 const hasData = chartEvolucao[key] && chartEvolucao[key].some(v => v > 0)
+                 
+                 return (
+                   <button 
+                     key={key} 
+                     onClick={() => hasData && toggleVis(key)} 
+                     disabled={!hasData} 
+                     className={`relative flex items-center justify-center gap-2 px-4 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border ${
+                       !hasData ? 'opacity-30 grayscale cursor-not-allowed border-transparent text-dark-400 bg-transparent' : 
+                       !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]' : 
+                       'font-bold text-white'
+                     }`}
+                     style={isActive && hasData ? {
+                       borderColor: color,
+                       backgroundColor: bg,
+                       boxShadow: `0 0 15px ${shadow}, inset 0 0 10px ${bg}`
+                     } : {}}
+                   >
+                     {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[3px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 10px ${color}` }} />}
+                     <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 12px ${color}` } : {}} />
+                     <span className={isActive ? 'drop-shadow-md tracking-wide text-white' : 'tracking-wide'}>{label}</span>
+                   </button>
+                 )
+               })}
+            </div>
+            
+            <div className="pt-2 z-10 relative">
+              <Plot
+                onClick={handleChartClick}
+                data={[
+                  { x: chartEvolucao.x, y: chartEvolucao.x.map(() => maxGrafico * 1.3), type: 'bar', marker: { color: 'rgba(245, 130, 32, 0.02)' }, hoverinfo: 'none', showlegend: false, cliponaxis: false },
+                  
+                  vis.total && { 
+                    x: chartEvolucao.x, y: chartEvolucao.total, type: 'scatter', mode: 'lines+markers', 
+                    line: { color: '#f58220', width: 2, shape: 'spline', smoothing: 1.3 }, 
+                    marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 1.5 } },
+                    fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', 
+                    hoverinfo: 'none', cliponaxis: false
+                  },
+                  
+                  vis.geral && { 
+                    x: chartEvolucao.x, y: chartEvolucao.geral, type: 'scatter', mode: 'lines+markers', 
+                    line: { color: '#e74c3c', width: 1.5, dash: 'dash', shape: 'spline', smoothing: 1.3 }, 
+                    marker: { size: 8, color: '#080808', line: { color: '#e74c3c', width: 1.5 } },
+                    hoverinfo: 'none', cliponaxis: false
+                  },
+                  
+                  vis.rotativo && { 
+                    x: chartEvolucao.x, y: chartEvolucao.rotativo, type: 'scatter', mode: 'lines+markers', 
+                    line: { color: '#2ecc71', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, 
+                    marker: { size: 8, color: '#080808', line: { color: '#2ecc71', width: 1.5 } },
+                    hoverinfo: 'none', cliponaxis: false
+                  }
+                ].filter(Boolean)}
+                layout={{
+                  ...PLOT_LAYOUT,
+                  height: 350,
+                  bargap: 0,
+                  margin: { l: 20, r: 20, t: 40, b: 45 },
+                  xaxis: { showgrid: false, zeroline: false, showticklabels: false, automargin: true },
+                  yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxGrafico * 0.15), maxGrafico * 1.3] },
+                  shapes: chartShapes,
+                  annotations: chartAnnotations
+                }}
+                config={{ displayModeBar: false, responsive: true }}
+                style={{ width: '100%', cursor: 'pointer' }}
+                useResizeHandler
+              />
+            </div>
+
+            {/* 2. BANNER DE AVISO TEMPORAL */}
+            <div className="mt-4 pt-4 border-t border-[#2A2A2A] relative z-20">
+              {mesClicado ? (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-accent/15 via-[#161616] to-accent/10 rounded-xl border border-accent/40 shadow-[0_4px_20px_rgba(245,130,32,0.15)] animate-fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shrink-0">
+                      <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <span className="text-xs text-white tracking-wide font-medium">
+                      Filtro ativo por snapshot temporal: <b className="text-accent font-mono text-xs px-2 py-0.5 bg-[#080808] border border-accent/30 rounded shadow-inner ml-1">{mesClicado}</b>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                     {!isCurrentMonth && (
+                       <button onClick={handleGoToCurrent} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/90 text-dark-900 font-bold text-xs transition-all duration-300 shadow-md">
+                         <span>Voltar ao Atual</span>
+                       </button>
+                     )}
+                     <button onClick={() => setMesClicado(null)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-transparent border border-danger/50 hover:bg-danger/10 text-danger font-bold text-xs transition-all duration-300 shadow-md">
+                       <span>✖ Remover Filtro</span>
+                     </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-2 px-4 mx-auto shadow-inner w-fit">
+                   <div className="flex items-center gap-2 text-center">
+                      <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">Dica: Clique em qualquer ponto/mês do gráfico acima para filtrar todo o painel.</span>
+                   </div>
+                </div>
+              )}
             </div>
          </div>
 
-         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-            {[ 
-              { key: 'total', label: 'Total Inventários', color: '#f58220', bg: 'rgba(245,130,32,0.15)', shadow: 'rgba(245,130,32,0.3)' }, 
-              { key: 'geral', label: 'Inventários Gerais', color: '#e74c3c', bg: 'rgba(231,76,60,0.15)', shadow: 'rgba(231,76,60,0.3)' }, 
-              { key: 'rotativo', label: 'Inventários Rotativos', color: '#2ecc71', bg: 'rgba(46,204,113,0.15)', shadow: 'rgba(46,204,113,0.3)' } 
-            ].map(({ key, label, color, bg, shadow }) => {
-              const isActive = vis[key]
-              const hasData = chartEvolucao[key] && chartEvolucao[key].some(v => v > 0)
-              
-              return (
-                <button 
-                  key={key} 
-                  onClick={() => hasData && toggleVis(key)} 
-                  disabled={!hasData} 
-                  className={`relative flex items-center justify-center gap-2 px-4 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border ${
-                    !hasData ? 'opacity-30 grayscale cursor-not-allowed border-transparent text-dark-400 bg-transparent' : 
-                    !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]' : 
-                    'font-bold text-white'
-                  }`}
-                  style={isActive && hasData ? {
-                    borderColor: color,
-                    backgroundColor: bg,
-                    boxShadow: `0 0 15px ${shadow}, inset 0 0 10px ${bg}`
-                  } : {}}
-                >
-                  {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[3px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 10px ${color}` }} />}
-                  <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 12px ${color}` } : {}} />
-                  <span className={isActive ? 'drop-shadow-md tracking-wide text-white' : 'tracking-wide'}>{label}</span>
-                </button>
-              )
-            })}
+         {/* 3. TABELA DE DETALHAMENTO (SEM overflow-hidden PARA O DROPDOWN FLUIR LIVREMENTE) */}
+         <div className="border border-[#2A2A2A] rounded-xl shadow-lg bg-[#111111]/40 transition-colors relative z-30">
+            {/* Cabeçalho da Tabela */}
+            <div 
+              className="px-4 py-3 border-b border-[#2A2A2A] bg-[#111111]/80 hover:bg-[#161616] flex items-center justify-between gap-4 cursor-pointer transition-colors w-full rounded-t-xl"
+              onClick={(e) => {
+                if (!e.target.closest('.filtros-tabela')) {
+                  setExpanded(!expanded)
+                }
+              }}
+            >
+               <div className="flex items-center gap-3 shrink-0">
+                  <span className="w-8 h-8 rounded-lg bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-inner">
+                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                  </span>
+                  <span className="text-xs font-bold text-white tracking-wide uppercase hover:text-accent transition-colors truncate">
+                     INVENTÁRIOS - DETALHAMENTOS
+                  </span>
+               </div>
+
+               <div className="flex items-center gap-3 shrink-0 filtros-tabela" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-2 border-r border-[#333] pr-3">
+                     <span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase hidden sm:block">Tipo</span>
+                     <CyberMultiSelect options={listasMaster.tiposVisual} selected={tipoSel} onChange={setTipoSel} placeholder="Todos" />
+                  </div>
+                  <div className="flex items-center gap-2 border-r border-[#333] pr-3">
+                     <span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase hidden sm:block">Nº ID</span>
+                     <CyberMultiSelect options={idsInventariosDisponiveis} selected={idInvSel} onChange={setIdInvSel} placeholder="Todos IDs" />
+                  </div>
+                  
+                  <button 
+                    onClick={() => setExpanded(!expanded)} 
+                    className="text-muted text-xs p-1 hover:text-accent transition-colors flex items-center justify-center"
+                  >
+                    {expanded ? '▲' : '▼'}
+                  </button>
+               </div>
+            </div>
+
+            {/* Corpo Expansível da Tabela */}
+            {expanded && (
+              <div className="p-4 sm:p-5 bg-[#141414] animate-fade-in space-y-2 rounded-b-xl">
+                <div className="bg-[#101010] border border-[#222222] rounded-xl px-3 py-2.5 shadow-inner grid grid-cols-12 gap-0 text-[10px] font-bold text-[#8c9ba5] uppercase tracking-wider items-center">
+                  <div className="col-span-2 text-left border-r border-[#222222] pr-2">Nome da Empresa</div>
+                  <div className="col-span-1 text-center border-r border-[#222222] px-1">(Qtde) Inv.</div>
+                  <div className="col-span-2 text-center border-r border-[#222222] px-2">Local Estoque</div>
+                  <div className="col-span-3 text-center border-r border-[#222222] px-2">Nº Inv. Geral</div>
+                  <div className="col-span-3 text-center border-r border-[#222222] px-2">Nº Inv. Rotativo</div>
+                  <div className="col-span-1 text-center pl-2">Gerenciar</div>
+                </div>
+
+                {empresasDisponiveis.map((emp) => {
+                  const d = dictEmpresas[emp]
+                  if (!d) return null
+                  return <EmpresaRow key={emp} emp={emp} dados={d} activeIds={activeIds} onToggle={toggleInv} onToggleAll={toggleAllEmp} />
+                })}
+              </div>
+            )}
          </div>
-         
-         <div className="pt-2 z-10 relative">
-           <Plot
-             onClick={handleChartClick}
-             data={[
-               { x: chartEvolucao.x, y: chartEvolucao.x.map(() => maxGrafico * 1.3), type: 'bar', marker: { color: 'rgba(245, 130, 32, 0.02)' }, hoverinfo: 'none', showlegend: false, cliponaxis: false },
-               
-               vis.total && { 
-                 x: chartEvolucao.x, y: chartEvolucao.total, type: 'scatter', mode: 'lines+markers', 
-                 line: { color: '#f58220', width: 2, shape: 'spline', smoothing: 1.3 }, 
-                 marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 1.5 } },
-                 fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', 
-                 hoverinfo: 'none', cliponaxis: false
-               },
-               
-               vis.geral && { 
-                 x: chartEvolucao.x, y: chartEvolucao.geral, type: 'scatter', mode: 'lines+markers', 
-                 line: { color: '#e74c3c', width: 1.5, dash: 'dash', shape: 'spline', smoothing: 1.3 }, 
-                 marker: { size: 8, color: '#080808', line: { color: '#e74c3c', width: 1.5 } },
-                 hoverinfo: 'none', cliponaxis: false
-               },
-               
-               vis.rotativo && { 
-                 x: chartEvolucao.x, y: chartEvolucao.rotativo, type: 'scatter', mode: 'lines+markers', 
-                 line: { color: '#2ecc71', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, 
-                 marker: { size: 8, color: '#080808', line: { color: '#2ecc71', width: 1.5 } },
-                 hoverinfo: 'none', cliponaxis: false
-               }
-             ].filter(Boolean)}
-             layout={{
-               ...PLOT_LAYOUT,
-               height: 350,
-               bargap: 0,
-               margin: { l: 20, r: 20, t: 40, b: 45 },
-               xaxis: { showgrid: false, zeroline: false, showticklabels: false, automargin: true },
-               yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxGrafico * 0.15), maxGrafico * 1.3] },
-               shapes: chartShapes,
-               annotations: chartAnnotations
-             }}
-             config={{ displayModeBar: false, responsive: true }}
-             style={{ width: '100%', cursor: 'pointer' }}
-             useResizeHandler
-           />
-         </div>
+
       </div>
 
-      {mesClicado ? (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 p-3.5 bg-gradient-to-r from-accent/15 via-[#161616] to-accent/10 rounded-xl border border-accent/40 shadow-[0_4px_20px_rgba(245,130,32,0.15)] animate-fade-in z-30 relative mb-6">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shrink-0">
-              <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
-            <span className="text-xs text-white tracking-wide font-medium">Filtro ativo por snapshot temporal: <b className="text-accent font-mono text-xs px-2 py-0.5 bg-[#080808] border border-accent/30 rounded shadow-inner ml-1">{mesClicado}</b></span>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-             <div className="items-center gap-2 border-r border-[#333] pr-3 hidden lg:flex">
-                <span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase text-right">Nº ID</span>
-                <CyberMultiSelect options={idsInventariosDisponiveis} selected={idInvSel} onChange={setIdInvSel} placeholder="Todos IDs" />
-             </div>
-             
-             {!isCurrentMonth && (
-               <button onClick={handleGoToCurrent} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/90 text-dark-900 font-bold text-xs transition-all duration-300 shadow-md">
-                 <span>Voltar ao Atual</span>
-               </button>
-             )}
-             
-             <button onClick={() => setMesClicado(null)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-transparent border border-danger/50 hover:bg-danger/10 text-danger font-bold text-xs transition-all duration-300 shadow-md">
-               <span>✖ Remover Filtro</span>
-             </button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-3 mb-6 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-2 px-4 mx-auto shadow-inner z-30 relative w-fit">
-           <div className="flex items-center gap-2 text-center">
-              <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">Dica: Clique em qualquer ponto/mês do gráfico acima para filtrar todo o painel.</span>
-           </div>
-           <div className="flex items-center gap-2 border-l border-[#333] pl-3">
-              <span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase text-right">Nº ID</span>
-              <CyberMultiSelect options={idsInventariosDisponiveis} selected={idInvSel} onChange={setIdInvSel} placeholder="Todos IDs" />
-           </div>
-        </div>
-      )}
-
-      {/* BLOCOS SUPERIORES */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-4 relative z-10">
+      {/* BLOCOS SUPERIORES (KPIs reflete as seleções do Hub) */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-6 relative z-10">
         
         {/* BLOCO 1: FOTO INICIAL */}
         <div 
@@ -851,41 +906,6 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-      </div>
-
-      {/* LISTAGEM DE UNIDADES (TABELA) */}
-      <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-5 shadow-xl mt-6 relative z-10">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full text-left text-xs font-bold text-white hover:text-accent transition-colors flex items-center justify-between tracking-wide uppercase"
-        >
-          <span className="flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-inner">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-            </span>
-            DETALHAMENTO E GERENCIAMENTO DOS INVENTÁRIOS POR UNIDADE
-          </span>
-          <span className="text-muted text-xs">{expanded ? '▲' : '▼'}</span>
-        </button>
-
-        {expanded && (
-          <div className="mt-4 space-y-2 animate-fade-in">
-            <div className="bg-[#101010] border border-[#222222] rounded-xl px-3 py-2.5 shadow-inner grid grid-cols-12 gap-0 text-[10px] font-bold text-[#8c9ba5] uppercase tracking-wider items-center">
-              <div className="col-span-2 text-left border-r border-[#222222] pr-2">Nome da Empresa</div>
-              <div className="col-span-1 text-center border-r border-[#222222] px-1">(Qtde) Inv.</div>
-              <div className="col-span-2 text-center border-r border-[#222222] px-2">Local Estoque</div>
-              <div className="col-span-3 text-center border-r border-[#222222] px-2">Nº Inv. Geral</div>
-              <div className="col-span-3 text-center border-r border-[#222222] px-2">Nº Inv. Rotativo</div>
-              <div className="col-span-1 text-center pl-2">Gerenciar</div>
-            </div>
-
-            {empresasDisponiveis.map((emp) => {
-              const d = dictEmpresas[emp]
-              if (!d) return null
-              return <EmpresaRow key={emp} emp={emp} dados={d} activeIds={activeIds} onToggle={toggleInv} onToggleAll={toggleAllEmp} />
-            })}
-          </div>
-        )}
       </div>
 
     </div>
