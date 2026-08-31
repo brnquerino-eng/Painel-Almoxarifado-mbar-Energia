@@ -295,7 +295,7 @@ export default function PainelInventarios({ data }) {
       finalizadosCount: 0, rotativosFinalizadosCount: 0, geralFinalizadosCount: 0, idsPendentes: [], idsComDivergencia: [],
       totalLinhas: 0, skusUnicos: 0, valCongelado: 0,
       linhasContadas: 0, skusContados: 0, valContado: 0, itensDivergentes: 0, qtdSobras: 0, valSobras: 0, 
-      qtdPerdas: 0, valPerdas: 0, diffLiquida: 0, acuraciaItens: 100, acuraciaValor: 100, qtdeLocaisEstoque: 0, locaisContados: 0
+      qtdPerdas: 0, valPerdas: 0, diffLiquida: 0, acuraciaItens: 100, acuraciaValor: 100, acuraciaLiquida: 100, qtdeLocaisEstoque: 0, locaisContados: 0
     }
 
     const uniqueInvs = new Set(dfInv.map((r) => r.id_inventario))
@@ -354,24 +354,26 @@ export default function PainelInventarios({ data }) {
     
     const divergAbs = dfInv.reduce((s, r) => s + Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
     const acuraciaValor = valCongelado > 0 ? Math.max(0, (1 - divergAbs / valCongelado) * 100) : (divergAbs === 0 ? 100 : 0)
+    
+    const acuraciaLiquida = valCongelado > 0 ? Math.max(0, (1 - Math.abs(diffLiquida) / valCongelado) * 100) : (diffLiquida === 0 ? 100 : 0)
 
     return {
       totalInvs: uniqueInvs.size, invsRotativos, invsGeral,
       finalizadosCount, rotativosFinalizadosCount, geralFinalizadosCount, idsPendentes, idsComDivergencia,
       totalLinhas, skusUnicos, valCongelado,
       linhasContadas, skusContados, valContado, itensDivergentes, qtdSobras, valSobras, qtdPerdas, 
-      valPerdas, diffLiquida, acuraciaItens, acuraciaValor, qtdeLocaisEstoque, locaisContados
+      valPerdas, diffLiquida, acuraciaItens, acuraciaValor, acuraciaLiquida, qtdeLocaisEstoque, locaisContados
     }
   }, [dfInv])
 
   const prevMetrics = useMemo(() => {
-    if (!chartEvolucao.x.length) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Anterior', hasData: false }
+    if (!chartEvolucao.x.length) return { acuFis: 0, acuFin: 0, acuLiq: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Anterior', hasData: false }
     const currentIndex = mesClicado ? chartEvolucao.x.indexOf(mesClicado) : chartEvolucao.x.length - 1
-    if (currentIndex <= 0) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Início', hasData: false }
+    if (currentIndex <= 0) return { acuFis: 0, acuFin: 0, acuLiq: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Início', hasData: false }
     
     const prevMonthLabel = chartEvolucao.x[currentIndex - 1]
     const dfPrev = dfMaster.filter(r => formatMesAno(r.mes_referencia, r.ano_referencia) === prevMonthLabel)
-    if (!dfPrev.length) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: prevMonthLabel, hasData: false }
+    if (!dfPrev.length) return { acuFis: 0, acuFin: 0, acuLiq: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: prevMonthLabel, hasData: false }
 
     const totalLinhas = dfPrev.length
     const itensDivergentes = dfPrev.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0).length
@@ -389,8 +391,9 @@ export default function PainelInventarios({ data }) {
 
     const diffLiq = valSobras + valPerdas
     const impLiq = valCongelado > 0 ? (diffLiq / valCongelado) * 100 : 0
+    const acuLiq = valCongelado > 0 ? Math.max(0, (1 - Math.abs(diffLiq) / valCongelado) * 100) : (diffLiq === 0 ? 100 : 0)
 
-    return { acuFis, acuFin, taxaDiv, impBruto, impLiq, label: prevMonthLabel, hasData: true }
+    return { acuFis, acuFin, acuLiq, taxaDiv, impBruto, impLiq, label: prevMonthLabel, hasData: true }
   }, [dfMaster, chartEvolucao.x, mesClicado])
 
   const toggleInv = useCallback((emp, uid, checked) => setActiveIds((prev) => ({ ...prev, [`${emp}||${uid}`]: checked })), [])
@@ -401,6 +404,7 @@ export default function PainelInventarios({ data }) {
   const isMasterSel = activeCard === 'master_operacional'
   const isAcuFisSel = activeCard === 'acuracia_fisica'
   const isAcuFinSel = activeCard === 'acuracia_financeira'
+  const isAcuLiqSel = activeCard === 'acuracia_liquida'
   const isEvolSel = activeCard === 'evolucao_comparativa'
 
   const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 150, showlegend: false }
@@ -477,10 +481,16 @@ export default function PainelInventarios({ data }) {
     return anns
   }, [chartEvolucao, vis, mesClicado])
 
-  const corAcuFis = stats.acuraciaItens >= 95 ? '#2ecc71' : stats.acuraciaItens >= 80 ? '#f58220' : '#e74c3c'
-  const corAcuFisBg = stats.acuraciaItens >= 95 ? '#111c16' : stats.acuraciaItens >= 80 ? '#1c1612' : '#2a1616'
-  const corAcuFin = stats.acuraciaValor >= 95 ? '#2ecc71' : stats.acuraciaValor >= 80 ? '#f58220' : '#e74c3c'
-  const corAcuFinBg = stats.acuraciaValor >= 95 ? '#111c16' : stats.acuraciaValor >= 80 ? '#1c1612' : '#2a1616'
+  const getCor = (val) => val >= 95 ? '#2ecc71' : val >= 80 ? '#f58220' : '#e74c3c'
+  const getCorBg = (val) => val >= 95 ? '#111c16' : val >= 80 ? '#1c1612' : '#2a1616'
+  const getStatusConf = (val) => val >= 95 ? 'EXCELENTE' : val >= 80 ? 'ATENÇÃO' : 'CRÍTICO'
+
+  const corAcuFis = getCor(stats.acuraciaItens)
+  const corAcuFisBg = getCorBg(stats.acuraciaItens)
+  const corAcuFin = getCor(stats.acuraciaValor)
+  const corAcuFinBg = getCorBg(stats.acuraciaValor)
+  const corAcuLiq = getCor(stats.acuraciaLiquida)
+  const corAcuLiqBg = getCorBg(stats.acuraciaLiquida)
 
   const pctConclusao = stats.totalInvs > 0 ? Math.floor((stats.finalizadosCount / stats.totalInvs) * 100) : 100
   const is100Percent = pctConclusao === 100
@@ -489,12 +499,14 @@ export default function PainelInventarios({ data }) {
 
   const atualAcuFis = stats.acuraciaItens
   const atualAcuFin = stats.acuraciaValor
+  const atualAcuLiq = stats.acuraciaLiquida
   const atualTaxaDiv = stats.totalLinhas > 0 ? (stats.itensDivergentes / stats.totalLinhas) * 100 : 0
   const atualImpBruto = stats.valCongelado > 0 ? ((Math.abs(stats.valSobras) + Math.abs(stats.valPerdas)) / stats.valCongelado) * 100 : 0
   const atualImpLiq = stats.valCongelado > 0 ? (stats.diffLiquida / stats.valCongelado) * 100 : 0
 
   const diffAcuFis = atualAcuFis - prevMetrics.acuFis
   const diffAcuFin = atualAcuFin - prevMetrics.acuFin
+  const diffAcuLiq = atualAcuLiq - prevMetrics.acuLiq
   const diffTaxaDiv = atualTaxaDiv - prevMetrics.taxaDiv
   const diffImpBruto = atualImpBruto - prevMetrics.impBruto
   const diffImpLiq = atualImpLiq - prevMetrics.impLiq
@@ -763,7 +775,9 @@ export default function PainelInventarios({ data }) {
 
             {/* 🌟 NOVO CARTÃO DE RAIO-X DOS INVENTÁRIOS (PENDÊNCIAS E DIVERGÊNCIAS) */}
             <div className="bg-[#101010] border border-[#222222] rounded-xl p-4 shadow-inner mt-4 flex flex-col gap-4 flex-grow">
-              <span className="text-[10px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] text-center w-full block">RAIO-X DOS INVENTÁRIOS</span>
+              <span className="text-xs sm:text-sm text-[#8c9ba5] uppercase font-black tracking-[0.15em] text-center w-full block mb-2">
+                RAIO-X DOS INVENTÁRIOS
+              </span>
               
               <div className="grid grid-cols-2 gap-4 divide-x divide-[#222222] h-full">
                 {/* PENDENTES DE FINALIZAÇÃO */}
@@ -801,10 +815,10 @@ export default function PainelInventarios({ data }) {
           </div>
         </div>
 
-        {/* COLUNA DIREITA (lg:col-span-6): Acurácia Física, Acurácia Financeira e a Nova Tabela de Evolução Comparativa */}
+        {/* COLUNA DIREITA (lg:col-span-6): Acurácias e Evolução */}
         <div className="lg:col-span-6 space-y-6 flex flex-col">
           
-          {/* ACURÁCIA FÍSICA (ITENS) */}
+          {/* 1. ACURÁCIA FÍSICA (ITENS) */}
           <div 
             onClick={() => handleCardClick('acuracia_fisica')}
             style={isAcuFisSel ? { backgroundColor: corAcuFisBg, borderColor: corAcuFis, boxShadow: `0 0 25px ${corAcuFis}55` } : {}}
@@ -818,11 +832,17 @@ export default function PainelInventarios({ data }) {
               <div className="inline-flex items-center justify-center w-9 h-9 rounded-xl mb-2.5 shadow-inner border" style={{ backgroundColor: `${corAcuFis}15`, color: corAcuFis, borderColor: `${corAcuFis}40` }}>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
               </div>
-              <h3 className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase mb-1">ACURÁCIA FÍSICA (ITENS)</h3>
+              <h3 className="text-sm font-black tracking-[0.1em] text-white uppercase mb-1">ACURÁCIA FÍSICA (ITENS)</h3>
               <p className="text-[11px] text-muted leading-relaxed mb-3">Mede a precisão da contagem física linha a linha.</p>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border" style={{ backgroundColor: `${corAcuFis}15`, borderColor: `${corAcuFis}35`, color: corAcuFis }}>
+              
+              <div className="flex items-center gap-2 mb-3 bg-[#111111] border border-[#222222] px-2 py-1.5 rounded text-[10px] font-mono shadow-inner">
+                 <span className="text-[#8c9ba5] uppercase">Taxa de Divergência:</span>
+                 <span className="text-white font-bold">{atualTaxaDiv.toFixed(2)}%</span>
+              </div>
+
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm" style={{ backgroundColor: `${corAcuFis}15`, borderColor: `${corAcuFis}35`, color: corAcuFis }}>
                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: corAcuFis }}></span>
-                 <span>CONFIABILIDADE</span>
+                 <span>STATUS: {getStatusConf(atualAcuFis)}</span>
               </div>
             </div>
             
@@ -835,7 +855,7 @@ export default function PainelInventarios({ data }) {
             </div>
           </div>
 
-          {/* ACURÁCIA FINANCEIRA (VALOR) */}
+          {/* 2. ACURÁCIA FINANCEIRA (BRUTA) */}
           <div 
             onClick={() => handleCardClick('acuracia_financeira')}
             style={isAcuFinSel ? { backgroundColor: corAcuFinBg, borderColor: corAcuFin, boxShadow: `0 0 25px ${corAcuFin}55` } : {}}
@@ -849,11 +869,17 @@ export default function PainelInventarios({ data }) {
               <div className="inline-flex items-center justify-center w-9 h-9 rounded-xl mb-2.5 shadow-inner border" style={{ backgroundColor: `${corAcuFin}15`, color: corAcuFin, borderColor: `${corAcuFin}40` }}>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </div>
-              <h3 className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase mb-1">ACURÁCIA FINANCEIRA (VALOR)</h3>
-              <p className="text-[11px] text-muted leading-relaxed mb-3">Avalia a saúde financeira e a exatidão monetária da contagem.</p>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border" style={{ backgroundColor: `${corAcuFin}15`, borderColor: `${corAcuFin}35`, color: corAcuFin }}>
+              <h3 className="text-sm font-black tracking-[0.1em] text-white uppercase mb-1">ACURÁCIA FINANCEIRA (BRUTA)</h3>
+              <p className="text-[11px] text-muted leading-relaxed mb-3">Avalia o impacto financeiro absoluto sobre o saldo contábil.</p>
+              
+              <div className="flex items-center gap-2 mb-3 bg-[#111111] border border-[#222222] px-2 py-1.5 rounded text-[10px] font-mono shadow-inner">
+                 <span className="text-[#8c9ba5] uppercase">Impacto Bruto:</span>
+                 <span className="text-white font-bold">{atualImpBruto.toFixed(2)}%</span>
+              </div>
+
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm" style={{ backgroundColor: `${corAcuFin}15`, borderColor: `${corAcuFin}35`, color: corAcuFin }}>
                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: corAcuFin }}></span>
-                 <span>CONFIABILIDADE</span>
+                 <span>STATUS: {getStatusConf(atualAcuFin)}</span>
               </div>
             </div>
             
@@ -866,7 +892,44 @@ export default function PainelInventarios({ data }) {
             </div>
           </div>
 
-          {/* EVOLUÇÃO COMPARATIVA (Estilo Tabela da Imagem Referência) */}
+          {/* 3. ACURÁCIA FINANCEIRA (LÍQUIDA) */}
+          <div 
+            onClick={() => handleCardClick('acuracia_liquida')}
+            style={isAcuLiqSel ? { backgroundColor: corAcuLiqBg, borderColor: corAcuLiq, boxShadow: `0 0 25px ${corAcuLiq}55` } : {}}
+            className={`bg-[#161616] border rounded-2xl p-5 flex flex-col sm:flex-row items-center transition-all duration-300 relative overflow-hidden cursor-pointer group ${
+              isAcuLiqSel ? 'border-opacity-100 -translate-y-1 ring-1' : 'border-[#2A2A2A] hover:-translate-y-1'
+            }`}
+          >
+            <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent to-transparent pointer-events-none" style={{ backgroundImage: `linear-gradient(to right, transparent, ${corAcuLiq}, transparent)` }} />
+
+            <div className="w-full sm:w-1/2 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
+              <div className="inline-flex items-center justify-center w-9 h-9 rounded-xl mb-2.5 shadow-inner border" style={{ backgroundColor: `${corAcuLiq}15`, color: corAcuLiq, borderColor: `${corAcuLiq}40` }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <h3 className="text-sm font-black tracking-[0.1em] text-white uppercase mb-1">ACURÁCIA FINANCEIRA (LÍQUIDA)</h3>
+              <p className="text-[11px] text-muted leading-relaxed mb-3">Mede o impacto financeiro real compensado (Sobras vs Perdas).</p>
+              
+              <div className="flex items-center gap-2 mb-3 bg-[#111111] border border-[#222222] px-2 py-1.5 rounded text-[10px] font-mono shadow-inner">
+                 <span className="text-[#8c9ba5] uppercase">Impacto Líquido:</span>
+                 <span className="text-white font-bold">{atualImpLiq > 0 ? '+' : ''}{atualImpLiq.toFixed(2)}%</span>
+              </div>
+
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm" style={{ backgroundColor: `${corAcuLiq}15`, borderColor: `${corAcuLiq}35`, color: corAcuLiq }}>
+                 <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: corAcuLiq }}></span>
+                 <span>STATUS: {getStatusConf(atualAcuLiq)}</span>
+              </div>
+            </div>
+            
+            <div className="w-full sm:w-1/2 flex justify-center items-center pointer-events-none relative min-w-[150px]">
+              <Plot 
+                data={[{ type: "pie", values: [stats.acuraciaLiquida, Math.max(0, 100 - stats.acuraciaLiquida)], hole: 0.72, sort: false, direction: 'clockwise', rotation: 90, textinfo: 'none', hoverinfo: 'none', marker: { colors: [corAcuLiq, '#222222'], line: { width: 0 } } }]}
+                layout={{ ...DONUT_LAYOUT, annotations: [{ text: `${stats.acuraciaLiquida.toFixed(2)}%`, font: { size: 18, color: corAcuLiq, family: 'Inter', weight: 900 }, showarrow: false, x: 0.5, y: 0.5 }] }} 
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', maxWidth: '160px' }}
+              />
+            </div>
+          </div>
+
+          {/* EVOLUÇÃO COMPARATIVA */}
           <div 
             onClick={() => handleCardClick('evolucao_comparativa')}
             className={`bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
@@ -906,11 +969,20 @@ export default function PainelInventarios({ data }) {
                   </tr>
 
                   <tr className="hover:bg-[#1f1f1f] transition-colors">
-                    <td className="py-2.5 px-2 font-medium text-white">Acurácia Financeira (Valor)</td>
+                    <td className="py-2.5 px-2 font-medium text-white">Acurácia Fin. Bruta</td>
                     <td className="py-2.5 px-2 text-right font-mono text-white">{atualAcuFin.toFixed(2)}%</td>
                     <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.acuFin.toFixed(2)}%` : '—'}</td>
                     <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffAcuFin >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
                       {diffAcuFin >= 0 ? `+${diffAcuFin.toFixed(2)} pp` : `${diffAcuFin.toFixed(2)} pp`}
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Acurácia Fin. Líquida</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualAcuLiq.toFixed(2)}%</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.acuLiq.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffAcuLiq >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffAcuLiq >= 0 ? `+${diffAcuLiq.toFixed(2)} pp` : `${diffAcuLiq.toFixed(2)} pp`}
                     </td>
                   </tr>
 
@@ -920,15 +992,6 @@ export default function PainelInventarios({ data }) {
                     <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.taxaDiv.toFixed(2)}%` : '—'}</td>
                     <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffTaxaDiv <= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
                       {diffTaxaDiv >= 0 ? `+${diffTaxaDiv.toFixed(2)} pp` : `${diffTaxaDiv.toFixed(2)} pp`}
-                    </td>
-                  </tr>
-
-                  <tr className="hover:bg-[#1f1f1f] transition-colors">
-                    <td className="py-2.5 px-2 font-medium text-white">Impacto Bruto (%)</td>
-                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualImpBruto.toFixed(2)}%</td>
-                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.impBruto.toFixed(2)}%` : '—'}</td>
-                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffImpBruto <= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
-                      {diffImpBruto >= 0 ? `+${diffImpBruto.toFixed(2)} pp` : `${diffImpBruto.toFixed(2)} pp`}
                     </td>
                   </tr>
 
