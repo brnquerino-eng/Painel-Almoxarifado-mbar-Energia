@@ -292,7 +292,7 @@ export default function PainelInventarios({ data }) {
   const stats = useMemo(() => {
     if (!dfInv.length) return {
       totalInvs: 0, invsRotativos: 0, invsGeral: 0, 
-      finalizadosCount: 0, rotativosFinalizadosCount: 0, geralFinalizadosCount: 0, idsPendentes: [],
+      finalizadosCount: 0, rotativosFinalizadosCount: 0, geralFinalizadosCount: 0, idsPendentes: [], idsComDivergencia: [],
       totalLinhas: 0, skusUnicos: 0, valCongelado: 0,
       linhasContadas: 0, skusContados: 0, valContado: 0, itensDivergentes: 0, qtdSobras: 0, valSobras: 0, 
       qtdPerdas: 0, valPerdas: 0, diffLiquida: 0, acuraciaItens: 100, acuraciaValor: 100, qtdeLocaisEstoque: 0, locaisContados: 0
@@ -334,8 +334,10 @@ export default function PainelInventarios({ data }) {
     const valContado = dfInv.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0) + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
     const locaisContados = qtdeLocaisEstoque
     
-    const itensDivergentes = dfInv.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0).length
-    
+    const rowsDivergentes = dfInv.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0)
+    const itensDivergentes = rowsDivergentes.length
+    const idsComDivergencia = [...new Set(rowsDivergentes.map(r => limparId(r.id_inventario)))].sort((a, b) => Number(a) - Number(b))
+
     const qtdSobrasRaw = dfInv.filter((r) => (r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0).reduce((s, r) => s + Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0), 0)
     const qtdSobras = qtdSobrasRaw > 0 ? qtdSobrasRaw : dfInv.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) > 0).length
     
@@ -355,33 +357,40 @@ export default function PainelInventarios({ data }) {
 
     return {
       totalInvs: uniqueInvs.size, invsRotativos, invsGeral,
-      finalizadosCount, rotativosFinalizadosCount, geralFinalizadosCount, idsPendentes,
+      finalizadosCount, rotativosFinalizadosCount, geralFinalizadosCount, idsPendentes, idsComDivergencia,
       totalLinhas, skusUnicos, valCongelado,
       linhasContadas, skusContados, valContado, itensDivergentes, qtdSobras, valSobras, qtdPerdas, 
       valPerdas, diffLiquida, acuraciaItens, acuraciaValor, qtdeLocaisEstoque, locaisContados
     }
   }, [dfInv])
 
-  // Cálculo de Acurácia do Mês Anterior para o Novo Card
-  const statsPrevMonth = useMemo(() => {
-    if (!chartEvolucao.x.length) return { acuraciaItens: 0, acuraciaValor: 0, label: 'Anterior', hasData: false }
+  const prevMetrics = useMemo(() => {
+    if (!chartEvolucao.x.length) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Anterior', hasData: false }
     const currentIndex = mesClicado ? chartEvolucao.x.indexOf(mesClicado) : chartEvolucao.x.length - 1
-    if (currentIndex <= 0) return { acuraciaItens: 0, acuraciaValor: 0, label: 'Início', hasData: false }
+    if (currentIndex <= 0) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Início', hasData: false }
     
     const prevMonthLabel = chartEvolucao.x[currentIndex - 1]
     const dfPrev = dfMaster.filter(r => formatMesAno(r.mes_referencia, r.ano_referencia) === prevMonthLabel)
-    if (!dfPrev.length) return { acuraciaItens: 0, acuraciaValor: 0, label: prevMonthLabel, hasData: false }
+    if (!dfPrev.length) return { acuFis: 0, acuFin: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: prevMonthLabel, hasData: false }
 
     const totalLinhas = dfPrev.length
     const itensDivergentes = dfPrev.filter((r) => Math.abs(r.diferenca_qtd || r.qtd_diferenca || r.diff_qtd || 0) > 0 || Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0) !== 0).length
-    const linhasSemDiv = totalLinhas - itensDivergentes
-    const acuraciaItens = totalLinhas > 0 ? (linhasSemDiv / totalLinhas) * 100 : 100
+    const acuFis = totalLinhas > 0 ? ((totalLinhas - itensDivergentes) / totalLinhas) * 100 : 100
 
     const valCongelado = dfPrev.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0)
     const divergAbs = dfPrev.reduce((s, r) => s + Math.abs(r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
-    const acuraciaValor = valCongelado > 0 ? Math.max(0, (1 - divergAbs / valCongelado) * 100) : (divergAbs === 0 ? 100 : 0)
+    const acuFin = valCongelado > 0 ? Math.max(0, (1 - divergAbs / valCongelado) * 100) : (divergAbs === 0 ? 100 : 0)
 
-    return { acuraciaItens, acuraciaValor, label: prevMonthLabel, hasData: true }
+    const taxaDiv = totalLinhas > 0 ? (itensDivergentes / totalLinhas) * 100 : 0
+
+    const valSobras = dfPrev.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) > 0).reduce((s, r) => s + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
+    const valPerdas = dfPrev.filter((r) => (r.diferenca_val || r.val_diferenca || r.diff_val || 0) < 0).reduce((s, r) => s + (r.diferenca_val || r.val_diferenca || r.diff_val || 0), 0)
+    const impBruto = valCongelado > 0 ? ((Math.abs(valSobras) + Math.abs(valPerdas)) / valCongelado) * 100 : 0
+
+    const diffLiq = valSobras + valPerdas
+    const impLiq = valCongelado > 0 ? (diffLiq / valCongelado) * 100 : 0
+
+    return { acuFis, acuFin, taxaDiv, impBruto, impLiq, label: prevMonthLabel, hasData: true }
   }, [dfMaster, chartEvolucao.x, mesClicado])
 
   const toggleInv = useCallback((emp, uid, checked) => setActiveIds((prev) => ({ ...prev, [`${emp}||${uid}`]: checked })), [])
@@ -389,33 +398,33 @@ export default function PainelInventarios({ data }) {
 
   if (!data.length) { return <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl text-center py-16 text-muted shadow-xl text-xs">⚠️ Nenhum dado de inventário encontrado na base.</div> }
 
-  const isSuperSel = activeCard === 'super_status'
-  const isDivSel = activeCard === 'divergencias'
+  const isMasterSel = activeCard === 'master_operacional'
   const isAcuFisSel = activeCard === 'acuracia_fisica'
   const isAcuFinSel = activeCard === 'acuracia_financeira'
-  const isAcuCompSel = activeCard === 'acuracia_comparativo'
+  const isEvolSel = activeCard === 'evolucao_comparativa'
 
-  const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 160, showlegend: false }
+  const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 150, showlegend: false }
 
   const UnifiedRow = ({ icon, label, valFoto, valRes }) => {
     const isMatch = valFoto === valRes
+    const resColor = isMatch ? 'text-white' : 'text-accent'
     const statusColor = isMatch ? 'text-[#2ecc71]' : 'text-accent'
     const statusIcon = isMatch ? '✓' : '✕'
     
     return (
-      <div className="grid grid-cols-12 items-center py-2 border-b border-[#222222]/40 hover:bg-[#1a1a1a] transition-colors rounded-lg px-2">
-        <div className="col-span-5 flex items-center gap-2.5">
-          <div className="text-[#3498db]">{icon}</div>
+      <div className="grid grid-cols-12 items-center py-1.5 border-b border-[#222222]/40 hover:bg-[#1a1a1a] transition-colors rounded-lg px-2">
+        <div className="col-span-5 flex items-center gap-2">
+          <div className="text-[#60a5fa]">{icon}</div>
           <span className="text-xs text-[#8c9ba5] font-medium">{label}</span>
         </div>
         <div className="col-span-3 text-center">
-          <span className="font-mono font-bold text-[#3498db] text-xs">{fmtInt(valFoto)}</span>
+          <span className="font-mono font-bold text-[#60a5fa] text-xs">{fmtInt(valFoto)}</span>
         </div>
         <div className="col-span-3 text-center">
-          <span className="font-mono font-bold text-white text-xs">{fmtInt(valRes)}</span>
+          <span className={`font-mono font-bold text-xs ${resColor}`}>{fmtInt(valRes)}</span>
         </div>
         <div className="col-span-1 text-right">
-          <span className={`text-sm font-black ${statusColor}`}>{statusIcon}</span>
+          <span className={`text-xs font-black ${statusColor}`}>{statusIcon}</span>
         </div>
       </div>
     )
@@ -477,11 +486,18 @@ export default function PainelInventarios({ data }) {
   const is100Percent = pctConclusao === 100
   const diffValContado = stats.valContado - stats.valCongelado
   const corValContado = diffValContado > 0 ? 'text-accent' : diffValContado < 0 ? 'text-danger' : 'text-white'
-  const iconeValContado = diffValContado === 0 ? '✓' : '✕'
 
-  // Variações de Acurácia com o Mês Anterior
-  const diffAcuFis = stats.acuraciaItens - statsPrevMonth.acuraciaItens
-  const diffAcuFin = stats.acuraciaValor - statsPrevMonth.acuraciaValor
+  const atualAcuFis = stats.acuraciaItens
+  const atualAcuFin = stats.acuraciaValor
+  const atualTaxaDiv = stats.totalLinhas > 0 ? (stats.itensDivergentes / stats.totalLinhas) * 100 : 0
+  const atualImpBruto = stats.valCongelado > 0 ? ((Math.abs(stats.valSobras) + Math.abs(stats.valPerdas)) / stats.valCongelado) * 100 : 0
+  const atualImpLiq = stats.valCongelado > 0 ? (stats.diffLiquida / stats.valCongelado) * 100 : 0
+
+  const diffAcuFis = atualAcuFis - prevMetrics.acuFis
+  const diffAcuFin = atualAcuFin - prevMetrics.acuFin
+  const diffTaxaDiv = atualTaxaDiv - prevMetrics.taxaDiv
+  const diffImpBruto = atualImpBruto - prevMetrics.impBruto
+  const diffImpLiq = atualImpLiq - prevMetrics.impLiq
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
@@ -655,150 +671,137 @@ export default function PainelInventarios({ data }) {
          </div>
       </div>
 
-      {/* 🌟 LAYOUT REVOLUCIONÁRIO EM DUAS COLUNAS SIMÉTRICAS */}
+      {/* 🌟 LAYOUT EM DUAS COLUNAS: LADO ESQUERDO (MASTER CARD OPERACIONAL) & LADO DIREITO (ACURÁCIAS + EVOLUÇÃO COMPARATIVA) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6 relative z-10">
         
-        {/* COLUNA ESQUERDA (lg:col-span-6): Super Card Unificado (Foto Inicial vs Resultado) + Balanço de Divergências */}
-        <div className="lg:col-span-6 space-y-6 flex flex-col">
-          
-          {/* SUPER CARD UNIFICADO (Planejamento x Execução + Dinheiro + Contabilidade) */}
+        {/* COLUNA ESQUERDA (lg:col-span-6): Master Card Operacional */}
+        <div className="lg:col-span-6 flex flex-col">
           <div 
-            onClick={() => handleCardClick('super_status')}
-            className={`bg-[#161616] border rounded-2xl p-5 sm:p-6 transition-all duration-300 transform relative flex flex-col justify-between group cursor-pointer ${
-              isSuperSel ? 'border-[#3498db] shadow-[0_0_25px_rgba(52,152,219,0.3)] bg-[#12181d] -translate-y-1 ring-1 ring-[#3498db]/50' : 'border-[#2A2A2A] hover:border-[#3498db]/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(52,152,219,0.15)]'
+            onClick={() => handleCardClick('master_operacional')}
+            className={`bg-[#161616] border rounded-2xl p-5 sm:p-6 transition-all duration-300 transform relative flex flex-col justify-between group cursor-pointer h-full ${
+              isMasterSel ? 'border-[#3498db] shadow-[0_0_25px_rgba(52,152,219,0.3)] bg-[#12181d] -translate-y-1 ring-1 ring-[#3498db]/50' : 'border-[#2A2A2A] hover:border-[#3498db]/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(52,152,219,0.15)]'
             }`}
           >
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#3498db]/50 to-transparent pointer-events-none" />
 
+            {/* Cabeçalho do Master Card */}
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-[#3498db]/15 flex items-center justify-center text-[#3498db] shadow-inner shrink-0 border border-[#3498db]/30">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 </div>
-                <h3 className="text-sm font-bold tracking-[0.18em] text-white uppercase">STATUS DO INVENTÁRIO (FOTO X RESULTADO)</h3>
+                <h3 className="text-xs font-bold tracking-[0.18em] text-white uppercase">PAINEL OPERACIONAL</h3>
               </div>
               
-              <div className="flex items-center gap-3">
-                <span className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-widest flex items-center gap-1.5 border ${is100Percent ? 'text-[#2ecc71] bg-[#2ecc71]/10 border-[#2ecc71]/40' : 'text-accent bg-accent/10 border-accent/40'}`}>
-                  {is100Percent ? 'CONCLUÍDO' : 'EM ANDAMENTO'} <span className="text-xs">{is100Percent ? '✓' : '✕'}</span>
+              <div className="flex items-center gap-2.5">
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-widest flex items-center gap-1 border ${is100Percent ? 'text-[#2ecc71] bg-[#2ecc71]/10 border-[#2ecc71]/40' : 'text-accent bg-accent/10 border-accent/40'}`}>
+                  {is100Percent ? 'CONCLUÍDO' : 'EM ANDAMENTO'} <span>{is100Percent ? '✓' : '✕'}</span>
                 </span>
-                <span className={`text-xl font-black font-mono tracking-tighter ${is100Percent ? 'text-[#2ecc71]' : 'text-accent'}`}>{pctConclusao}%</span>
+                <span className={`text-lg font-black font-mono tracking-tighter ${is100Percent ? 'text-[#2ecc71]' : 'text-accent'}`}>{pctConclusao}%</span>
               </div>
             </div>
 
-            {/* Tabela Unificada de Comparação */}
+            {/* Tabela Unificada: Foto Inicial vs Resultado */}
             <div className="bg-[#101010] border border-[#222222] rounded-xl p-3 shadow-inner flex flex-col mb-4">
-              <div className="grid grid-cols-12 pb-2 border-b border-[#333333] mb-2 px-2 text-[10px] font-bold text-[#8c9ba5] uppercase tracking-widest">
+              <div className="grid grid-cols-12 pb-2 border-b border-[#333333] mb-1.5 px-2 text-[10px] font-bold text-[#8c9ba5] uppercase tracking-widest">
                 <div className="col-span-5">Métrica</div>
-                <div className="col-span-3 text-center text-[#3498db]">FOTO INICIAL</div>
+                <div className="col-span-3 text-center text-[#60a5fa]">FOTO INICIAL</div>
                 <div className="col-span-3 text-center">RESULTADO</div>
                 <div className="col-span-1"></div>
               </div>
 
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>} label="Inventários" valFoto={stats.totalInvs} valRes={stats.finalizadosCount} />
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} label="Rotativos" valFoto={stats.invsRotativos} valRes={stats.rotativosFinalizadosCount} />
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} label="Gerais" valFoto={stats.invsGeral} valRes={stats.geralFinalizadosCount} />
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} label="Locais Estoque" valFoto={stats.qtdeLocaisEstoque} valRes={stats.locaisContados} />
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>} label="Linhas" valFoto={stats.totalLinhas} valRes={stats.linhasContadas} />
-              <UnifiedRow icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} label="SKUs" valFoto={stats.skusUnicos} valRes={stats.skusContados} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>} label="Inventários" valFoto={stats.totalInvs} valRes={stats.finalizadosCount} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} label="Rotativos" valFoto={stats.invsRotativos} valRes={stats.rotativosFinalizadosCount} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} label="Gerais" valFoto={stats.invsGeral} valRes={stats.geralFinalizadosCount} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} label="Locais Estoque" valFoto={stats.qtdeLocaisEstoque} valRes={stats.locaisContados} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>} label="Linhas" valFoto={stats.totalLinhas} valRes={stats.linhasContadas} />
+              <UnifiedRow icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} label="SKUs" valFoto={stats.skusUnicos} valRes={stats.skusContados} />
             </div>
 
-            {/* Palco do Dinheiro */}
-            <div className="bg-[#0c0c0c] border border-[#222222] rounded-xl p-3.5 shadow-inner grid grid-cols-2 gap-4 divide-x divide-[#222222] mb-3">
+            {/* 🌟 VALOR INICIAL & VALOR CONTADO */}
+            <div className="bg-[#0c0c0c] border-t border-x border-[#222222] rounded-t-xl p-3 shadow-inner grid grid-cols-2 gap-3 divide-x divide-[#222222]">
               <div className="flex flex-col justify-center pr-2">
-                <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-1">VALOR INICIAL</span>
-                <span className="block text-lg lg:text-xl font-black text-[#3498db] font-mono tracking-tight">{fmtBRL(stats.valCongelado)}</span>
+                <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-0.5">VALOR INICIAL</span>
+                <span className="block text-base font-black text-[#60a5fa] font-mono tracking-tight">{fmtBRL(stats.valCongelado)}</span>
               </div>
-              <div className="flex flex-col justify-center pl-4">
-                <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-1">VALOR CONTADO</span>
-                <span className={`block text-lg lg:text-xl font-black font-mono tracking-tight flex items-center gap-2 ${corValContado}`}>
-                  {fmtBRL(stats.valContado)} <span className="text-xs font-black">{iconeValContado}</span>
+              <div className="flex flex-col justify-center pl-3">
+                <span className="block text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-0.5">VALOR CONTADO</span>
+                <span className={`block text-base font-black font-mono tracking-tight ${corValContado}`}>
+                  {fmtBRL(stats.valContado)}
                 </span>
               </div>
             </div>
 
-            {/* Rodapé Tático de Contabilidade */}
-            <div>
-              {is100Percent ? (
-                <div className="flex items-center justify-center gap-2 bg-[#2ecc71]/10 border border-[#2ecc71]/30 rounded-lg py-2 px-3 shadow-inner">
-                  <span className="text-[#2ecc71] font-bold text-xs">✓ Nenhuma pendência de encerramento encontrada</span>
-                </div>
-              ) : (
-                <div 
-                  className="flex items-center justify-between bg-gradient-to-r from-accent/20 to-accent/5 border border-accent/40 rounded-lg py-2 px-3 shadow-inner group cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(`IDs pendentes: ${stats.idsPendentes.join(', ')}`);
-                    alert('IDs copiados para a área de transferência! 🚀');
-                  }}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent"></span></span>
-                    <span className="text-xs text-white font-medium truncate">Aguardando Contabilidade: <span className="font-bold text-accent font-mono">{stats.idsPendentes.slice(0, 4).join(', ')}{stats.idsPendentes.length > 4 ? '...' : ''}</span></span>
-                  </div>
-                  <button className="bg-accent text-dark-900 text-[10px] font-bold px-2.5 py-1 rounded shadow shrink-0">Copiar IDs</button>
-                </div>
-              )}
+            {/* 🌟 DIFERENÇA LÍQUIDA */}
+            <div className="bg-[#101010] border-x border-b border-[#222222] rounded-b-xl p-4 shadow-inner flex flex-col items-center justify-center text-center mb-4">
+              <span className="text-[10px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] mb-1">DIFERENÇA LÍQUIDA</span>
+              <span className={`text-xl font-black font-mono tracking-tight ${stats.diffLiquida > 0 ? 'text-[#2ecc71]' : stats.diffLiquida < 0 ? 'text-[#e74c3c]' : 'text-white'}`}>
+                {stats.diffLiquida > 0 ? '+' : ''}{fmtBRL(stats.diffLiquida)}
+              </span>
             </div>
-          </div>
 
-          {/* BALANÇO DE DIVERGÊNCIAS */}
-          <div 
-            onClick={() => handleCardClick('divergencias')}
-            className={`bg-[#161616] border rounded-2xl p-6 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
-              isDivSel ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'
-            }`}
-          >
-            <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+            {/* 🌟 ITENS DIVERGENTES E SOBRAS / PERDAS */}
+            <div className="bg-[#101010] border-x border-t border-[#222222] rounded-t-xl p-4 shadow-inner flex flex-col items-center justify-center text-center">
+              <span className="text-[10px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] mb-1">ITENS DIVERGENTES</span>
+              <span className="text-xl font-black font-mono tracking-tight text-white">
+                {fmtInt(stats.itensDivergentes)} <span className="text-xs font-medium text-muted">registros</span>
+              </span>
+            </div>
 
-            <div>
-              <div className="flex items-center gap-2.5 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0 border border-accent/30">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>
-                </div>
-                <span className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase">BALANÇO DE DIVERGÊNCIAS</span>
+            <div className="bg-[#0c0c0c] border-x border-b border-[#222222] rounded-b-xl p-4 shadow-inner grid grid-cols-2 gap-3 divide-x divide-[#222222]">
+              <div className="flex flex-col justify-center pr-2">
+                <span className="block text-xs text-[#2ecc71] font-bold uppercase mb-1">▲ Sobras (Mais)</span>
+                <span className="block text-xs text-muted mb-1">Qtde: {fmtInt(stats.qtdSobras)} UN</span>
+                <span className="block font-mono font-bold text-[#2ecc71] text-sm">{fmtBRL(stats.valSobras)}</span>
               </div>
+              <div className="flex flex-col justify-center pl-4">
+                <span className="block text-xs text-[#e74c3c] font-bold uppercase mb-1">▼ Perdas (Menos)</span>
+                <span className="block text-xs text-muted mb-1">Qtde: {fmtInt(stats.qtdPerdas)} UN</span>
+                <span className="block font-mono font-bold text-[#e74c3c] text-sm">{fmtBRL(stats.valPerdas)}</span>
+              </div>
+            </div>
+
+            {/* 🌟 NOVO CARTÃO DE RAIO-X DOS INVENTÁRIOS (PENDÊNCIAS E DIVERGÊNCIAS) */}
+            <div className="bg-[#101010] border border-[#222222] rounded-xl p-4 shadow-inner mt-4 flex flex-col gap-4 flex-grow">
+              <span className="text-[10px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] text-center w-full block">RAIO-X DOS INVENTÁRIOS</span>
               
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="bg-[#101010] border border-[#222222] rounded-xl flex flex-col shadow-inner overflow-hidden">
-                  <div className="px-3 py-2 border-b border-[#222222] bg-[#161616]">
-                    <span className="block text-[10px] text-[#2ecc71] font-bold tracking-widest uppercase">▲ Sobras (Para Mais)</span>
-                  </div>
-                  <div className="p-3 flex flex-col justify-center gap-1.5 divide-y divide-[#222222]">
-                    <div className="flex justify-between items-end pb-1"><span className="text-[11px] text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdSobras)} UN</span></div>
-                    <div className="flex justify-between items-end pt-1"><span className="text-[11px] text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#2ecc71] text-xs">{fmtBRL(stats.valSobras)}</span></div>
+              <div className="grid grid-cols-2 gap-4 divide-x divide-[#222222] h-full">
+                {/* PENDENTES DE FINALIZAÇÃO */}
+                <div className="flex flex-col pr-2">
+                  <span className="text-xs text-[#f1c40f] font-bold uppercase mb-1.5 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#f1c40f] animate-pulse"></span> Pendentes
+                  </span>
+                  <span className="text-[10px] text-muted mb-2">Aguardando fechamento: <b className="text-white text-xs ml-1">{stats.idsPendentes.length}</b></span>
+                  <div className="flex flex-wrap gap-1.5 mt-auto">
+                    {stats.idsPendentes.length > 0 ? (
+                      stats.idsPendentes.map(id => <span key={id} className="bg-[#1a1a1a] border border-[#333] text-[#f1c40f] px-1.5 py-0.5 rounded text-[10px] font-mono">{id}</span>)
+                    ) : (
+                      <span className="text-[10px] text-[#2ecc71] font-bold">✓ Nenhum pendente</span>
+                    )}
                   </div>
                 </div>
-                
-                <div className="bg-[#101010] border border-[#222222] rounded-xl flex flex-col shadow-inner overflow-hidden">
-                  <div className="px-3 py-2 border-b border-[#222222] bg-[#161616]">
-                    <span className="block text-[10px] text-[#e74c3c] font-bold tracking-widest uppercase">▼ Perdas (Para Menos)</span>
-                  </div>
-                  <div className="p-3 flex flex-col justify-center gap-1.5 divide-y divide-[#222222]">
-                    <div className="flex justify-between items-end pb-1"><span className="text-[11px] text-[#8c9ba5]">Qtde Itens:</span><span className="font-mono font-bold text-white text-xs">{fmtInt(stats.qtdPerdas)} UN</span></div>
-                    <div className="flex justify-between items-end pt-1"><span className="text-[11px] text-[#8c9ba5]">Impacto:</span><span className="font-mono font-bold text-[#e74c3c] text-xs">{fmtBRL(stats.valPerdas)}</span></div>
+
+                {/* COM DIVERGÊNCIA */}
+                <div className="flex flex-col pl-4">
+                  <span className="text-xs text-accent font-bold uppercase mb-1.5 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span> Divergentes
+                  </span>
+                  <span className="text-[10px] text-muted mb-2">Com alguma divergência: <b className="text-white text-xs ml-1">{stats.idsComDivergencia.length}</b></span>
+                  <div className="flex flex-wrap gap-1.5 mt-auto max-h-[80px] overflow-y-auto custom-scrollbar pr-1">
+                    {stats.idsComDivergencia.length > 0 ? (
+                      stats.idsComDivergencia.map(id => <span key={id} className="bg-[#1a1a1a] border border-[#333] text-accent px-1.5 py-0.5 rounded text-[10px] font-mono">{id}</span>)
+                    ) : (
+                      <span className="text-[10px] text-[#2ecc71] font-bold">✓ 100% Exatos</span>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-[#101010] rounded-xl border border-[#222222] p-3.5 shadow-inner flex items-center justify-between divide-x divide-[#222222]">
-               <div className="flex-1 pr-3">
-                 <span className="block text-[9px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-0.5">ITENS DIVERGENTES</span>
-                 <span className="block text-xs font-bold text-white font-mono">{fmtInt(stats.itensDivergentes)} <span className="text-[9px] text-muted">registros</span></span>
-               </div>
-               <div className="flex-1 pl-3 text-right">
-                 <span className="block text-[9px] text-[#8c9ba5] uppercase font-bold tracking-wider mb-0.5">DIFERENÇA LÍQUIDA</span>
-                 <span className={`block text-sm font-black font-mono tracking-tight ${stats.diffLiquida > 0 ? 'text-[#2ecc71]' : stats.diffLiquida < 0 ? 'text-[#e74c3c]' : 'text-white'}`}>
-                   {stats.diffLiquida > 0 ? '+' : ''}{fmtBRL(stats.diffLiquida)}
-                 </span>
-               </div>
-            </div>
           </div>
-
         </div>
 
-        {/* COLUNA DIREITA (lg:col-span-6): Acurácia Física, Acurácia Financeira e Novo Comparativo com Mês Anterior */}
+        {/* COLUNA DIREITA (lg:col-span-6): Acurácia Física, Acurácia Financeira e a Nova Tabela de Evolução Comparativa */}
         <div className="lg:col-span-6 space-y-6 flex flex-col">
           
           {/* ACURÁCIA FÍSICA (ITENS) */}
@@ -823,11 +826,11 @@ export default function PainelInventarios({ data }) {
               </div>
             </div>
             
-            <div className="w-full sm:w-1/2 flex justify-center items-center pointer-events-none relative min-w-[160px]">
+            <div className="w-full sm:w-1/2 flex justify-center items-center pointer-events-none relative min-w-[150px]">
               <Plot 
                 data={[{ type: "pie", values: [stats.acuraciaItens, Math.max(0, 100 - stats.acuraciaItens)], hole: 0.72, sort: false, direction: 'clockwise', rotation: 90, textinfo: 'none', hoverinfo: 'none', marker: { colors: [corAcuFis, '#222222'], line: { width: 0 } } }]}
-                layout={{ ...DONUT_LAYOUT, annotations: [{ text: `${stats.acuraciaItens.toFixed(2)}%`, font: { size: 20, color: corAcuFis, family: 'Inter', weight: 900 }, showarrow: false, x: 0.5, y: 0.5 }] }} 
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', maxWidth: '170px' }}
+                layout={{ ...DONUT_LAYOUT, annotations: [{ text: `${stats.acuraciaItens.toFixed(2)}%`, font: { size: 18, color: corAcuFis, family: 'Inter', weight: 900 }, showarrow: false, x: 0.5, y: 0.5 }] }} 
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', maxWidth: '160px' }}
               />
             </div>
           </div>
@@ -854,67 +857,91 @@ export default function PainelInventarios({ data }) {
               </div>
             </div>
             
-            <div className="w-full sm:w-1/2 flex justify-center items-center pointer-events-none relative min-w-[160px]">
+            <div className="w-full sm:w-1/2 flex justify-center items-center pointer-events-none relative min-w-[150px]">
               <Plot 
                 data={[{ type: "pie", values: [stats.acuraciaValor, Math.max(0, 100 - stats.acuraciaValor)], hole: 0.72, sort: false, direction: 'clockwise', rotation: 90, textinfo: 'none', hoverinfo: 'none', marker: { colors: [corAcuFin, '#222222'], line: { width: 0 } } }]}
-                layout={{ ...DONUT_LAYOUT, annotations: [{ text: `${stats.acuraciaValor.toFixed(2)}%`, font: { size: 20, color: corAcuFin, family: 'Inter', weight: 900 }, showarrow: false, x: 0.5, y: 0.5 }] }} 
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', maxWidth: '170px' }}
+                layout={{ ...DONUT_LAYOUT, annotations: [{ text: `${stats.acuraciaValor.toFixed(2)}%`, font: { size: 18, color: corAcuFin, family: 'Inter', weight: 900 }, showarrow: false, x: 0.5, y: 0.5 }] }} 
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', maxWidth: '160px' }}
               />
             </div>
           </div>
 
-          {/* NOVO CARD EXCLUSIVO: COMPARATIVO DE ACURÁCIA COM O MÊS ANTERIOR */}
+          {/* EVOLUÇÃO COMPARATIVA (Estilo Tabela da Imagem Referência) */}
           <div 
-            onClick={() => handleCardClick('acuracia_comparativo')}
+            onClick={() => handleCardClick('evolucao_comparativa')}
             className={`bg-[#161616] border rounded-2xl p-5 transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${
-              isAcuCompSel ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.3)] bg-[#1c1612] -translate-y-1 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.15)]'
+              isEvolSel ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.3)] bg-[#1c1612] -translate-y-1 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.15)]'
             }`}
           >
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-accent/15 flex items-center justify-center text-accent shadow-inner shrink-0 border border-accent/30">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold tracking-[0.18em] text-[#8c9ba5] uppercase">EVOLUÇAO MÊS ANTERIOR</h3>
-                  <span className="text-[10px] text-accent font-medium">Comparativo vs. {statsPrevMonth.label}</span>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#222] text-[#8c9ba5] border border-[#333]">
-                {statsPrevMonth.hasData ? 'HISTÓRICO ATIVO' : 'SEM BASE ANTERIOR'}
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#2A2A2A]">
+              <h3 className="text-xs font-bold tracking-[0.18em] text-white uppercase flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+                EVOLUÇÃO COMPARATIVA
+              </h3>
+              <span className="text-[10px] font-mono text-accent bg-accent/10 border border-accent/30 px-2 py-0.5 rounded">
+                {mesClicado || 'Atual'} vs {prevMetrics.label}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              {/* Física */}
-              <div className="bg-[#101010] border border-[#222222] rounded-xl p-3 shadow-inner flex flex-col justify-between">
-                <span className="text-[10px] text-[#8c9ba5] font-bold uppercase mb-1">Acurácia Física</span>
-                <div className="flex items-baseline justify-between">
-                  <span className="font-mono font-bold text-white text-sm">{statsPrevMonth.hasData ? `${statsPrevMonth.acuraciaItens.toFixed(1)}%` : '—'}</span>
-                  {statsPrevMonth.hasData && (
-                    <span className={`text-[11px] font-bold font-mono ${diffAcuFis >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
-                      {diffAcuFis >= 0 ? `+${diffAcuFis.toFixed(1)}%` : `${diffAcuFis.toFixed(1)}%`}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[9px] text-muted mt-1">Mês anterior: {statsPrevMonth.label}</span>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#2A2A2A] text-[10px] font-bold text-[#8c9ba5] uppercase tracking-wider">
+                    <th className="py-2 px-2">Indicador</th>
+                    <th className="py-2 px-2 text-right">Atual ({mesClicado || 'Atual'})</th>
+                    <th className="py-2 px-2 text-right">Anterior ({prevMetrics.label})</th>
+                    <th className="py-2 px-2 text-right">Variação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#222222]">
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Acurácia Física (Itens)</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualAcuFis.toFixed(2)}%</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.acuFis.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffAcuFis >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffAcuFis >= 0 ? `+${diffAcuFis.toFixed(2)} pp` : `${diffAcuFis.toFixed(2)} pp`}
+                    </td>
+                  </tr>
 
-              {/* Financeira */}
-              <div className="bg-[#101010] border border-[#222222] rounded-xl p-3 shadow-inner flex flex-col justify-between">
-                <span className="text-[10px] text-[#8c9ba5] font-bold uppercase mb-1">Acurácia Financeira</span>
-                <div className="flex items-baseline justify-between">
-                  <span className="font-mono font-bold text-white text-sm">{statsPrevMonth.hasData ? `${statsPrevMonth.acuraciaValor.toFixed(1)}%` : '—'}</span>
-                  {statsPrevMonth.hasData && (
-                    <span className={`text-[11px] font-bold font-mono ${diffAcuFin >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
-                      {diffAcuFin >= 0 ? `+${diffAcuFin.toFixed(1)}%` : `${diffAcuFin.toFixed(1)}%`}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[9px] text-muted mt-1">Mês anterior: {statsPrevMonth.label}</span>
-              </div>
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Acurácia Financeira (Valor)</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualAcuFin.toFixed(2)}%</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.acuFin.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffAcuFin >= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffAcuFin >= 0 ? `+${diffAcuFin.toFixed(2)} pp` : `${diffAcuFin.toFixed(2)} pp`}
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Taxa de Divergência (Itens)</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualTaxaDiv.toFixed(2)}%</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.taxaDiv.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffTaxaDiv <= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffTaxaDiv >= 0 ? `+${diffTaxaDiv.toFixed(2)} pp` : `${diffTaxaDiv.toFixed(2)} pp`}
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Impacto Bruto (%)</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualImpBruto.toFixed(2)}%</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.impBruto.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffImpBruto <= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffImpBruto >= 0 ? `+${diffImpBruto.toFixed(2)} pp` : `${diffImpBruto.toFixed(2)} pp`}
+                    </td>
+                  </tr>
+
+                  <tr className="hover:bg-[#1f1f1f] transition-colors">
+                    <td className="py-2.5 px-2 font-medium text-white">Impacto Líquido (%)</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-white">{atualImpLiq >= 0 ? `+${atualImpLiq.toFixed(2)}%` : `${atualImpLiq.toFixed(2)}%`}</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-[#8c9ba5]">{prevMetrics.hasData ? `${prevMetrics.impLiq.toFixed(2)}%` : '—'}</td>
+                    <td className={`py-2.5 px-2 text-right font-mono font-bold ${diffImpLiq <= 0 ? 'text-[#2ecc71]' : 'text-[#e74c3c]'}`}>
+                      {diffImpLiq >= 0 ? `+${diffImpLiq.toFixed(2)} pp` : `${diffImpLiq.toFixed(2)} pp`}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -943,7 +970,7 @@ function EmpresaRow({ emp, dados, activeIds, onToggle, onToggleAll }) {
       <div className="grid grid-cols-12 gap-0 items-center text-xs">
         <div className="col-span-2 text-left text-white font-medium truncate border-r border-[#222222] pr-2" title={emp}>{emp}</div>
         <div className="col-span-1 text-center text-accent font-black border-r border-[#222222] px-1">{dados.qtdAtiva}</div>
-        <div className="col-span-2 text-center text-[#3498db] font-mono truncate border-r border-[#222222] px-2" title={dados.locaisEstoqueStr}>{dados.locaisEstoqueStr}</div>
+        <div className="col-span-2 text-center text-[#60a5fa] font-mono truncate border-r border-[#222222] px-2" title={dados.locaisEstoqueStr}>{dados.locaisEstoqueStr}</div>
         <div className="col-span-3 text-center text-white font-mono truncate border-r border-[#222222] px-2" title={strGeral}>{strGeral}</div>
         <div className="col-span-3 text-center text-white font-mono truncate border-r border-[#222222] px-2" title={strRot}>{strRot}</div>
         <div className="col-span-1 text-center pl-2" onClick={(e) => e.stopPropagation()}>
