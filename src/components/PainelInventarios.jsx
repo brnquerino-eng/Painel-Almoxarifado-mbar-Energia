@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import Plot from 'react-plotly.js'
 import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
 import * as XLSX from 'xlsx'
+import pptxgen from 'pptxgenjs' // <-- Nova importação para gerar o PowerPoint
 
 const MAPA_MESES = {
   '1': '01 - Janeiro', '2': '02 - Fevereiro', '3': '03 - Março', '4': '04 - Abril',
@@ -138,7 +139,7 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
   )
 }
 
-export default function PainelInventarios({ data }) {
+export default function PainelInventarios({ data = [] }) {
   const [empresaSel, setEmpresaSel] = useState([])
   const [tipoSel, setTipoSel] = useState([])
   const [anoSel, setAnoSel] = useState([])
@@ -153,18 +154,13 @@ export default function PainelInventarios({ data }) {
   const [modalUnidadesSel, setModalUnidadesSel] = useState([])
   const [modalSearch, setModalSearch] = useState('')
 
-  // Estados para seleção exclusiva (Clique nos itens)
   const [selEmpresaRow, setSelEmpresaRow] = useState(null)
   const [selResumoRow, setSelResumoRow] = useState(null)
   const [selEvolucaoRow, setSelEvolucaoRow] = useState(null)
   const [selAcuraciaCard, setSelAcuraciaCard] = useState(null)
-  const [selDivRow, setSelDivRow] = useState(null) // Para as tabelas de divergência
+  const [selDivRow, setSelDivRow] = useState(null)
 
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
-
-  const handleExportExcel = useCallback(() => alert("🚀 EXCEL: Gerando planilha formatadinha!"), [])
-  const handleExportPDF = useCallback(() => window.print(), [])
-  const handleExportWord = useCallback(() => alert("📝 WORD: Gerando relatório executivo!"), [])
 
   const dfMaster = useMemo(() => {
     let df = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
@@ -444,6 +440,150 @@ export default function PainelInventarios({ data }) {
     return { acuFis, acuFin, acuLiq, taxaDiv, impBruto, impLiq, label: prevMonthLabel, hasData: true }
   }, [dfMaster, chartEvolucao.x, mesClicado])
 
+  const handleExportExcel = useCallback(() => {
+    if (!dfPainel || dfPainel.length === 0) return alert("Nenhum dado para exportar!");
+    
+    const wsData = dfPainel.map(row => ({
+      'Empresa / Unidade': row.empresa_nome || row.unidade || '—',
+      'Nº Inventário': limparId(row.id_inventario),
+      'Tipo': row.tipo_inventario || '—',
+      'Mês Referência': formatMesAno(row.mes_referencia, row.ano_referencia),
+      'Código SKU': row.codigo_produto || row.codigo || '—',
+      'Nome do Produto': row.nome_produto ?? row.descricao_produto ?? '—',
+      'Qtde Sistema': row.saldo_anterior_consolidado ?? row.saldo_anterior ?? 0,
+      'Qtde Físico': row.inventario_consolidado ?? row.quantidade_contada ?? 0,
+      'Divergência (Qtde)': row.diferenca_consolidada ?? row.diferenca_qtd ?? 0,
+      'Preço Médio (R$)': row.custo_unitario ?? row.preco_medio ?? 0,
+      'Divergência (R$)': row.diferenca_val ?? row.val_diferenca ?? 0
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, 'Relatório Geral');
+    XLSX.writeFile(wb, `Inventarios_Geral_${mesClicado || 'Completo'}.xlsx`);
+  }, [dfPainel, mesClicado]);
+
+  const handleExportPDF = useCallback(() => window.print(), []);
+
+  const handleExportWord = useCallback(() => {
+    const dataAtual = new Date().toLocaleDateString('pt-BR');
+    
+    const html = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head><meta charset='utf-8'><title>Relatório de Inventários</title></head>
+      <body style="font-family: Arial, sans-serif;">
+        <h1 style="color: #f58220;">Relatório Executivo de Inventários - Âmbar Energia</h1>
+        <p><strong>Período Analisado:</strong> ${mesClicado || 'Todo o Histórico'}</p>
+        <p><strong>Data de Geração:</strong> ${dataAtual}</p>
+        <hr/>
+        <h3>Resumo da Conciliação</h3>
+        <ul>
+          <li><strong>Total de Inventários:</strong> ${stats.totalInvs} (Finalizados: ${stats.finalizadosCount})</li>
+          <li><strong>Acurácia Física (Itens):</strong> ${stats.acuraciaItens.toFixed(2)}%</li>
+          <li><strong>Acurácia Financeira (Bruta):</strong> ${stats.acuraciaValor.toFixed(2)}%</li>
+          <li><strong>Acurácia Financeira (Líquida):</strong> ${stats.acuraciaLiquida.toFixed(2)}%</li>
+          <li><strong>Valor Congelado (Contábil):</strong> ${fmtBRL(stats.valCongelado)}</li>
+          <li><strong>Diferença Líquida Total:</strong> ${fmtBRL(stats.diffLiquida)}</li>
+        </ul>
+        <hr/>
+        <p><em>Relatório gerado automaticamente pelo Painel Gerencial.</em></p>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Relatorio_Executivo_${mesClicado ? mesClicado.replace('/','-') : 'Geral'}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [stats, mesClicado]);
+
+  // Função exclusiva para gerar o PowerPoint (PPTX) dinâmico
+  const handleExportPPTX = useCallback(() => {
+    const pres = new pptxgen();
+    pres.author = 'Painel Gerencial - Âmbar Energia';
+    pres.company = 'Âmbar Energia';
+    pres.title = 'Relatório de Inventários';
+    pres.layout = 'LAYOUT_16x9';
+
+    // SLIDE 1: Capa (Visual moderno e escuro)
+    const slideCapa = pres.addSlide();
+    slideCapa.background = { color: '161616' };
+    slideCapa.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '10%', h: '100%', fill: { color: 'f58220' } }); // Detalhe lateral laranja
+    
+    slideCapa.addText('ÂMBAR ENERGIA', { 
+      x: 1, y: 1.8, w: '80%', color: 'f58220', fontSize: 44, bold: true, align: 'center', fontFace: 'Arial' 
+    });
+    slideCapa.addText('FECHAMENTO DE ESTOQUE GERENCIAL', { 
+      x: 1, y: 2.8, w: '80%', color: 'FFFFFF', fontSize: 26, align: 'center', fontFace: 'Arial' 
+    });
+    slideCapa.addText(`COMPILADO: ${mesClicado ? mesClicado.toUpperCase() : 'HISTÓRICO COMPLETO'}`, { 
+      x: 1, y: 3.5, w: '80%', color: '8c9ba5', fontSize: 16, align: 'center', fontFace: 'Arial', bold: true
+    });
+
+    // SLIDE 2: Resumo Consolidado (Geral do Filtro)
+    const slideResumo = pres.addSlide();
+    slideResumo.background = { color: 'F5F5F5' };
+    slideResumo.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
+    slideResumo.addText(`VISÃO GERAL CONSOLIDADA - ${mesClicado || 'GERAL'}`, { 
+      x: 0.2, y: 0.1, w: '90%', h: 0.6, color: 'FFFFFF', fontSize: 20, bold: true, fontFace: 'Arial' 
+    });
+
+    slideResumo.addText([
+      { text: 'Resumo da Conciliação de Inventários\n', options: { fontSize: 18, bold: true, color: '161616' } },
+      { text: `\n• Acurácia Física (Itens): ${stats.acuraciaItens.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
+      { text: `• Acurácia Financeira Bruta: ${stats.acuraciaValor.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
+      { text: `• Acurácia Financeira Líquida: ${stats.acuraciaLiquida.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
+      { text: `• Total de SKUs Contados: ${fmtInt(stats.skusContados)}\n`, options: { fontSize: 14, color: '333333' } },
+      { text: `• Valor Congelado (Sistema): ${fmtBRL(stats.valCongelado)}\n`, options: { fontSize: 14, color: '333333' } },
+      { text: `• Diferença Líquida: ${fmtBRL(stats.diffLiquida)}`, options: { fontSize: 14, color: stats.diffLiquida < 0 ? 'e74c3c' : '2ecc71', bold: true } }
+    ], { x: 0.5, y: 1.2, w: '80%', h: 3.5 });
+
+    // SLIDE 3 em diante: Um slide detalhado para cada unidade filtrada na tela (ex: Lages, Araucária)
+    empresasDisponiveis.forEach(emp => {
+      const slideEmp = pres.addSlide();
+      slideEmp.background = { color: 'FFFFFF' };
+
+      // Header do Slide por Unidade
+      slideEmp.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
+      slideEmp.addText(`PERFORMANCE ALMOXARIFADO - ${emp.toUpperCase()}`, { 
+        x: 0.2, y: 0.1, w: '90%', h: 0.6, color: 'f58220', fontSize: 20, bold: true, fontFace: 'Arial' 
+      });
+
+      // Cálculos restritos àquela unidade específica para exibir no Slide
+      const dadosEmp = dfInv.filter(r => r.empresa_nome === emp || r.unidade === emp);
+      const valCongeladoEmp = dadosEmp.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0);
+      const skusEmp = new Set(dadosEmp.map(r => r.codigo_produto).filter(Boolean)).size;
+
+      const valSobrasEmp = dadosEmp.filter(r => (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0) > 0).reduce((s, r) => s + (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0), 0);
+      const valPerdasEmp = dadosEmp.filter(r => (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0) < 0).reduce((s, r) => s + (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0), 0);
+      const diffLiquidaEmp = valSobrasEmp + valPerdasEmp;
+
+      // Montando os dados na tela do slide de forma limpa e executiva
+      slideEmp.addText('INDICADORES DE FECHAMENTO', { x: 0.5, y: 1.2, w: 4, h: 0.5, color: '161616', fontSize: 16, bold: true });
+      
+      slideEmp.addText(`Unidade Analisada: ${emp}`, { x: 0.5, y: 1.8, w: 8, color: '555555', fontSize: 14, bold: true });
+      slideEmp.addText(`Total de SKUs: ${fmtInt(skusEmp)}`, { x: 0.5, y: 2.2, w: 4, color: '333333', fontSize: 14 });
+      slideEmp.addText(`Valor do Estoque (Congelado): ${fmtBRL(valCongeladoEmp)}`, { x: 0.5, y: 2.6, w: 6, color: '333333', fontSize: 14 });
+      
+      slideEmp.addText(`Sobras (Entradas Físicas): ${fmtBRL(valSobrasEmp)}`, { x: 0.5, y: 3.2, w: 6, color: '2ecc71', fontSize: 14, bold: true });
+      slideEmp.addText(`Perdas (Consumo/Divergência): ${fmtBRL(valPerdasEmp)}`, { x: 0.5, y: 3.6, w: 6, color: 'e74c3c', fontSize: 14, bold: true });
+      
+      slideEmp.addShape(pres.shapes.LINE, { x: 0.5, y: 4.0, w: 8, h: 0, line: { color: 'E0E0E0', width: 1 } });
+      
+      slideEmp.addText(`Resultado Líquido do Inventário: ${fmtBRL(diffLiquidaEmp)}`, { 
+        x: 0.5, y: 4.2, w: 8, color: diffLiquidaEmp < 0 ? 'e74c3c' : '2ecc71', fontSize: 16, bold: true 
+      });
+    });
+
+    // Baixa o arquivo PPTX automaticamente
+    const nomeArquivo = `Apresentacao_Inventarios_${mesClicado ? mesClicado.replace('/','-') : 'Geral'}.pptx`;
+    pres.writeFile({ fileName: nomeArquivo });
+  }, [stats, empresasDisponiveis, dfInv, mesClicado]);
+
   const toggleInv = useCallback((emp, uid, checked) => setActiveIds((prev) => ({ ...prev, [`${emp}||${uid}`]: checked })), [])
   const toggleAllEmp = useCallback((emp, ids, selectAll) => { setActiveIds((prev) => { const next = { ...prev }; for (const uid of ids) next[`${emp}||${uid}`] = selectAll; return next }) }, [])
 
@@ -619,6 +759,9 @@ export default function PainelInventarios({ data }) {
            <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#1a2e22] text-[#2ecc71] border border-[#2ecc71]/40 hover:bg-[#203a2b] transition-all flex items-center gap-1.5 shadow-sm"><span>📥</span> Excel</button>
            <button onClick={handleExportPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1616] text-[#e74c3c] border border-[#e74c3c]/40 hover:bg-[#3a1c1c] transition-all flex items-center gap-1.5 shadow-sm"><span>📄</span> PDF</button>
            <button onClick={handleExportWord} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#162432] text-[#3498db] border border-[#3498db]/40 hover:bg-[#1c2e40] transition-all flex items-center gap-1.5 shadow-sm"><span>📝</span> Word</button>
+           
+           {/* NOVO BOTÃO DE POWERPOINT */}
+           <button onClick={handleExportPPTX} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1b16] text-[#f58220] border border-[#f58220]/40 hover:bg-[#3a251c] transition-all flex items-center gap-1.5 shadow-sm ml-1 border-l-2 border-l-[#f58220]"><span>📊</span> PPTX</button>
         </div>
       </div>
 
