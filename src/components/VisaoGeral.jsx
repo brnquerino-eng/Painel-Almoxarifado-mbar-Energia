@@ -141,7 +141,7 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
               </button>
             </div>
 
-            <div className="max-h-48 overflow-y-auto custom-scrollbar p-1 space-y-0.5 mt-1">
+            <div className="max-h-48 overflow-y-auto custom-scrollbar overscroll-contain p-1 space-y-0.5 mt-1">
               {filtradas.length === 0 && <div className="text-muted text-xs p-3 text-center tracking-wide">Nenhuma opção encontrada</div>}
               {filtradas.map(opt => (
                 <label key={String(opt)} className="flex items-center gap-3 px-2.5 py-2 hover:bg-[#222222] rounded-lg cursor-pointer text-xs text-white transition-colors font-medium group">
@@ -200,7 +200,9 @@ const ExecutiveCard = ({
       border: isSelected ? 'border-[#1abc9c] shadow-[0_0_25px_rgba(26,188,156,0.4)] bg-[#111c19]' : 'border-[#2A2A2A] hover:border-[#1abc9c]/80',
       glow: isSelected ? 'shadow-[0_20px_40px_rgba(26,188,156,0.3)]' : 'hover:shadow-[0_15px_35px_rgba(26,188,156,0.25)]',
       highlight: isSelected ? 'via-[#1abc9c]' : 'via-[#1abc9c]/60',
-      pill: isPositive ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30 shadow-[0_0_10px_rgba(26,188,156,0.15)]' : 'bg-danger/15 text-danger border-danger/30'
+      pill: invertColor 
+        ? (isPositive ? 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]' : 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30 shadow-[0_0_10px_rgba(26,188,156,0.15)]')
+        : (isPositive ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30 shadow-[0_0_10px_rgba(26,188,156,0.15)]' : 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]')
     }
   }
 
@@ -377,7 +379,6 @@ export default function VisaoGeral({ data }) {
     for (const r of snapshot) {
       if (!r.nome_produto) continue
       
-      // Quebra a frase em palavras/números, ordena alfabeticamente para formar chave única robusta
       const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
       const palavras = nomeUpper.split(' ').filter(Boolean)
       palavras.sort()
@@ -1024,7 +1025,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaMaioresValoresExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaMaioresValores /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaMaioresValores /></div>
             </div>
           )}
         </div>
@@ -1037,10 +1038,10 @@ export default function VisaoGeral({ data }) {
           <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Linha Financeira</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <ExecutiveCard cardKey="estoque" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#2ecc71]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} iconBg="bg-[#16221d]" title="(R$) ESTOQUE" value={fmtBRL(metrics.valEstoque)} valueAtual={metrics.valEstoque} valueAnterior={metrics.valEstoquePrev} variant="default" />
+          <ExecutiveCard cardKey="estoque" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#2ecc71]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} iconBg="bg-[#16221d]" title="(R$) ESTOQUE" value={fmtBRL(metrics.valEstoque)} valueAtual={metrics.valEstoque} valueAnterior={metrics.valEstoquePrev} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="critico" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#e74c3c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>} iconBg="bg-[#261816]" title="(R$) EST. CRÍTICO" value={fmtBRL(metrics.valCritico)} valueAtual={metrics.valCritico} valueAnterior={metrics.valCriticoPrev} variant="critico" />
           <ExecutiveCard cardKey="obsoleto" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#9b59b6]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>} iconBg="bg-[#201826]" title="(R$) EST. OBSOLETO" value={fmtBRL(metrics.valObsoleto)} valueAtual={metrics.valObsoleto} valueAnterior={metrics.valObsoletoPrev} variant="obsoleto" />
-          <ExecutiveCard cardKey="obra" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#1abc9c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} iconBg="bg-[#162222]" title="(R$) EST. OBRA" value={fmtBRL(metrics.valObra)} valueAtual={metrics.valObra} valueAnterior={metrics.valObraPrev} variant="obra" />
+          <ExecutiveCard cardKey="obra" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg" alignCenter={true} icon={<svg className="w-4 h-4 text-[#1abc9c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} iconBg="bg-[#162222]" title="(R$) EST. OBRA" value={fmtBRL(metrics.valObra)} valueAtual={metrics.valObra} valueAnterior={metrics.valObraPrev} invertColor={true} variant="obra" />
         </div>
       </div>
 
@@ -1050,13 +1051,13 @@ export default function VisaoGeral({ data }) {
           <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Linha Operacional</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#f1c40f]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#262014]" title="COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg" alignCenter={true} variant="default" />
-          <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#e74c3c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#261816]" title="CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg" alignCenter={true} invertColor variant="default" />
-          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#3498db]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#161c24]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-lg lg:text-xl" alignCenter={true} variant="default" />
+          <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#f1c40f]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#262014]" title="COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg" alignCenter={true} invertColor={true} variant="default" />
+          <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#e74c3c]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#261816]" title="CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg" alignCenter={true} variant="default" />
+          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#3498db]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#161c24]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-lg lg:text-xl" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="giro" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#9b59b6]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} iconBg="bg-[#1c1624]" title="GIRO" value={""} valueAtual={giroMensal} valueAnterior={giroMensalPrev} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1"><div className="bg-[#101010] border border-[#222222] rounded-xl p-1.5 text-center transition-colors"><span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">MENSAL</span><span className="text-base font-black text-white font-mono">{fmtDec(giroMensal)}</span></div><div className="bg-[#101010] border border-[#222222] rounded-xl p-1.5 text-center transition-colors"><span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">ANUAL</span><span className="text-base font-black text-white font-mono">{fmtDec(giroAnual)}</span></div></div>
           </ExecutiveCard>
-          <ExecutiveCard cardKey="cobertura" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#e67e22]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} iconBg="bg-[#262014]" title="COBERTURA" value={""} valueAtual={coberturaMeses} valueAnterior={coberturaMesesPrev} variant="default">
+          <ExecutiveCard cardKey="cobertura" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#e67e22]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} iconBg="bg-[#262014]" title="COBERTURA" value={""} valueAtual={coberturaMeses} valueAnterior={coberturaMesesPrev} invertColor={true} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1"><div className="bg-[#101010] border border-[#222222] rounded-xl p-1.5 text-center transition-colors"><span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">MENSAL</span><span className="text-base font-black text-white font-mono">{fmtMes(coberturaMeses)}</span></div><div className="bg-[#101010] border border-[#222222] rounded-xl p-1.5 text-center transition-colors"><span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">ANUAL</span><span className="text-base font-black text-white font-mono">{fmtMes(coberturaAnos)}</span></div></div>
           </ExecutiveCard>
         </div>
@@ -1070,7 +1071,7 @@ export default function VisaoGeral({ data }) {
             <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">ESTOQUE POR UNIDADE (R$)</span></div>
             {selectedBarraRanking && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraRanking(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
           </div>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             <Plot data={[{ type: 'bar', orientation: 'h', y: rankingUnidade.map((d) => d.unidade), x: rankingUnidade.map((d) => d.valor), text: rankingUnidade.map((d) => fmtValorCurto(d.valor)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 }, marker: { color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'), opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3), line: { color: 'rgba(255,255,255,0.08)', width: 1 } }, hoverinfo: 'none' }]} layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 140, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } } }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraRanking(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }} />
           </div>
         </div>
@@ -1097,19 +1098,19 @@ export default function VisaoGeral({ data }) {
             {isCriticoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e74c3c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#e74c3c] shadow-[0_0_10px_rgba(231,76,60,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#e74c3c]/60 to-transparent pointer-events-none" />
             <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#261816] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#e74c3c] uppercase">EST. CRÍTICO POR UNID</span></div>{selectedBarraCritico && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraCritico(null); }} className="text-[10px] bg-[#e74c3c]/20 text-[#e74c3c] border border-[#e74c3c]/40 px-2 py-0.5 rounded hover:bg-[#e74c3c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar">{makeInteractiveHBar(rankCritico, '#e74c3c', selectedBarraCritico, setSelectedBarraCritico)}</div>
+            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankCritico, '#e74c3c', selectedBarraCritico, setSelectedBarraCritico)}</div>
           </div>
           <div onClick={() => handleCardClick('rank_obsoleto')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObsoletoSelected ? 'border-[#9b59b6] shadow-[0_0_25px_rgba(155,89,182,0.4)] bg-[#17121c] -translate-y-1.5 ring-1 ring-[#9b59b6]/50' : 'border-[#2A2A2A] hover:border-[#9b59b6]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(155,89,182,0.25)]'}`}>
             {isObsoletoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#9b59b6] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#9b59b6] shadow-[0_0_10px_rgba(155,89,182,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#9b59b6]/60 to-transparent pointer-events-none" />
             <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#201826] flex items-center justify-center text-[#9b59b6] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#9b59b6] uppercase">EST. OBSOLETO POR UNID</span></div>{selectedBarraObsoleto && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraObsoleto(null); }} className="text-[10px] bg-[#9b59b6]/20 text-[#9b59b6] border border-[#9b59b6]/40 px-2 py-0.5 rounded hover:bg-[#9b59b6]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar">{makeInteractiveHBar(rankObsoleto, '#9b59b6', selectedBarraObsoleto, setSelectedBarraObsoleto)}</div>
+            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObsoleto, '#9b59b6', selectedBarraObsoleto, setSelectedBarraObsoleto)}</div>
           </div>
           <div onClick={() => handleCardClick('rank_obra')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObraSelected ? 'border-[#1abc9c] shadow-[0_0_25px_rgba(26,188,156,0.4)] bg-[#111c19] -translate-y-1.5 ring-1 ring-[#1abc9c]/50' : 'border-[#2A2A2A] hover:border-[#1abc9c]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(26,188,156,0.25)]'}`}>
             {isObraSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1abc9c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#1abc9c] shadow-[0_0_10px_rgba(26,188,156,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#1abc9c]/60 to-transparent pointer-events-none" />
             <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#162222] flex items-center justify-center text-[#1abc9c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#1abc9c] uppercase">EST. OBRA POR UNID</span></div>{selectedBarraObra && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraObra(null); }} className="text-[10px] bg-[#1abc9c]/20 text-[#1abc9c] border border-[#1abc9c]/40 px-2 py-0.5 rounded hover:bg-[#1abc9c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar">{makeInteractiveHBar(rankObra, '#1abc9c', selectedBarraObra, setSelectedBarraObra)}</div>
+            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObra, '#1abc9c', selectedBarraObra, setSelectedBarraObra)}</div>
           </div>
         </div>
       </div>
@@ -1152,7 +1153,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaComprasSemConsumoExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaComprasSemConsumo /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaComprasSemConsumo /></div>
             </div>
           )}
         </div>
@@ -1166,7 +1167,7 @@ export default function VisaoGeral({ data }) {
             <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">COMPRA X CONSUMO POR UNIDADE</span></div>
             <div className="flex items-center gap-3 text-[11px] text-muted tracking-wider"><span><span className="text-[#e74c3c]">■</span> Compras</span><span><span className="text-[#2ecc71]">■</span> Consumo</span></div>
           </div>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             {compraConsumoUnidade.length ? (
               <Plot
                 data={[
@@ -1187,7 +1188,7 @@ export default function VisaoGeral({ data }) {
             <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">SKUs POR UNIDADE (QTDE)</span></div>
             {selectedBarraSkus && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraSkus(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
           </div>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar">
+          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain">
             {makeInteractiveHBar(skusUnidade, '#3498db', selectedBarraSkus, setSelectedBarraSkus)}
           </div>
         </div>
@@ -1222,7 +1223,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaDuplicadosExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaDuplicados /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaDuplicados /></div>
             </div>
           )}
         </div>
@@ -1285,7 +1286,7 @@ export default function VisaoGeral({ data }) {
                       <button onClick={() => setTabelaExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-[#333] text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Janela</span></button>
                     </div>
                   </div>
-                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar border border-[#2A2A2A] rounded-xl bg-[#121212]"><TabelaCyberpunk /></div>
+                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212]"><TabelaCyberpunk /></div>
                 </div>
               )}
             </div>
