@@ -41,9 +41,12 @@ function formatarPeriodoTexto(periodoStr) {
   return `${nomeMes}/${String(p.ano).slice(-2)}`
 }
 
-function formatarPeriodoElite(periodoStr, periodoEfetivo) {
-  if (!periodoStr) return ''
-  return formatarPeriodoTexto(periodoStr)
+/** Classifica o registro uma única vez */
+function classificarRegistro(r) {
+  if (isObsoleto(r.nome_local_estoque)) return 'Obsoleto'
+  if (isObra(r.nome_local_estoque)) return 'Obra'
+  if (isCritico(r.item_critico)) return 'Crítico'
+  return 'Operacional'
 }
 
 const FullScreenPortal = ({ children, onClose }) => {
@@ -74,12 +77,19 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
   const [busca, setBusca] = useState('')
 
   const filtradas = useMemo(() => {
-    return options
-      .filter(o => String(o).toLowerCase().includes(busca.toLowerCase()))
-      .filter(o => String(o).toLowerCase() !== 'todas' && String(o).toLowerCase() !== 'todos')
+    return options.filter(o => String(o).toLowerCase().includes(busca.toLowerCase()))
   }, [options, busca])
 
-  const hasActiveSelection = selected.length > 0 && !selected.includes('Todas') && !selected.includes('Todos')
+  // Lógica inteligente para saber se "Tudo" está selecionado
+  const isAllSelected = selected.length === 0 || (options.length > 0 && selected.length === options.length);
+
+  const labelText = useMemo(() => {
+    if (isAllSelected) return placeholder;
+    if (selected.length === 1) return selected[0];
+    return `${selected.length} selecionadas`;
+  }, [selected, options, placeholder, isAllSelected])
+
+  const hasActiveSelection = !isAllSelected;
 
   const toggleOption = useCallback((opt) => {
     if (selected.includes(opt)) {
@@ -101,7 +111,7 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
       >
         <span className="truncate max-w-[140px] font-medium tracking-wide flex items-center gap-1.5">
           {hasActiveSelection && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shadow-[0_0_8px_#f58220]" />}
-          {selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : `${selected.length} selecionadas`}
+          {labelText}
         </span>
         <span className={`text-[10px] transition-transform duration-300 ${hasActiveSelection ? 'text-accent font-bold' : 'text-muted group-hover:text-accent'}`}>
           {isOpen ? '▲' : '▼'}
@@ -112,30 +122,29 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
           <div className="absolute top-full left-0 mt-1.5 w-full min-w-[240px] bg-[#161616] border border-[#2A2A2A] rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.9)] z-50 flex flex-col overflow-hidden animate-fade-in p-1.5">
-            
             <div className="p-1.5 border-b border-[#2A2A2A] bg-[#0c0c0c] rounded-lg mb-1.5 relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-accent/80 text-[11px]">🔍</span>
-              <input 
-                type="text" 
-                className="w-full bg-[#161616] border border-[#2A2A2A] rounded-md pl-7 pr-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent focus:shadow-[0_0_8px_rgba(245,130,32,0.2)] placeholder-dark-400 font-medium transition-all" 
-                placeholder="Digite para buscar..." 
-                value={busca} 
-                onChange={(e) => setBusca(e.target.value)} 
-                autoFocus 
+              <input
+                type="text"
+                className="w-full bg-[#161616] border border-[#2A2A2A] rounded-md pl-7 pr-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent focus:shadow-[0_0_8px_rgba(245,130,32,0.2)] placeholder-dark-400 font-medium transition-all"
+                placeholder="Digite para buscar..."
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                autoFocus
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-2 px-1 pb-2 border-b border-[#2A2A2A]">
-              <button 
-                type="button" 
-                onClick={() => onChange([...options])} 
+              <button
+                type="button"
+                onClick={() => onChange([...options])}
                 className="bg-[#1a1a1a] hover:bg-accent/10 hover:text-accent hover:border-accent/50 text-white text-[10px] font-bold py-2 rounded-md transition-all border border-[#2A2A2A] tracking-widest uppercase shadow-sm"
               >
                 Todas
               </button>
-              <button 
-                type="button" 
-                onClick={() => onChange([])} 
+              <button
+                type="button"
+                onClick={() => onChange([])}
                 className="bg-[#1a1a1a] hover:bg-danger/10 hover:text-danger hover:border-danger/50 text-white text-[10px] font-bold py-2 rounded-md transition-all border border-[#2A2A2A] tracking-widest uppercase shadow-sm"
               >
                 Limpar
@@ -165,10 +174,10 @@ const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }
   )
 }
 
-const ExecutiveCard = ({ 
-  cardKey, icon, iconBg, title, value, valueAtual = null, valueAnterior = null, invertColor = false, 
-  variant = 'default', valueFontSize = 'text-base lg:text-lg', alignCenter = false, paddingClass = 'p-5', 
-  activeCard, onCardClick, children 
+const ExecutiveCard = ({
+  cardKey, icon, iconBg, title, value, valueAtual = null, valueAnterior = null, invertColor = false,
+  variant = 'default', valueFontSize = 'text-base lg:text-lg', alignCenter = false, paddingClass = 'p-5',
+  activeCard, onCardClick, children
 }) => {
   const isSelected = activeCard === cardKey
   const hasTrend = valueAtual != null && valueAnterior != null && valueAnterior !== 0
@@ -181,7 +190,7 @@ const ExecutiveCard = ({
       border: isSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612]' : 'border-[#2A2A2A] hover:border-accent/60',
       glow: isSelected ? 'shadow-[0_20px_40px_rgba(245,130,32,0.25)]' : 'hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]',
       highlight: isSelected ? 'via-accent' : 'via-accent/50',
-      pill: invertColor 
+      pill: invertColor
         ? (isPositive ? 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]' : 'bg-success/15 text-success border-success/30 shadow-[0_0_10px_rgba(46,204,113,0.15)]')
         : (isPositive ? 'bg-success/15 text-success border-success/30 shadow-[0_0_10px_rgba(46,204,113,0.15)]' : 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]')
     },
@@ -201,7 +210,7 @@ const ExecutiveCard = ({
       border: isSelected ? 'border-[#1abc9c] shadow-[0_0_25px_rgba(26,188,156,0.4)] bg-[#111c19]' : 'border-[#2A2A2A] hover:border-[#1abc9c]/80',
       glow: isSelected ? 'shadow-[0_20px_40px_rgba(26,188,156,0.3)]' : 'hover:shadow-[0_15px_35px_rgba(26,188,156,0.25)]',
       highlight: isSelected ? 'via-[#1abc9c]' : 'via-[#1abc9c]/60',
-      pill: invertColor 
+      pill: invertColor
         ? (isPositive ? 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]' : 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30 shadow-[0_0_10px_rgba(26,188,156,0.15)]')
         : (isPositive ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30 shadow-[0_0_10px_rgba(26,188,156,0.15)]' : 'bg-danger/15 text-danger border-danger/30 shadow-[0_0_10px_rgba(231,76,60,0.15)]')
     }
@@ -210,7 +219,7 @@ const ExecutiveCard = ({
   const cfg = themeConfig[variant] || themeConfig.default
 
   return (
-    <div 
+    <div
       onClick={() => onCardClick(cardKey)}
       className={`bg-[#161616] border ${cfg.border} rounded-2xl ${paddingClass} shadow-[0_10px_30px_rgba(0,0,0,0.85)] ${cfg.glow} transition-all duration-300 transform ${isSelected ? '-translate-y-1.5 ring-1 ring-accent/50' : 'hover:-translate-y-1'} relative overflow-hidden flex flex-col justify-between group cursor-pointer`}
     >
@@ -246,11 +255,15 @@ const ExecutiveCard = ({
   )
 }
 
-// --- TABELAS COMPONENTIZADAS ---
-
-const TabelaMaioresValores = ({ dados }) => {
+// --- TABELA GENÉRICA ---
+const TabelaGenerica = ({ dados, columns, highlightColor = '#f58220', emptyMessage = 'Nenhum item encontrado.' }) => {
   const [indexSel, setIndexSel] = useState(null)
   const contRef = useRef(null)
+
+  // Reset seleção quando os dados mudam
+  useEffect(() => {
+    setIndexSel(null)
+  }, [dados])
 
   const handleKeyDown = (e) => {
     if (!dados || dados.length === 0) return
@@ -275,227 +288,47 @@ const TabelaMaioresValores = ({ dados }) => {
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
+            {columns.map((col) => (
+              <th
+                key={col.key}
+                className={`p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : ''}`}
+              >
+                {col.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-[#222222]/50">
           {dados.length > 0 ? (
             dados.map((item, idx) => {
-              const isSelected = indexSel === idx;
+              const isSelected = indexSel === idx
               return (
-                <tr 
-                  key={`${item.unidade}-${item.codigo}-${idx}`}
+                <tr
+                  key={item._rowKey || idx}
                   data-index={idx}
                   onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
-                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#3498db]' : 'hover:bg-[#1a1a1a]'}`}
+                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a]' : 'hover:bg-[#1a1a1a]'}`}
+                  style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${highlightColor}` } : undefined}
                 >
-                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                  <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-                  <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                  <td className="p-3.5 text-right font-mono text-[#3498db] font-bold text-xs">{fmtBRL(item.valor)}</td>
+                  {columns.map((col) => (
+                    <td
+                      key={col.key}
+                      className={`p-3.5 text-xs ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : ''} ${col.className || 'text-white'}`}
+                      title={col.title ? col.title(item) : undefined}
+                    >
+                      {col.render ? col.render(item) : item[col.key]}
+                    </td>
+                  ))}
                 </tr>
               )
             })
-          ) : ( <tr><td colSpan="5" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado no período selecionado.</td></tr> )}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-const TabelaDuplicados = ({ dados }) => {
-  const [indexSel, setIndexSel] = useState(null)
-  const contRef = useRef(null)
-
-  const handleKeyDown = (e) => {
-    if (!dados || dados.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
-    }
-  }
-
-  useEffect(() => {
-    if (indexSel !== null && contRef.current) {
-      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
-      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [indexSel])
-
-  return (
-    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
-      <table className="w-full text-left border-collapse">
-        <thead>
-          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto (Agrupado por Chave)</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Qtd SKUs</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Lista de SKUs</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Qtd Fís.</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#222222]/50">
-          {dados.length > 0 ? (
-            dados.map((item, idx) => {
-              const isSelected = indexSel === idx;
-              return (
-                <tr 
-                  key={`${item.nome}-${idx}`}
-                  data-index={idx}
-                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
-                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f1c40f]' : 'hover:bg-[#1a1a1a]'}`}
-                >
-                  <td className="p-3.5 text-white font-medium text-xs max-w-[250px] truncate" title={item.nome}>{item.nome}</td>
-                  <td className="p-3.5 text-center">
-                    <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">
-                      {item.qtd_skus} SKUs
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate" title={item.skus_lista}>{item.skus_lista}</td>
-                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                  <td className="p-3.5 text-right font-mono text-[#f1c40f] font-bold text-xs">{fmtBRL(item.valor)}</td>
-                </tr>
-              )
-            })
-          ) : ( <tr><td colSpan="5" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Base limpa! Nenhum cadastro duplicado encontrado no período.</td></tr> )}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-const TabelaComprasSemConsumo = ({ dados }) => {
-  const [indexSel, setIndexSel] = useState(null)
-  const contRef = useRef(null)
-
-  const handleKeyDown = (e) => {
-    if (!dados || dados.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
-    }
-  }
-
-  useEffect(() => {
-    if (indexSel !== null && contRef.current) {
-      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
-      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [indexSel])
-
-  return (
-    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
-      <table className="w-full text-left border-collapse">
-        <thead>
-          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Classificação</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Comprado</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Consumido</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#222222]/50">
-          {dados.length > 0 ? (
-            dados.map((item, idx) => {
-              const isSelected = indexSel === idx;
-              return (
-                <tr 
-                  key={`${item.unidade}-${item.codigo}-${idx}`}
-                  data-index={idx}
-                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
-                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#e74c3c]' : 'hover:bg-[#1a1a1a]'}`}
-                >
-                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                  <td className="p-3.5 text-[#e74c3c] font-mono text-xs">{item.codigo}</td>
-                  <td className="p-3.5 text-white text-xs truncate max-w-[200px]" title={item.nome}>{item.nome || '—'}</td>
-                  <td className="p-3.5 text-center">
-                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
-                      item.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : item.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : item.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
-                    }`}>{item.categoria}</span>
-                  </td>
-                  <td className="p-3.5 text-right font-mono text-[#e74c3c] font-bold text-xs">{fmtBRL(item.comprado)}</td>
-                  <td className="p-3.5 text-right font-mono text-muted font-bold text-xs">R$ 0,00</td>
-                </tr>
-              )
-            })
-          ) : ( <tr><td colSpan="6" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo.</td></tr> )}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-const TabelaCyberpunk = ({ dados }) => {
-  const [indexSel, setIndexSel] = useState(null)
-  const contRef = useRef(null)
-
-  const handleKeyDown = (e) => {
-    if (!dados || dados.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
-    }
-  }
-
-  useEffect(() => {
-    if (indexSel !== null && contRef.current) {
-      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
-      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [indexSel])
-
-  return (
-    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
-      <table className="w-full text-left border-collapse">
-        <thead>
-          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Parado</th>
-            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Meses Parado</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#222222]/50">
-          {dados.length > 0 ? (
-            dados.map((item, idx) => {
-              const isSelected = indexSel === idx;
-              return (
-                <tr 
-                  key={`${item.unidade}-${item.codigo}-${item.mesesParado}-${idx}`}
-                  data-index={idx}
-                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
-                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f58220]' : 'hover:bg-[#1a1a1a]'}`}
-                >
-                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                  <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-                  <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                  <td className="p-3.5 text-right font-mono text-[#2ecc71] font-bold text-xs">{fmtBRL(item.valor)}</td>
-                  <td className="p-3.5 text-center">
-                    <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{item.mesesParado} Meses</span>
-                  </td>
-                </tr>
-              )
-            })
-          ) : ( <tr><td colSpan="6" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado.</td></tr> )}
+          ) : (
+            <tr>
+              <td colSpan={columns.length} className="text-center py-8 text-muted text-sm tracking-wide">
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -503,16 +336,15 @@ const TabelaCyberpunk = ({ dados }) => {
 }
 
 // --- COMPONENTE PRINCIPAL ---
-
 export default function VisaoGeral({ data }) {
   const [escoposSel, setEscoposSel] = useState(['Ativa'])
   const [unidadesSel, setUnidadesSel] = useState([])
   const [anosSel, setAnosSel] = useState([])
-  const [tiposEstoqueSel, setTiposEstoqueSel] = useState(['Todos'])
-  
+  const [tiposEstoqueSel, setTiposEstoqueSel] = useState([]) // Array vazio = Inteligência de "Todos"
+
   const [periodoAtivo, setPeriodoAtivo] = useState(null)
   const [activeCard, setActiveCard] = useState(null)
-  
+
   const [selectedBarraRanking, setSelectedBarraRanking] = useState(null)
   const [selectedFatiaComposicao, setSelectedFatiaComposicao] = useState(null)
   const [selectedBarraCritico, setSelectedBarraCritico] = useState(null)
@@ -523,7 +355,7 @@ export default function VisaoGeral({ data }) {
 
   const [filtroMesParado, setFiltroMesParado] = useState(null)
   const [abaSkus, setAbaSkus] = useState('unicos')
-  
+
   const [listaAberta, setListaAberta] = useState(false)
   const [tabelaUnidadesSel, setTabelaUnidadesSel] = useState([])
   const [tabelaMesesSel, setTabelaMesesSel] = useState([])
@@ -534,7 +366,7 @@ export default function VisaoGeral({ data }) {
 
   const [listaComprasSemConsumoAberta, setListaComprasSemConsumoAberta] = useState(false)
   const [tabelaComprasSemConsumoExpandida, setTabelaComprasSemConsumoExpandida] = useState(false)
-  
+
   const [listaDuplicadosAberta, setListaDuplicadosAberta] = useState(false)
   const [tabelaDuplicadosExpandida, setTabelaDuplicadosExpandida] = useState(false)
 
@@ -542,8 +374,11 @@ export default function VisaoGeral({ data }) {
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
   const [visGiroCobertura, setVisGiroCobertura] = useState({ giro: true, cobertura: true })
 
+  const [exportando, setExportando] = useState(false)
+
   const handleCardClick = useCallback((key) => setActiveCard(prev => prev === key ? null : key), [])
 
+  // --- Opções de filtro ---
   const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
     if (!data || data.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
     const uniques = [...new Set(data.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
@@ -557,44 +392,54 @@ export default function VisaoGeral({ data }) {
     if (anoOpcoes.length > 0 && anosSel.length === 0) setAnosSel([anoOpcoes[anoOpcoes.length - 1]])
   }, [anoOpcoes])
 
-  const opcoesUnid = useMemo(() => {
-    if (escoposSel.includes('Todas') || escoposSel.length === 0) return unidadesOpcoes
+  const getUnidadesPermitidas = useCallback((escopos) => {
+    if (escopos.length === 0) return unidadesOpcoes
     let allowed = []
-    if (escoposSel.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
-    if (escoposSel.includes('Gerencial')) allowed = [...allowed, ...unidadesGerenciais]
+    if (escopos.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
+    if (escopos.includes('Gerencial')) allowed = [...allowed, ...unidadesGerenciais]
     return [...new Set(allowed)].sort()
-  }, [escoposSel, unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
+  }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
+  const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
+
+  // --- Dados filtrados com categoria pré-classificada ---
   const dfFiltrado = useMemo(() => {
     let df = data || []
-    
-    if (!escoposSel.includes('Todas') && escoposSel.length > 0) {
-      let allowed = []
-      if (escoposSel.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
-      if (escoposSel.includes('Gerencial')) allowed = [...allowed, ...unidadesGerenciais]
+
+    if (escoposSel.length > 0) {
+      const allowed = getUnidadesPermitidas(escoposSel)
       df = df.filter(r => allowed.includes(r.unidade_almoxarifado))
     }
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
     if (anosSel.length > 0) df = df.filter((r) => anosSel.includes(r.ano_referencia))
-    
-    if (tiposEstoqueSel.length > 0 && !tiposEstoqueSel.includes('Todos')) {
-      df = df.filter(r => {
-        const isCrit = isCritico(r.item_critico);
-        const isObs = isObsoleto(r.nome_local_estoque);
-        const isObr = isObra(r.nome_local_estoque);
-        const isOp = !isCrit && !isObs && !isObr;
 
-        return (
-          (tiposEstoqueSel.includes('Crítico') && isCrit) ||
-          (tiposEstoqueSel.includes('Obsoleto') && isObs) ||
-          (tiposEstoqueSel.includes('Obra') && isObr) ||
-          (tiposEstoqueSel.includes('Operacional') && isOp)
-        );
-      })
+    // Pré-classifica categoria uma única vez
+    df = df.map(r => ({
+      ...r,
+      _categoria: classificarRegistro(r)
+    }))
+
+    if (tiposEstoqueSel.length > 0) {
+      df = df.filter(r => tiposEstoqueSel.includes(r._categoria))
     }
 
     return df
-  }, [data, escoposSel, unidadesSel, anosSel, unidadesAtivas, unidadesGerenciais, tiposEstoqueSel])
+  }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas])
+
+  // Reset de focos/seleções quando filtros principais mudam
+  useEffect(() => {
+    setSelectedBarraRanking(null)
+    setSelectedFatiaComposicao(null)
+    setSelectedBarraCritico(null)
+    setSelectedBarraObsoleto(null)
+    setSelectedBarraObra(null)
+    setSelectedBarraCompraConsumo(null)
+    setSelectedBarraSkus(null)
+    setActiveCard(null)
+    setFiltroMesParado(null)
+    setTabelaUnidadesSel([])
+    setTabelaMesesSel([])
+  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (data || [])
@@ -622,68 +467,153 @@ export default function VisaoGeral({ data }) {
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
 
-  // --- LÓGICA: MAIORES VALORES DE ESTOQUE (Tabelas UI) ---
-  const maioresValoresDataCompleta = useMemo(() => {
-    if (!snapshot.length) return []
-    return [...snapshot]
-      .filter(r => (r.valor_saldo_atual || 0) > 0)
-      .sort((a, b) => (b.valor_saldo_atual || 0) - (a.valor_saldo_atual || 0))
-      .map(r => ({ unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual || 0, valor: r.valor_saldo_atual || 0 }))
-  }, [snapshot])
+  // --- Agregados consolidados do snapshot ---
+  const {
+    metrics,
+    rankingUnidade,
+    rankCritico,
+    rankObsoleto,
+    rankObra,
+    compraConsumoUnidade,
+    skusUnidade,
+    composicao,
+    maioresValoresDataCompleta,
+    comprasSemConsumoDataCompleta,
+    duplicadosDataCompleta
+  } = useMemo(() => {
+    const empty = {
+      metrics: {
+        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0,
+        valCritico: 0, valObsoleto: 0, valObra: 0,
+        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0,
+        valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
+      },
+      rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [],
+      compraConsumoUnidade: [], skusUnidade: [], composicao: [],
+      maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
+    }
+    if (!snapshot.length && !snapshotPrev.length) return empty
 
-  const maioresValoresTabela = useMemo(() => {
-    return tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12)
-  }, [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
-
-  const exportarExcelMaioresValores = useCallback(() => {
-    if (!maioresValoresDataCompleta.length) return
-    const wsData = maioresValoresDataCompleta.map(item => ({
-      'Unidade': item.unidade,
-      'Código SKU': item.codigo,
-      'Nome do Produto': item.nome,
-      'Quantidade': item.quantidade,
-      'Valor em Estoque (R$)': item.valor,
-      'Período': formatarPeriodoTexto(periodoEfetivo)
-    }))
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(wsData)
-    XLSX.utils.book_append_sheet(wb, ws, 'Maiores Valores')
-    XLSX.writeFile(wb, `maiores_valores_estoque_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
-  }, [maioresValoresDataCompleta, periodoEfetivo])
-
-  // --- LÓGICA: CADASTROS DUPLICADOS COM MÉTRICA DE CHAVES ---
-  const duplicadosDataCompleta = useMemo(() => {
-    if (!snapshot.length) return []
-
+    const mapRank = new Map()
+    const mapCrit = new Map()
+    const mapObs = new Map()
+    const mapObra = new Map()
+    const mapCC = new Map()
+    const mapSkus = new Map()
     const mapChaves = new Map()
-    for (const r of snapshot) {
-      if (!r.nome_produto) continue
-      
-      const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
-      const palavras = nomeUpper.split(' ').filter(Boolean)
-      palavras.sort()
-      const chaveGerada = palavras.join(' ')
 
-      if (!mapChaves.has(chaveGerada)) {
-        mapChaves.set(chaveGerada, {
-          nomeExemplo: r.nome_produto,
-          skus: new Set(),
-          unidades: new Set(),
-          quantidade: 0,
-          valor: 0
+    let valEstoque = 0, valCompras = 0, valConsumo = 0
+    let valCritico = 0, valObsoleto = 0, valObra = 0
+    const skusSet = new Set()
+    const maiores = []
+    const comprasSem = []
+
+    for (const r of snapshot) {
+      const u = r.unidade_almoxarifado
+      const val = r.valor_saldo_atual || 0
+      const cat = r._categoria
+
+      valEstoque += val
+      valCompras += r.valor_entrada_compras || 0
+      valConsumo += Math.abs(r.valor_saida_cons_interno || 0)
+
+      mapRank.set(u, (mapRank.get(u) || 0) + val)
+
+      if (cat === 'Crítico') {
+        mapCrit.set(u, (mapCrit.get(u) || 0) + val)
+        valCritico += val
+      } else if (cat === 'Obsoleto') {
+        mapObs.set(u, (mapObs.get(u) || 0) + val)
+        valObsoleto += val
+      } else if (cat === 'Obra') {
+        mapObra.set(u, (mapObra.get(u) || 0) + val)
+        valObra += val
+      }
+
+      if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
+      mapCC.get(u).compras += r.valor_entrada_compras || 0
+      mapCC.get(u).consumo += Math.abs(r.valor_saida_cons_interno || 0)
+
+      if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
+        skusSet.add(r.codigo_produto)
+        if (!mapSkus.has(u)) mapSkus.set(u, new Set())
+        mapSkus.get(u).add(r.codigo_produto)
+      }
+
+      if (val > 0) {
+        maiores.push({
+          _rowKey: `${u}-${r.codigo_produto}`,
+          unidade: u,
+          codigo: r.codigo_produto,
+          nome: r.nome_produto,
+          quantidade: r.qtde_saldo_atual || 0,
+          valor: val
         })
       }
-      const item = mapChaves.get(chaveGerada)
-      if (r.codigo_produto) item.skus.add(r.codigo_produto)
-      item.unidades.add(r.unidade_almoxarifado)
-      item.quantidade += (r.qtde_saldo_atual || 0)
-      item.valor += (r.valor_saldo_atual || 0)
+
+      if ((r.valor_entrada_compras || 0) > 0 && Math.abs(r.valor_saida_cons_interno || 0) === 0) {
+        comprasSem.push({
+          _rowKey: `${u}-${r.codigo_produto}`,
+          unidade: u,
+          codigo: r.codigo_produto,
+          nome: r.nome_produto,
+          categoria: cat,
+          comprado: r.valor_entrada_compras || 0
+        })
+      }
+
+      if (r.nome_produto) {
+        const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
+        const palavras = nomeUpper.split(' ').filter(Boolean)
+        palavras.sort()
+        const chaveGerada = palavras.join(' ')
+        if (!mapChaves.has(chaveGerada)) {
+          mapChaves.set(chaveGerada, {
+            nomeExemplo: r.nome_produto,
+            skus: new Set(),
+            unidades: new Set(),
+            quantidade: 0,
+            valor: 0
+          })
+        }
+        const item = mapChaves.get(chaveGerada)
+        if (r.codigo_produto) item.skus.add(r.codigo_produto)
+        item.unidades.add(u)
+        item.quantidade += (r.qtde_saldo_atual || 0)
+        item.valor += val
+      }
     }
+
+    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
+    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0
+    const skusPrevSet = new Set()
+    for (const r of snapshotPrev) {
+      const val = r.valor_saldo_atual || 0
+      const cat = r._categoria
+      valEstoquePrev += val
+      valComprasPrev += r.valor_entrada_compras || 0
+      valConsumoPrev += Math.abs(r.valor_saida_cons_interno || 0)
+      if (cat === 'Crítico') valCriticoPrev += val
+      else if (cat === 'Obsoleto') valObsoletoPrev += val
+      else if (cat === 'Obra') valObraPrev += val
+      if (r.qtde_saldo_atual > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
+    }
+
+    const mapToSort = (m) => [...m.entries()].filter(([, v]) => v > 0).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
+
+    const valOp = Math.max(0, valEstoque - (valObsoleto + valObra + valCritico))
+    const comp = [
+      { name: 'Estoque Crítico', value: valCritico, color: '#e74c3c' },
+      { name: 'Estoque Obsoleto', value: valObsoleto, color: '#9b59b6' },
+      { name: 'Estoque Obra', value: valObra, color: '#1abc9c' },
+      { name: 'Estoque Operacional', value: valOp, color: '#3498db' },
+    ].filter((d) => d.value > 0)
 
     const duplicados = []
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
         duplicados.push({
+          _rowKey: dados.nomeExemplo,
           nome: dados.nomeExemplo,
           qtd_skus: dados.skus.size,
           skus_lista: Array.from(dados.skus).join(', '),
@@ -693,83 +623,70 @@ export default function VisaoGeral({ data }) {
         })
       }
     }
-    return duplicados.sort((a, b) => b.valor - a.valor)
-  }, [snapshot])
+    duplicados.sort((a, b) => b.valor - a.valor)
 
-  const duplicadosTabela = useMemo(() => {
-    return tabelaDuplicadosExpandida ? duplicadosDataCompleta.slice(0, 1000) : duplicadosDataCompleta.slice(0, 12)
-  }, [duplicadosDataCompleta, tabelaDuplicadosExpandida])
+    maiores.sort((a, b) => b.valor - a.valor)
+    comprasSem.sort((a, b) => b.comprado - a.comprado)
 
-  const exportarExcelDuplicados = useCallback(() => {
-    if (!duplicadosDataCompleta.length) return
-    const wsData = duplicadosDataCompleta.map(item => ({
-      'Nome do Produto': item.nome,
-      'Qtd SKUs Diferentes': item.qtd_skus,
-      'Códigos SKUs': item.skus_lista,
-      'Unidades Afetadas': item.unidades_lista,
-      'Quantidade Total': item.quantidade,
-      'Valor Imobilizado (R$)': item.valor,
-      'Período': formatarPeriodoTexto(periodoEfetivo)
-    }))
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(wsData)
-    XLSX.utils.book_append_sheet(wb, ws, 'Cadastros Duplicados')
-    XLSX.writeFile(wb, `cadastros_duplicados_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
-  }, [duplicadosDataCompleta, periodoEfetivo])
+    return {
+      metrics: {
+        valEstoque, valCompras, valConsumo, valSkus: skusSet.size,
+        valCritico, valObsoleto, valObra,
+        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size,
+        valCriticoPrev, valObsoletoPrev, valObraPrev
+      },
+      rankingUnidade: mapToSort(mapRank),
+      rankCritico: mapToSort(mapCrit),
+      rankObsoleto: mapToSort(mapObs),
+      rankObra: mapToSort(mapObra),
+      compraConsumoUnidade: [...mapCC.values()].filter((d) => d.compras > 0.01 || d.consumo > 0.01).sort((a, b) => a.compras - b.compras),
+      skusUnidade: [...mapSkus.entries()].map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
+      composicao: comp,
+      maioresValoresDataCompleta: maiores,
+      comprasSemConsumoDataCompleta: comprasSem,
+      duplicadosDataCompleta: duplicados
+    }
+  }, [snapshot, snapshotPrev])
 
-  // --- LÓGICA: COMPRAS SEM CONSUMO ---
-  const comprasSemConsumoDataCompleta = useMemo(() => {
-    if (!snapshot.length) return []
-    return [...snapshot]
-      .filter(r => (r.valor_entrada_compras || 0) > 0 && Math.abs(r.valor_saida_cons_interno || 0) === 0)
-      .sort((a, b) => (b.valor_entrada_compras || 0) - (a.valor_entrada_compras || 0))
-      .map(r => {
-        let categoria = 'Operacional'
-        if (isObsoleto(r.nome_local_estoque)) categoria = 'Obsoleto'
-        else if (isObra(r.nome_local_estoque)) categoria = 'Obra'
-        else if (isCritico(r.item_critico)) categoria = 'Crítico'
-        return { unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, categoria, comprado: r.valor_entrada_compras || 0 }
-      })
-  }, [snapshot])
+  const maioresValoresTabela = useMemo(() => {
+    return tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12)
+  }, [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
 
   const comprasSemConsumoTabela = useMemo(() => {
     return tabelaComprasSemConsumoExpandida ? comprasSemConsumoDataCompleta.slice(0, 1000) : comprasSemConsumoDataCompleta.slice(0, 12)
   }, [comprasSemConsumoDataCompleta, tabelaComprasSemConsumoExpandida])
 
-  const exportarExcelComprasSemConsumo = useCallback(() => {
-    if (!comprasSemConsumoDataCompleta.length) return
-    const wsData = comprasSemConsumoDataCompleta.map(item => ({
-      'Unidade': item.unidade,
-      'Código SKU': item.codigo,
-      'Nome do Produto': item.nome,
-      'Classificação': item.categoria,
-      'Valor Comprado (R$)': item.comprado,
-      'Valor Consumido (R$)': 0,
-      'Período': formatarPeriodoTexto(periodoEfetivo)
-    }))
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(wsData)
-    XLSX.utils.book_append_sheet(wb, ws, 'Compras s/ Consumo')
-    XLSX.writeFile(wb, `compras_sem_consumo_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
-  }, [comprasSemConsumoDataCompleta, periodoEfetivo])
+  const duplicadosTabela = useMemo(() => {
+    return tabelaDuplicadosExpandida ? duplicadosDataCompleta.slice(0, 1000) : duplicadosDataCompleta.slice(0, 12)
+  }, [duplicadosDataCompleta, tabelaDuplicadosExpandida])
 
+  // --- Séries temporais ---
   const timeSeriesAgg = useMemo(() => {
     const map = new Map()
     for (const r of dfFiltrado) {
       const key = `${r.tmp_ano_num}-${String(r.tmp_mes_num).padStart(2, '0')}`
-      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, compras: 0, consumo: 0, skus: new Set(), chavesMap: new Map() })
+      if (!map.has(key)) {
+        map.set(key, {
+          periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia),
+          ano: r.tmp_ano_num,
+          mes: r.tmp_mes_num,
+          total: 0, critico: 0, obsoleto: 0, obra: 0,
+          compras: 0, consumo: 0,
+          skus: new Set(),
+          chavesMap: new Map()
+        })
+      }
       const item = map.get(key)
       const val = r.valor_saldo_atual || 0
       item.total += val
-      if (isCritico(r.item_critico)) item.critico += val
-      if (isObsoleto(r.nome_local_estoque)) item.obsoleto += val
-      if (isObra(r.nome_local_estoque)) item.obra += val
+      if (r._categoria === 'Crítico') item.critico += val
+      if (r._categoria === 'Obsoleto') item.obsoleto += val
+      if (r._categoria === 'Obra') item.obra += val
       item.compras += r.valor_entrada_compras || 0
       item.consumo += Math.abs(r.valor_saida_cons_interno || 0)
-      
+
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
-        
         if (r.nome_produto) {
           const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
           const palavras = nomeUpper.split(' ').filter(Boolean)
@@ -788,58 +705,53 @@ export default function VisaoGeral({ data }) {
       obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
       comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
       skus: sorted.map(d => {
-        let skusDupCount = 0;
+        let skusDupCount = 0
         for (const skusSet of d.chavesMap.values()) {
-          if (skusSet.size > 1) {
-            skusDupCount += skusSet.size;
-          }
+          if (skusSet.size > 1) skusDupCount += skusSet.size
         }
         return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
       })
     }
   }, [dfFiltrado])
 
-  const sum = (arr, key) => arr.reduce((s, r) => s + (r[key] || 0), 0)
-
-  const metrics = useMemo(() => {
-    const valEstoque = sum(snapshot, 'valor_saldo_atual')
-    const valCompras = sum(snapshot, 'valor_entrada_compras')
-    const valConsumo = snapshot.reduce((s, r) => s + Math.abs(r.valor_saida_cons_interno || 0), 0)
-    const valSkus = new Set(snapshot.filter((r) => r.qtde_saldo_atual > 0 && r.codigo_produto).map((r) => r.codigo_produto)).size
-    const valCritico = sum(snapshot.filter((r) => isCritico(r.item_critico)), 'valor_saldo_atual')
-    const valObsoleto = sum(snapshot.filter((r) => isObsoleto(r.nome_local_estoque)), 'valor_saldo_atual')
-    const valObra = sum(snapshot.filter((r) => isObra(r.nome_local_estoque)), 'valor_saldo_atual')
-
-    const valEstoquePrev = sum(snapshotPrev, 'valor_saldo_atual')
-    const valComprasPrev = sum(snapshotPrev, 'valor_entrada_compras')
-    const valConsumoPrev = snapshotPrev.reduce((s, r) => s + Math.abs(r.valor_saida_cons_interno || 0), 0)
-    const valSkusPrev = new Set(snapshotPrev.filter((r) => r.qtde_saldo_atual > 0 && r.codigo_produto).map((r) => r.codigo_produto)).size
-    const valCriticoPrev = sum(snapshotPrev.filter((r) => isCritico(r.item_critico)), 'valor_saldo_atual')
-    const valObsoletoPrev = sum(snapshotPrev.filter((r) => isObsoleto(r.nome_local_estoque)), 'valor_saldo_atual')
-    const valObraPrev = sum(snapshotPrev.filter((r) => isObra(r.nome_local_estoque)), 'valor_saldo_atual')
-
-    return { valEstoque, valCompras, valConsumo, valSkus, valCritico, valObsoleto, valObra, valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev, valCriticoPrev, valObsoletoPrev, valObraPrev }
-  }, [snapshot, snapshotPrev])
-
-  const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw } =
+  // --- Giro e Cobertura ---
+  const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw, giroCoberturaTempo } =
     useMemo(() => {
-      const empty = { giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0, giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [] }
+      const empty = {
+        giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0,
+        giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: []
+      }
       if (!dfFiltrado.length) return empty
       const p = parsePeriodo(periodoEfetivo)
       if (!p) return empty
+
       const map = new Map()
       for (const r of dfFiltrado) {
         const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
         if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
         const item = map.get(key)
-        if (!isCritico(r.item_critico) && !isObsoleto(r.nome_local_estoque)) {
+        if (r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto') {
           item.estoque_op += r.valor_saldo_atual || 0
           item.consumo_op += Math.abs(r.valor_saida_cons_interno || 0)
         }
       }
       const monthly = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
+
+      let accEst = 0, accCon = 0
+      const giroCoberturaTempo = monthly.map((row, i) => {
+        accEst += row.estoque_op
+        accCon += row.consumo_op
+        const n = i + 1
+        const estMed = accEst / n
+        const conMed = accCon / n
+        return {
+          periodo: periodoLabel(row.mes, row.ano),
+          giro: estMed > 0 ? conMed / estMed : 0,
+          cobertura: conMed > 0 ? estMed / conMed : 0
+        }
+      })
+
       const subAtual = monthly.filter((m) => m.ano === p.ano && m.mes <= p.mes)
-      
       let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
       if (subAtual.length) {
         const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
@@ -847,7 +759,9 @@ export default function VisaoGeral({ data }) {
         if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }
         if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
       }
-      const mTetoPrev = p.mes > 1 ? p.mes - 1 : 12, anoPrev = p.mes > 1 ? p.ano : p.ano - 1
+
+      const mTetoPrev = p.mes > 1 ? p.mes - 1 : 12
+      const anoPrev = p.mes > 1 ? p.ano : p.ano - 1
       const subPrev = monthly.filter((m) => m.ano === anoPrev && m.mes <= mTetoPrev)
       let giroMensalPrev = 0, coberturaMesesPrev = 0
       if (subPrev.length) {
@@ -856,83 +770,22 @@ export default function VisaoGeral({ data }) {
         if (estMedP > 0) giroMensalPrev = conMedP / estMedP
         if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
       }
-      return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly }
+
+      return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
     }, [dfFiltrado, periodoEfetivo])
 
-  const giroCoberturaTempo = useMemo(() => {
-    if (!monthlyRaw.length) return []
-    return monthlyRaw.map((row) => {
-      const sub = monthlyRaw.filter((m) => m.ano === row.ano && m.mes <= row.mes)
-      const estMed = sub.reduce((s, m) => s + m.estoque_op, 0) / sub.length
-      const conMed = sub.reduce((s, m) => s + m.consumo_op, 0) / sub.length
-      return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 }
-    })
-  }, [monthlyRaw])
-
-  const { rankingUnidade, rankCritico, rankObsoleto, rankObra, compraConsumoUnidade, skusUnidade, composicao } = useMemo(() => {
-    const mapRank = new Map(), mapCrit = new Map(), mapObs = new Map(), mapObra = new Map(), mapCC = new Map(), mapSkus = new Map()
-    let valObs = 0, valObr = 0, valCri = 0
-
-    for (const r of snapshot) {
-      const u = r.unidade_almoxarifado
-      const val = r.valor_saldo_atual || 0
-      mapRank.set(u, (mapRank.get(u) || 0) + val)
-      
-      const isCrit = isCritico(r.item_critico)
-      const isObs = isObsoleto(r.nome_local_estoque)
-      const isObr = isObra(r.nome_local_estoque)
-      
-      if (isObs) {
-        mapObs.set(u, (mapObs.get(u) || 0) + val)
-        valObs += val
-      } else if (isObr) {
-        mapObra.set(u, (mapObra.get(u) || 0) + val)
-        valObr += val
-      } else if (isCrit) {
-        mapCrit.set(u, (mapCrit.get(u) || 0) + val)
-        valCri += val
-      }
-
-      if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
-      mapCC.get(u).compras += r.valor_entrada_compras || 0
-      mapCC.get(u).consumo += Math.abs(r.valor_saida_cons_interno || 0)
-
-      if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
-        if (!mapSkus.has(u)) mapSkus.set(u, new Set())
-        mapSkus.get(u).add(r.codigo_produto)
-      }
-    }
-
-    const valOp = Math.max(0, metrics.valEstoque - (valObs + valObr + valCri))
-    const comp = [
-      { name: 'Estoque Crítico', value: valCri, color: '#e74c3c' },
-      { name: 'Estoque Obsoleto', value: valObs, color: '#9b59b6' },
-      { name: 'Estoque Obra', value: valObr, color: '#1abc9c' },
-      { name: 'Estoque Operacional', value: valOp, color: '#3498db' },
-    ].filter((d) => d.value > 0)
-
-    const mapToSort = (m) => [...m.entries()].filter(([, v]) => v > 0).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
-    
-    return {
-      rankingUnidade: mapToSort(mapRank),
-      rankCritico: mapToSort(mapCrit),
-      rankObsoleto: mapToSort(mapObs),
-      rankObra: mapToSort(mapObra),
-      compraConsumoUnidade: [...mapCC.values()].filter((d) => d.compras > 0.01 || d.consumo > 0.01).sort((a, b) => a.compras - b.compras),
-      skusUnidade: [...mapSkus.entries()].map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
-      composicao: comp
-    }
-  }, [snapshot, metrics.valEstoque])
-
+  // --- Itens parados ---
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
     const snapshotIdx = p.ano * 12 + p.mes
+
     const calc = dfFiltrado
-      .filter((r) => r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && !isCritico(r.item_critico) && !isObsoleto(r.nome_local_estoque))
+      .filter((r) => r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto')
       .map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
-    
-    const ultimoMov = new Map(), primeiroHist = new Map()
+
+    const ultimoMov = new Map()
+    const primeiroHist = new Map()
     for (const r of calc) {
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
       if (Math.abs(r.valor_saida_cons_interno || 0) > 0) {
@@ -943,7 +796,7 @@ export default function VisaoGeral({ data }) {
 
     const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && r.qtde_saldo_atual > 0 && r.codigo_produto)
     const result = []
-    
+
     for (const r of snapAtual) {
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
       let ultimo = ultimoMov.get(key)
@@ -951,9 +804,10 @@ export default function VisaoGeral({ data }) {
         const prim = primeiroHist.get(key)
         ultimo = prim != null ? prim - 1 : snapshotIdx
       }
-      const mesesParado = snapshotIdx - ultimo
+      const mesesParado = Math.max(0, snapshotIdx - ultimo)
       if (mesesParado >= 3) {
         result.push({
+          _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`,
           unidade: r.unidade_almoxarifado,
           codigo: r.codigo_produto,
           nome: r.nome_produto,
@@ -998,21 +852,196 @@ export default function VisaoGeral({ data }) {
     return lista.sort((a, b) => b.valor - a.valor)
   }, [itensParados, filtroMesParado, tabelaMesesSel, tabelaUnidadesSel])
 
+  // --- Exportações ---
+  const exportarExcelMaioresValores = useCallback(() => {
+    if (!maioresValoresDataCompleta.length) return
+    setExportando(true)
+    try {
+      const wsData = maioresValoresDataCompleta.map(item => ({
+        'Unidade': item.unidade,
+        'Código SKU': item.codigo,
+        'Nome do Produto': item.nome,
+        'Quantidade': item.quantidade,
+        'Valor em Estoque (R$)': item.valor,
+        'Período': formatarPeriodoTexto(periodoEfetivo)
+      }))
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(wsData)
+      XLSX.utils.book_append_sheet(wb, ws, 'Maiores Valores')
+      XLSX.writeFile(wb, `maiores_valores_estoque_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
+    } finally {
+      setExportando(false)
+    }
+  }, [maioresValoresDataCompleta, periodoEfetivo])
+
+  const exportarExcelDuplicados = useCallback(() => {
+    if (!duplicadosDataCompleta.length) return
+    setExportando(true)
+    try {
+      const wsData = duplicadosDataCompleta.map(item => ({
+        'Nome do Produto': item.nome,
+        'Qtd SKUs Diferentes': item.qtd_skus,
+        'Códigos SKUs': item.skus_lista,
+        'Unidades Afetadas': item.unidades_lista,
+        'Quantidade Total': item.quantidade,
+        'Valor Imobilizado (R$)': item.valor,
+        'Período': formatarPeriodoTexto(periodoEfetivo)
+      }))
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(wsData)
+      XLSX.utils.book_append_sheet(wb, ws, 'Cadastros Duplicados')
+      XLSX.writeFile(wb, `cadastros_duplicados_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
+    } finally {
+      setExportando(false)
+    }
+  }, [duplicadosDataCompleta, periodoEfetivo])
+
+  const exportarExcelComprasSemConsumo = useCallback(() => {
+    if (!comprasSemConsumoDataCompleta.length) return
+    setExportando(true)
+    try {
+      const wsData = comprasSemConsumoDataCompleta.map(item => ({
+        'Unidade': item.unidade,
+        'Código SKU': item.codigo,
+        'Nome do Produto': item.nome,
+        'Classificação': item.categoria,
+        'Valor Comprado (R$)': item.comprado,
+        'Valor Consumido (R$)': 0,
+        'Período': formatarPeriodoTexto(periodoEfetivo)
+      }))
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(wsData)
+      XLSX.utils.book_append_sheet(wb, ws, 'Compras s/ Consumo')
+      XLSX.writeFile(wb, `compras_sem_consumo_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
+    } finally {
+      setExportando(false)
+    }
+  }, [comprasSemConsumoDataCompleta, periodoEfetivo])
+
   const exportarExcelParados = useCallback(() => {
     if (!itensParadosParaExportar.length) return
-    const wsData = itensParadosParaExportar.map(item => ({
-      Unidade: item.unidade,
-      'Código SKU': item.codigo,
-      'Nome do Produto': item.nome,
-      Quantidade: item.quantidade,
-      'Valor Parado (R$)': item.valor,
-      'Meses Inativo': item.mesesParado
-    }))
-    const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(wsData)
-    XLSX.utils.book_append_sheet(wb, ws, 'Materiais Parados')
-    XLSX.writeFile(wb, 'materiais_parados_completo.xlsx')
+    setExportando(true)
+    try {
+      const wsData = itensParadosParaExportar.map(item => ({
+        Unidade: item.unidade,
+        'Código SKU': item.codigo,
+        'Nome do Produto': item.nome,
+        Quantidade: item.quantidade,
+        'Valor Parado (R$)': item.valor,
+        'Meses Inativo': item.mesesParado
+      }))
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(wsData)
+      XLSX.utils.book_append_sheet(wb, ws, 'Materiais Parados')
+      XLSX.writeFile(wb, 'materiais_parados_completo.xlsx')
+    } finally {
+      setExportando(false)
+    }
   }, [itensParadosParaExportar])
+
+  // PPTX
+  const exportarPowerPoint = useCallback(() => {
+    setExportando(true)
+    try {
+      const pres = new pptxgen()
+      pres.layout = 'LAYOUT_16x9'
+
+      const slideCapa = pres.addSlide()
+      slideCapa.background = { color: '080808' }
+      slideCapa.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.1, fill: { color: 'f58220' } })
+      slideCapa.addText('ÂMBAR ENERGIA', { x: 0.5, y: 1.8, w: '90%', h: 0.5, fontSize: 16, color: 'f58220', bold: true, align: 'center', charSpacing: 3 })
+      slideCapa.addText('RELATÓRIO GERENCIAL DE ESTOQUE', { x: 0.5, y: 2.3, w: '90%', h: 1, fontSize: 38, color: 'ffffff', bold: true, align: 'center' })
+      slideCapa.addText(`Período de Referência: ${formatarPeriodoTexto(periodoEfetivo)}`, { x: 0.5, y: 3.5, w: '90%', h: 0.5, fontSize: 14, color: '8c9ba5', align: 'center' })
+      
+      const labelTipos = tiposEstoqueSel.length === 0 ? 'Todos' : tiposEstoqueSel.join(', ')
+      const labelEscopos = escoposSel.length === 0 ? 'Todas' : escoposSel.join(', ')
+      const filtrosAplicados = `Filtros Ativos - Escopo: ${labelEscopos} | Tipo de Estoque: ${labelTipos}`
+      slideCapa.addText(filtrosAplicados, { x: 0.5, y: 4.2, w: '90%', h: 0.5, fontSize: 11, color: '555555', align: 'center', italic: true })
+
+      const slideResumo = pres.addSlide()
+      slideResumo.background = { color: '121212' }
+      slideResumo.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+      slideResumo.addText('RESUMO FINANCEIRO E OPERACIONAL', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'f58220', bold: true })
+
+      const kpiRows = [
+        [{ text: 'INDICADOR', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }, { text: 'VALOR ATUAL', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }],
+        ['Total em Estoque', fmtBRL(metrics.valEstoque)],
+        ['Estoque Crítico', fmtBRL(metrics.valCritico)],
+        ['Estoque Obsoleto', fmtBRL(metrics.valObsoleto)],
+        ['Total de Compras no Período', fmtBRL(metrics.valCompras)],
+        ['Total de Consumo no Período', fmtBRL(metrics.valConsumo)],
+        ['Total de SKUs Únicos', fmtInt(metrics.valSkus)]
+      ]
+      slideResumo.addTable(kpiRows, {
+        x: 1.0, y: 1.2, w: 8,
+        fill: '161616', color: 'ffffff',
+        border: { type: 'solid', color: '2A2A2A', pt: 1 },
+        fontSize: 14, rowH: 0.5, align: 'center', valign: 'middle'
+      })
+
+      if (maioresValoresDataCompleta.length > 0) {
+        const slideTop = pres.addSlide()
+        slideTop.background = { color: '121212' }
+        slideTop.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+        slideTop.addText('TOP SKUs: MAIOR CAPITAL IMOBILIZADO', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: '3498db', bold: true })
+
+        const topRows = [[
+          { text: 'UNIDADE', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'SKU', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'PRODUTO', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'VALOR', options: { fill: '2A2A2A', color: '3498db', bold: true, align: 'right' } }
+        ]]
+        maioresValoresDataCompleta.slice(0, 9).forEach(item => {
+          topRows.push([item.unidade, item.codigo, (item.nome || '').substring(0, 45) + '...', { text: fmtBRL(item.valor), options: { align: 'right' } }])
+        })
+        slideTop.addTable(topRows, {
+          x: 0.5, y: 0.8, w: 9,
+          fill: '161616', color: 'ffffff',
+          border: { type: 'solid', color: '2A2A2A', pt: 1 },
+          fontSize: 11, rowH: 0.4
+        })
+      }
+
+      if (itensParados.length > 0) {
+        const slideParados = pres.addSlide()
+        slideParados.background = { color: '121212' }
+        slideParados.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+        slideParados.addText('ALERTA: MATERIAIS PARADOS (> 3 MESES)', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'e74c3c', bold: true })
+
+        const paradosRows = [[
+          { text: 'UNIDADE', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'SKU', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'PRODUTO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'TEMPO INATIVO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'center' } },
+          { text: 'VALOR', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'right' } }
+        ]]
+        const ordenados = [...itensParados].sort((a, b) => b.valor - a.valor)
+        ordenados.slice(0, 9).forEach(item => {
+          paradosRows.push([
+            item.unidade,
+            item.codigo,
+            (item.nome || '').substring(0, 35) + '...',
+            { text: `${item.mesesParado} Meses`, options: { align: 'center' } },
+            { text: fmtBRL(item.valor), options: { align: 'right' } }
+          ])
+        })
+        slideParados.addTable(paradosRows, {
+          x: 0.5, y: 0.8, w: 9.0,
+          fill: '161616', color: 'ffffff',
+          border: { type: 'solid', color: '2A2A2A', pt: 1 },
+          fontSize: 11, rowH: 0.4
+        })
+      }
+
+      const fileName = `Apresentacao_Gerencial_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.pptx`
+      pres.writeFile({ fileName })
+    } catch (error) {
+      console.error('Erro ao gerar o PowerPoint:', error)
+      alert('Houve um erro ao gerar a apresentação. Verifique o console.')
+    } finally {
+      setExportando(false)
+    }
+  }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel, maioresValoresDataCompleta, itensParados])
 
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
@@ -1023,7 +1052,7 @@ export default function VisaoGeral({ data }) {
   }, [])
 
   const maxValorGlobal = useMemo(() => {
-    let m = 10 
+    let m = 10
     if (vis.total) m = Math.max(m, ...timeSeriesAgg.total.map(d => d.valor))
     if (vis.critico) m = Math.max(m, ...timeSeriesAgg.critico.map(d => d.valor))
     if (vis.obsoleto) m = Math.max(m, ...timeSeriesAgg.obsoleto.map(d => d.valor))
@@ -1065,8 +1094,8 @@ export default function VisaoGeral({ data }) {
   const chartAnnotations = useMemo(() => {
     let anns = []
     const createAnns = (dataArr, color, yOffset) => dataArr.map(d => ({
-       x: d.periodo, y: d.valor, text: `<b>${fmtValorCurto(d.valor)}</b>`, showarrow: true, arrowhead: 0, arrowcolor: 'rgba(0,0,0,0)',
-       ax: 0, ay: yOffset, font: { size: 10, color: '#ffffff', family: 'Inter' }, bgcolor: 'rgba(22, 22, 22, 0.85)', bordercolor: color, borderwidth: 1, borderpad: 4,
+      x: d.periodo, y: d.valor, text: `<b>${fmtValorCurto(d.valor)}</b>`, showarrow: true, arrowhead: 0, arrowcolor: 'rgba(0,0,0,0)',
+      ax: 0, ay: yOffset, font: { size: 10, color: '#ffffff', family: 'Inter' }, bgcolor: 'rgba(22, 22, 22, 0.85)', bordercolor: color, borderwidth: 1, borderpad: 4,
     }))
     if (vis.total) anns.push(...createAnns(timeSeriesAgg.total, 'rgba(245,130,32,0.6)', -22))
     if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, 'rgba(231,76,60,0.8)', 24))
@@ -1075,159 +1104,105 @@ export default function VisaoGeral({ data }) {
     return anns
   }, [timeSeriesAgg, vis])
 
+  const plotDataRanking = useMemo(() => [{
+    type: 'bar', orientation: 'h',
+    y: rankingUnidade.map((d) => d.unidade),
+    x: rankingUnidade.map((d) => d.valor),
+    text: rankingUnidade.map((d) => fmtValorCurto(d.valor)),
+    textposition: 'auto',
+    textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
+    marker: {
+      color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'),
+      opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3),
+      line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+    },
+    hoverinfo: 'none'
+  }], [rankingUnidade, selectedBarraRanking])
+
   const makeInteractiveHBar = useCallback((items, color, selectedBar, setSelectedBar) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
     return (
       <div onClick={(e) => e.stopPropagation()}>
         <Plot
-          data={[{ 
-            type: 'bar', orientation: 'h', y: items.map((d) => d.unidade), x: items.map((d) => d.valor ?? d.total), 
-            text: items.map((d) => d.total != null ? `${fmtInt(d.total)} SKUs` : fmtValorCurto(d.valor)), 
-            textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 }, 
-            marker: { 
+          data={[{
+            type: 'bar', orientation: 'h',
+            y: items.map((d) => d.unidade),
+            x: items.map((d) => d.valor ?? d.total),
+            text: items.map((d) => d.total != null ? `${fmtInt(d.total)} SKUs` : fmtValorCurto(d.valor)),
+            textposition: 'auto',
+            textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
+            marker: {
               color: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? color : 'rgba(255, 255, 255, 0.15)'),
-              opacity: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? 1 : 0.3), line: { color: 'rgba(255,255,255,0.08)', width: 1 }
-            }, hoverinfo: 'none' 
+              opacity: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? 1 : 0.3),
+              line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+            },
+            hoverinfo: 'none'
           }]}
-          layout={{ ...PLOT_LAYOUT, height: Math.max(300, items.length * 32), margin: { l: 140, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } } }}
-          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
-          onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBar(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
+          layout={{
+            ...PLOT_LAYOUT,
+            height: Math.max(300, items.length * 32),
+            margin: { l: 140, r: 20, t: 10, b: 10 },
+            xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false },
+            yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } }
+          }}
+          config={{ displayModeBar: false, responsive: true }}
+          style={{ width: '100%', cursor: 'pointer' }}
+          useResizeHandler
+          onClick={(e) => {
+            e?.event?.stopPropagation?.()
+            e?.event?.preventDefault?.()
+            if (e?.points?.[0]?.y) setSelectedBar(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim())
+          }}
         />
       </div>
     )
   }, [])
 
+  // Colunas das tabelas
+  const colsMaioresValores = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[280px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
+  ], [])
 
-  const exportarPowerPoint = useCallback(() => {
-    try {
-      const pres = new pptxgen()
-      pres.layout = 'LAYOUT_16x9'
+  const colsDuplicados = useMemo(() => [
+    { key: 'nome', label: 'Nome do Produto (Agrupado por Chave)', className: 'text-white font-medium max-w-[250px] truncate', title: (i) => i.nome },
+    { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (
+      <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>
+    )},
+    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate', title: (i) => i.skus_lista },
+    { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
+  ], [])
 
-      const slideCapa = pres.addSlide()
-      slideCapa.background = { color: '080808' }
-      
-      slideCapa.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.1, fill: { color: 'f58220' } })
-      
-      slideCapa.addText('ÂMBAR ENERGIA', { x: 0.5, y: 1.8, w: '90%', h: 0.5, fontSize: 16, color: 'f58220', bold: true, align: 'center', charSpacing: 3 })
-      slideCapa.addText('RELATÓRIO GERENCIAL DE ESTOQUE', { x: 0.5, y: 2.3, w: '90%', h: 1, fontSize: 38, color: 'ffffff', bold: true, align: 'center' })
-      slideCapa.addText(`Período de Referência: ${formatarPeriodoTexto(periodoEfetivo)}`, { x: 0.5, y: 3.5, w: '90%', h: 0.5, fontSize: 14, color: '8c9ba5', align: 'center' })
-      
-      const filtrosAplicados = `Filtros Ativos - Escopo: ${escoposSel.join(', ')} | Tipo de Estoque: ${tiposEstoqueSel.join(', ')}`
-      slideCapa.addText(filtrosAplicados, { x: 0.5, y: 4.2, w: '90%', h: 0.5, fontSize: 11, color: '555555', align: 'center', italic: true })
+  const colsComprasSemConsumo = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[200px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'categoria', label: 'Classificação', align: 'center', render: (i) => (
+      <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
+        i.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30'
+          : i.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30'
+          : i.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30'
+          : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
+      }`}>{i.categoria}</span>
+    )},
+    { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
+    { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: () => 'R$ 0,00' },
+  ], [])
 
-      const slideResumo = pres.addSlide()
-      slideResumo.background = { color: '121212' }
-      slideResumo.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
-      slideResumo.addText('RESUMO FINANCEIRO E OPERACIONAL', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'f58220', bold: true })
-
-      const kpiRows = [
-        [{ text: 'INDICADOR', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }, { text: 'VALOR ATUAL', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }],
-        ['Total em Estoque', fmtBRL(metrics.valEstoque)],
-        ['Estoque Crítico', fmtBRL(metrics.valCritico)],
-        ['Estoque Obsoleto', fmtBRL(metrics.valObsoleto)],
-        ['Total de Compras no Período', fmtBRL(metrics.valCompras)],
-        ['Total de Consumo no Período', fmtBRL(metrics.valConsumo)],
-        ['Total de SKUs Únicos', fmtInt(metrics.valSkus)]
-      ]
-
-      slideResumo.addTable(kpiRows, { 
-        x: 1.0, y: 1.2, w: 8, 
-        fill: '161616', color: 'ffffff', 
-        border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
-        fontSize: 14, rowH: 0.5, align: 'center', valign: 'middle' 
-      })
-
-      const maioresValoresDataCompleta = [...snapshot]
-        .filter(r => (r.valor_saldo_atual || 0) > 0)
-        .sort((a, b) => (b.valor_saldo_atual || 0) - (a.valor_saldo_atual || 0))
-        .map(r => ({ unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual || 0, valor: r.valor_saldo_atual || 0 }))
-
-      if (maioresValoresDataCompleta.length > 0) {
-        const slideTop = pres.addSlide()
-        slideTop.background = { color: '121212' }
-        slideTop.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
-        slideTop.addText('TOP SKUs: MAIOR CAPITAL IMOBILIZADO', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: '3498db', bold: true })
-        
-        const topRows = [[
-          { text: 'UNIDADE', options: { fill: '2A2A2A', color: '3498db', bold: true } },
-          { text: 'SKU', options: { fill: '2A2A2A', color: '3498db', bold: true } },
-          { text: 'PRODUTO', options: { fill: '2A2A2A', color: '3498db', bold: true } },
-          { text: 'VALOR', options: { fill: '2A2A2A', color: '3498db', bold: true, align: 'right' } }
-        ]]
-        
-        maioresValoresDataCompleta.slice(0, 9).forEach(item => {
-          topRows.push([item.unidade, item.codigo, (item.nome || '').substring(0, 45) + '...', { text: fmtBRL(item.valor), options: { align: 'right' } }])
-        })
-        
-        slideTop.addTable(topRows, { 
-          x: 0.5, y: 0.8, w: 9, 
-          fill: '161616', color: 'ffffff', 
-          border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
-          fontSize: 11, rowH: 0.4 
-        })
-      }
-
-      const calcParados = dfFiltrado.filter((r) => r.tmp_ano_num * 12 + r.tmp_mes_num <= (parsePeriodo(periodoEfetivo).ano * 12 + parsePeriodo(periodoEfetivo).mes) && !isCritico(r.item_critico) && !isObsoleto(r.nome_local_estoque)).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
-      const ultimoMov = new Map(), primeiroHist = new Map()
-      for (const r of calcParados) {
-        const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-        if (Math.abs(r.valor_saida_cons_interno || 0) > 0) {
-          if (r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
-        }
-        if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
-      }
-      const pAtual = parsePeriodo(periodoEfetivo)
-      const snapshotIdx = pAtual.ano * 12 + pAtual.mes
-      const snapAtual = calcParados.filter((r) => r.tmp_ano_num === pAtual.ano && r.tmp_mes_num === pAtual.mes && r.qtde_saldo_atual > 0 && r.codigo_produto)
-      const itensParadosPPTX = []
-      for (const r of snapAtual) {
-        const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-        let ultimo = ultimoMov.get(key)
-        if (ultimo == null) {
-          const prim = primeiroHist.get(key)
-          ultimo = prim != null ? prim - 1 : snapshotIdx
-        }
-        const mesesParado = snapshotIdx - ultimo
-        if (mesesParado >= 3) {
-          itensParadosPPTX.push({ unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, mesesParado, valor: r.valor_saldo_atual })
-        }
-      }
-      itensParadosPPTX.sort((a, b) => b.valor - a.valor)
-
-      if (itensParadosPPTX.length > 0) {
-        const slideParados = pres.addSlide()
-        slideParados.background = { color: '121212' }
-        slideParados.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
-        slideParados.addText('ALERTA: MATERIAIS PARADOS (> 3 MESES)', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'e74c3c', bold: true })
-        
-        const paradosRows = [[
-          { text: 'UNIDADE', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
-          { text: 'SKU', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
-          { text: 'PRODUTO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
-          { text: 'TEMPO INATIVO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'center' } },
-          { text: 'VALOR', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'right' } }
-        ]]
-        
-        itensParadosPPTX.slice(0, 9).forEach(item => {
-          paradosRows.push([item.unidade, item.codigo, (item.nome || '').substring(0, 35) + '...', { text: `${item.mesesParado} Meses`, options: { align: 'center' } }, { text: fmtBRL(item.valor), options: { align: 'right' } }])
-        })
-        
-        slideParados.addTable(paradosRows, { 
-          x: 0.5, y: 0.8, w: 9.0, 
-          fill: '161616', color: 'ffffff', 
-          border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
-          fontSize: 11, rowH: 0.4 
-        })
-      }
-
-      const fileName = `Apresentacao_Gerencial_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.pptx`
-      pres.writeFile({ fileName })
-
-    } catch (error) {
-      console.error("Erro ao gerar o PowerPoint:", error)
-      alert("Houve um erro ao gerar a apresentação. Verifique o console.")
-    }
-  }, [dfFiltrado, snapshot, periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
+  const colsParados = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[280px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'valor', label: 'Valor Parado', align: 'right', className: 'font-mono text-[#2ecc71] font-bold', render: (i) => fmtBRL(i.valor) },
+    { key: 'mesesParado', label: 'Meses Parado', align: 'center', render: (i) => (
+      <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{i.mesesParado} Meses</span>
+    )},
+  ], [])
 
   const isRankingSelected = activeCard === 'ranking_unidade'
   const isComposicaoSelected = activeCard === 'composicao_estoque'
@@ -1239,8 +1214,8 @@ export default function VisaoGeral({ data }) {
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
-      
-      {/* --- NOVO CABEÇALHO GLOBAL (Estilo da Imagem 2) --- */}
+
+      {/* --- CABEÇALHO GLOBAL --- */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 mt-2 px-1">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#2a1610] border border-[#f58220]/30 flex items-center justify-center text-[#f58220] shadow-inner shrink-0">
@@ -1252,19 +1227,20 @@ export default function VisaoGeral({ data }) {
             GESTÃO E FECHAMENTO EXECUTIVO DE ESTOQUE
           </h1>
         </div>
-        
+
         <div className="flex items-center gap-3">
-          <button 
+          <button
             onClick={exportarPowerPoint}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#121212] hover:bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#f58220]/50 text-white font-bold text-[11px] tracking-widest shadow-sm transition-all"
+            disabled={exportando}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#121212] hover:bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#f58220]/50 text-white font-bold text-[11px] tracking-widest shadow-sm transition-all disabled:opacity-50 disabled:cursor-wait"
           >
             <svg className="w-4 h-4 text-[#f58220]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-            <span>PPTX</span>
+            <span>{exportando ? 'Gerando...' : 'PPTX'}</span>
           </button>
         </div>
       </div>
 
-      {/* --- INÍCIO DO CARD DO GRÁFICO --- */}
+      {/* --- CARD DO GRÁFICO PRINCIPAL --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
@@ -1278,15 +1254,15 @@ export default function VisaoGeral({ data }) {
               EVOLUÇÃO TEMPORAL DO ESTOQUE (R$)
             </h2>
           </div>
-          
+
           <div className="flex flex-wrap items-end gap-3 z-30">
             <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>Tipo</label>
-              <CyberMultiSelect options={['Todos', 'Operacional', 'Crítico', 'Obsoleto', 'Obra']} selected={tiposEstoqueSel} onChange={setTiposEstoqueSel} placeholder="Todos os Tipos" />
+              <CyberMultiSelect options={['Operacional', 'Crítico', 'Obsoleto', 'Obra']} selected={tiposEstoqueSel} onChange={setTiposEstoqueSel} placeholder="Todos os Tipos" />
             </div>
             <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>Unidade</label>
-              <CyberMultiSelect options={['Todas', 'Ativa', 'Gerencial']} selected={escoposSel} onChange={(val) => { setEscoposSel(val); setUnidadesSel([]); }} placeholder="Selecione Unidade" />
+              <CyberMultiSelect options={['Ativa', 'Gerencial']} selected={escoposSel} onChange={(val) => { setEscoposSel(val); setUnidadesSel([]); }} placeholder="Selecione Unidade" />
             </div>
             <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>Local</label>
@@ -1321,7 +1297,7 @@ export default function VisaoGeral({ data }) {
               vis.obsoleto && timeSeriesAgg.obsoleto.length > 0 && { x: timeSeriesAgg.obsoleto.map((d) => d.periodo), y: timeSeriesAgg.obsoleto.map((d) => d.valor), name: 'Estoque Obsoleto', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#9b59b6', width: 1.5, dash: 'dot', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#9b59b6', width: 1.5 } }, cliponaxis: false },
               vis.obra && timeSeriesAgg.obra.length > 0 && { x: timeSeriesAgg.obra.map((d) => d.periodo), y: timeSeriesAgg.obra.map((d) => d.valor), name: 'Estoque Obra', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#1abc9c', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#1abc9c', width: 1.5 } }, cliponaxis: false },
             ].filter(Boolean)}
-            layout={{ ...PLOT_LAYOUT, hovermode: 'closest', height: 350, bargap: 0, margin: { l: 20, r: 20, t: 40, b: 45 }, shapes: chartShapes, annotations: chartAnnotations, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.total.map(d => d.periodo), ticktext: timeSeriesAgg.total.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)), range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } }}
+            layout={{ ...PLOT_LAYOUT, hovermode: 'closest', height: 350, bargap: 0, margin: { l: 20, r: 20, t: 40, b: 45 }, shapes: chartShapes, annotations: chartAnnotations, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.total.map(d => d.periodo), ticktext: timeSeriesAgg.total.map(d => formatarPeriodoTexto(d.periodo)), range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } }}
             config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
           />
         </div>
@@ -1363,19 +1339,19 @@ export default function VisaoGeral({ data }) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor em estoque para a seleção atual. (Dica: Clique na tabela e use as setas ↑ ↓ do teclado para navegar)</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={exportarExcelMaioresValores} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"><span>📥</span><span>Exportar Excel</span></button>
+                  <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => setTabelaMaioresValoresExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
               <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaMaioresValores dados={maioresValoresTabela} />
+                <TabelaGenerica dados={maioresValoresTabela} columns={colsMaioresValores} highlightColor="#3498db" emptyMessage="Nenhum item encontrado no período selecionado." />
               </div>
             </div>
           )}
         </div>
-
       </div>
 
+      {/* --- LINHA FINANCEIRA --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-2">
           <div className="w-5 h-5 rounded-md bg-[#16221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
@@ -1389,6 +1365,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
+      {/* --- LINHA OPERACIONAL --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-6">
           <div className="w-5 h-5 rounded-md bg-[#262014] flex items-center justify-center text-accent shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
@@ -1407,6 +1384,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
+      {/* --- RANKING + COMPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
@@ -1416,7 +1394,14 @@ export default function VisaoGeral({ data }) {
             {selectedBarraRanking && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraRanking(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
           </div>
           <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
-            <Plot data={[{ type: 'bar', orientation: 'h', y: rankingUnidade.map((d) => d.unidade), x: rankingUnidade.map((d) => d.valor), text: rankingUnidade.map((d) => fmtValorCurto(d.valor)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 }, marker: { color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'), opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3), line: { color: 'rgba(255,255,255,0.08)', width: 1 } }, hoverinfo: 'none' }]} layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 140, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } } }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraRanking(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }} />
+            <Plot
+              data={plotDataRanking}
+              layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 140, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } } }}
+              config={{ displayModeBar: false, responsive: true }}
+              style={{ width: '100%', cursor: 'pointer' }}
+              useResizeHandler
+              onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraRanking(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
+            />
           </div>
         </div>
 
@@ -1435,6 +1420,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
+      {/* --- RANKING POR CATEGORIA --- */}
       <div className="mt-6">
         <div className="flex items-center gap-2 mb-3 ml-2"><div className="w-5 h-5 rounded-md bg-[#261616] flex items-center justify-center text-[#e74c3c] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">RANKING POR CATEGORIA E UNIDADE (R$)</span></div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1459,6 +1445,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
+      {/* --- COMPRA x CONSUMO --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] mt-6 relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#2ecc71]/50 to-transparent pointer-events-none" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
@@ -1473,7 +1460,7 @@ export default function VisaoGeral({ data }) {
             visComprasConsumo.compras && { x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), y: timeSeriesAgg.comprasConsumo.map((d) => d.compras), name: 'Compras', type: 'scatter', mode: 'lines+markers', line: { color: '#e74c3c', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#e74c3c', line: { color: '#161616', width: 1.5 } }, customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.compras)), hovertemplate: '<b>%{x}</b><br>Compras: <span style="color:#e74c3c; font-weight:bold;">%{customdata}</span><extra></extra>' },
             visComprasConsumo.consumo && { x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), y: timeSeriesAgg.comprasConsumo.map((d) => d.consumo), name: 'Consumo', type: 'scatter', mode: 'lines+markers', line: { color: '#2ecc71', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#2ecc71', line: { color: '#161616', width: 1.5 } }, customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.consumo)), hovertemplate: '<b>%{x}</b><br>Consumo: <span style="color:#2ecc71; font-weight:bold;">%{customdata}</span><extra></extra>' },
           ].filter(Boolean)}
-          layout={{ ...PLOT_LAYOUT, height: 350, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapes, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), ticktext: timeSeriesAgg.comprasConsumo.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)), showspikes: true, spikemode: 'across', spikedash: 'dot', spikecolor: '#555555', spikethickness: 1 }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false } }}
+          layout={{ ...PLOT_LAYOUT, height: 350, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapes, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), ticktext: timeSeriesAgg.comprasConsumo.map(d => formatarPeriodoTexto(d.periodo)), showspikes: true, spikemode: 'across', spikedash: 'dot', spikecolor: '#555555', spikethickness: 1 }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false } }}
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
@@ -1493,18 +1480,19 @@ export default function VisaoGeral({ data }) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <span className="text-[11px] text-[#e74c3c]/80">Listando materiais com imobilização de caixa injustificada no período (R$ Comprado &gt; 0 e R$ Consumido = 0).</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={exportarExcelComprasSemConsumo} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm"><span>📥</span><span>Exportar Excel</span></button>
+                  <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => setTabelaComprasSemConsumoExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
               <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaComprasSemConsumo dados={comprasSemConsumoTabela} />
+                <TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" emptyMessage="🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo." />
               </div>
             </div>
           )}
         </div>
       </div>
 
+      {/* --- COMPRA x CONSUMO POR UNIDADE + SKUs --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         <div onClick={() => handleCardClick('compra_consumo_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isCompraConsumoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isCompraConsumoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
@@ -1540,6 +1528,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
+      {/* --- EVOLUÇÃO SKUs --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2.5">
@@ -1559,33 +1548,33 @@ export default function VisaoGeral({ data }) {
             </button>
           </div>
         </div>
-        
-        <Plot 
-          data={[{ 
-            x: timeSeriesAgg.skus.map((d) => d.periodo), 
-            y: timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 
-            type: 'scatter', 
-            mode: 'lines+markers+text', 
-            text: timeSeriesAgg.skus.map((d) => fmtInt(abaSkus === 'duplicados' ? d.duplicados : d.total)), 
-            textposition: 'top center', 
-            textfont: { color: 'white', size: 11, family: 'Inter' }, 
-            line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 }, 
-            marker: { size: 8, color: '#080808', line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } }, 
-            fill: 'tozeroy', 
-            fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] }, 
-            fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)', 
+
+        <Plot
+          data={[{
+            x: timeSeriesAgg.skus.map((d) => d.periodo),
+            y: timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total),
+            type: 'scatter',
+            mode: 'lines+markers+text',
+            text: timeSeriesAgg.skus.map((d) => fmtInt(abaSkus === 'duplicados' ? d.duplicados : d.total)),
+            textposition: 'top center',
+            textfont: { color: 'white', size: 11, family: 'Inter' },
+            line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 },
+            marker: { size: 8, color: '#080808', line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } },
+            fill: 'tozeroy',
+            fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] },
+            fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)',
             hoverinfo: 'none',
             cliponaxis: false
-          }]} 
-          layout={{ 
-            ...PLOT_LAYOUT, 
-            height: 330, 
-            margin: { l: 30, r: 20, t: 40, b: 40 }, 
-            shapes: chartShapesSkus, 
-            xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)), range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] }, 
-            yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] } 
-          }} 
-          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler 
+          }]}
+          layout={{
+            ...PLOT_LAYOUT,
+            height: 330,
+            margin: { l: 30, r: 20, t: 40, b: 40 },
+            shapes: chartShapesSkus,
+            xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoTexto(d.periodo)), range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] },
+            yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] }
+          }}
+          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler
         />
 
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
@@ -1609,18 +1598,19 @@ export default function VisaoGeral({ data }) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <span className="text-[11px] text-[#f1c40f]/80">Listando materiais com padrão descritivo equivalente (palavras ordenadas), mas SKUs diferentes. Ordenado pelo impacto financeiro.</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={exportarExcelDuplicados} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a2616] hover:bg-[#3a341c] text-[#f1c40f] border border-[#f1c40f]/40 text-xs font-bold transition-all shadow-sm"><span>📥</span><span>Exportar Excel</span></button>
+                  <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a2616] hover:bg-[#3a341c] text-[#f1c40f] border border-[#f1c40f]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => setTabelaDuplicadosExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
               <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaDuplicados dados={duplicadosTabela} />
+                <TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" emptyMessage="🎉 Base limpa! Nenhum cadastro duplicado encontrado no período." />
               </div>
             </div>
           )}
         </div>
       </div>
 
+      {/* --- GIRO x COBERTURA --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
           <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#1c1624] flex items-center justify-center text-[#9b59b6] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE GIRO x COBERTURA (MENSAL)</span></div>
@@ -1635,12 +1625,13 @@ export default function VisaoGeral({ data }) {
               visGiroCobertura.giro && { x: giroCoberturaTempo.map((d) => d.periodo), y: giroCoberturaTempo.map((d) => d.giro), name: 'Giro Mensal', type: 'scatter', mode: 'lines+markers', line: { color: '#3498db', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#3498db', line: { color: '#fff', width: 1.5 } }, customdata: giroCoberturaTempo.map((d) => fmtDec(d.giro)), hovertemplate: '<b>%{x}</b><br>Giro Mensal: <span style="color:#3498db; font-weight:bold;">%{customdata}</span><extra></extra>' },
               visGiroCobertura.cobertura && { x: giroCoberturaTempo.map((d) => d.periodo), y: giroCoberturaTempo.map((d) => d.cobertura), name: 'Cobertura', type: 'scatter', mode: 'lines+markers', yaxis: 'y2', line: { color: '#f58220', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#f58220', line: { color: '#fff', width: 1.5 } }, customdata: giroCoberturaTempo.map((d) => fmtMes(d.cobertura)), hovertemplate: '<b>%{x}</b><br>Cobertura: <span style="color:#f58220; font-weight:bold;">%{customdata}</span><extra></extra>' },
             ].filter(Boolean)}
-            layout={{ ...PLOT_LAYOUT, height: 380, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapesGiro, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: giroCoberturaTempo.map(d => d.periodo), ticktext: giroCoberturaTempo.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)) }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } }}
+            layout={{ ...PLOT_LAYOUT, height: 380, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapesGiro, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: giroCoberturaTempo.map(d => d.periodo), ticktext: giroCoberturaTempo.map(d => formatarPeriodoTexto(d.periodo)) }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } }}
             config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler
           />
         ) : (<p className="text-muted text-center py-10">Sem dados suficientes para calcular Giro x Cobertura.</p>)}
       </div>
 
+      {/* --- MATERIAIS PARADOS --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
@@ -1668,18 +1659,18 @@ export default function VisaoGeral({ data }) {
               {listaAberta && (
                 <div className="p-4 space-y-4 animate-fade-in">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-[#161616] p-3.5 rounded-xl border border-[#2A2A2A]">
-                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Unidade:</label><CyberMultiSelect options={['Todas', ...unidadesParadasOpcoes]} selected={tabelaUnidadesSel} onChange={setTabelaUnidadesSel} placeholder="Todas as Unidades" /></div>
-                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Tempo Parado:</label><CyberMultiSelect options={['Todos', ...mesesParadosOpcoes]} selected={tabelaMesesSel} onChange={setTabelaMesesSel} placeholder="Todos os Meses" /></div>
+                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Unidade:</label><CyberMultiSelect options={unidadesParadasOpcoes} selected={tabelaUnidadesSel} onChange={setTabelaUnidadesSel} placeholder="Todas as Unidades" /></div>
+                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Tempo Parado:</label><CyberMultiSelect options={mesesParadosOpcoes} selected={tabelaMesesSel} onChange={setTabelaMesesSel} placeholder="Todos os Meses" /></div>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-muted">Exibindo os itens mais relevantes ordenados por valor financeiro.</span>
                     <div className="flex items-center gap-2">
-                      <button onClick={exportarExcelParados} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"><span>📥</span><span>Exportar Excel</span></button>
+                      <button onClick={exportarExcelParados} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                       <button onClick={() => setTabelaExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-[#333] text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Janela</span></button>
                     </div>
                   </div>
                   <div className="max-h-[520px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212]">
-                    <TabelaCyberpunk dados={itensParadosFiltradosTabela} />
+                    <TabelaGenerica dados={itensParadosFiltradosTabela} columns={colsParados} highlightColor="#f58220" emptyMessage="Nenhum item encontrado." />
                   </div>
                 </div>
               )}
@@ -1688,18 +1679,18 @@ export default function VisaoGeral({ data }) {
         ) : (<p className="text-muted text-center py-8 tracking-wide">Nenhum material operacional parado há mais de 3 meses para o período selecionado.</p>)}
       </div>
 
-      {/* MODAIS FULLSCREEN AQUI (Ocultados nesta visualização, mantidos no código original) */}
+      {/* --- MODAIS FULLSCREEN --- */}
       {tabelaExpandida && (
         <FullScreenPortal onClose={() => setTabelaExpandida(false)}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3"><span className="text-accent text-2xl drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]">📂</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa de Itens Parados (Tela Cheia)</h2><span className="ml-3 text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">Exibindo até 1.000 registros mais relevantes (Total filtrado: {Number(itensParadosParaExportar.length).toLocaleString('pt-BR')})</span></div>
               <div className="flex gap-3 items-center">
-                  <button onClick={exportarExcelParados} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"><span>📥</span><span>Baixar Excel Completo</span></button>
-                  <button onClick={() => setTabelaExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelParados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
+                <button onClick={() => setTabelaExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaCyberpunk dados={itensParadosFiltradosTabela} /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={itensParadosFiltradosTabela} columns={colsParados} highlightColor="#f58220" /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1710,11 +1701,11 @@ export default function VisaoGeral({ data }) {
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3"><span className="text-[#3498db] text-2xl drop-shadow-[0_0_10px_rgba(52,152,219,0.8)]">📈</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Maiores Valores de Estoque (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#3498db]/15 text-[#3498db] px-2.5 py-1 rounded-md font-mono border border-[#3498db]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período selecionado: {Number(maioresValoresDataCompleta.length).toLocaleString('pt-BR')})</span></div>
               <div className="flex gap-3 items-center">
-                  <button onClick={exportarExcelMaioresValores} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"><span>📥</span><span>Baixar Excel Completo</span></button>
-                  <button onClick={() => setTabelaMaioresValoresExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
+                <button onClick={() => setTabelaMaioresValoresExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaMaioresValores dados={maioresValoresTabela} /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={maioresValoresTabela} columns={colsMaioresValores} highlightColor="#3498db" /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1725,11 +1716,11 @@ export default function VisaoGeral({ data }) {
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3"><span className="text-[#e74c3c] text-2xl drop-shadow-[0_0_10px_rgba(231,76,60,0.8)]">⚠️</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Compras com Consumo Zero (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#e74c3c]/15 text-[#e74c3c] px-2.5 py-1 rounded-md font-mono border border-[#e74c3c]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período: {Number(comprasSemConsumoDataCompleta.length).toLocaleString('pt-BR')})</span></div>
               <div className="flex gap-3 items-center">
-                  <button onClick={exportarExcelComprasSemConsumo} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"><span>📥</span><span>Baixar Excel Completo</span></button>
-                  <button onClick={() => setTabelaComprasSemConsumoExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
+                <button onClick={() => setTabelaComprasSemConsumoExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaComprasSemConsumo dados={comprasSemConsumoTabela} /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1740,11 +1731,11 @@ export default function VisaoGeral({ data }) {
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3"><span className="text-[#f1c40f] text-2xl drop-shadow-[0_0_10px_rgba(241,196,15,0.8)]">⚠️</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Cadastros Duplicados (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#f1c40f]/15 text-[#f1c40f] px-2.5 py-1 rounded-md font-mono border border-[#f1c40f]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período: {Number(duplicadosDataCompleta.length).toLocaleString('pt-BR')})</span></div>
               <div className="flex gap-3 items-center">
-                  <button onClick={exportarExcelDuplicados} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"><span>📥</span><span>Baixar Excel Completo</span></button>
-                  <button onClick={() => setTabelaDuplicadosExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
+                <button onClick={() => setTabelaDuplicadosExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaDuplicados dados={duplicadosTabela} /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
