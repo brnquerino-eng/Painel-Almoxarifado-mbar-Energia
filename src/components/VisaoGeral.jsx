@@ -467,6 +467,22 @@ export default function VisaoGeral({ data }) {
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
 
+  // Corrige gráficos Plotly invisíveis no 1º paint (container ainda sem dimensão).
+  // Dispara resize após o browser estabilizar o layout — custo desprezível.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+    // Segundo kick leve: cobre casos em que o layout ainda muda após o 1º frame
+    const t = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 80)
+    return () => {
+      cancelAnimationFrame(id)
+      clearTimeout(t)
+    }
+  }, [snapshot.length, periodoEfetivo, dfFiltrado.length])
+
   const {
     metrics,
     rankingUnidade,
@@ -1172,7 +1188,7 @@ export default function VisaoGeral({ data }) {
             yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } }
           }}
           config={{ displayModeBar: false, responsive: true }}
-          style={{ width: '100%', cursor: 'pointer' }}
+          style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
           useResizeHandler
           onClick={(e) => {
             e?.event?.stopPropagation?.()
@@ -1324,7 +1340,7 @@ export default function VisaoGeral({ data }) {
               vis.obra && timeSeriesAgg.obra.length > 0 && { x: timeSeriesAgg.obra.map((d) => d.periodo), y: timeSeriesAgg.obra.map((d) => d.valor), name: 'Estoque Obra', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#1abc9c', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#1abc9c', width: 1.5 } }, cliponaxis: false },
             ].filter(Boolean)}
             layout={{ ...PLOT_LAYOUT, hovermode: 'closest', height: 350, bargap: 0, margin: { l: 20, r: 20, t: 40, b: 45 }, shapes: chartShapes, annotations: chartAnnotations, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.total.map(d => d.periodo), ticktext: timeSeriesAgg.total.map(d => formatarPeriodoTexto(d.periodo)), range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } }}
-            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
+            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
           />
         </div>
 
@@ -1424,7 +1440,7 @@ export default function VisaoGeral({ data }) {
               data={plotDataRanking}
               layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 140, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' } } }}
               config={{ displayModeBar: false, responsive: true }}
-              style={{ width: '100%', cursor: 'pointer' }}
+              style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
               useResizeHandler
               onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraRanking(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
             />
@@ -1440,7 +1456,7 @@ export default function VisaoGeral({ data }) {
           </div>
           <div onClick={(e) => e.stopPropagation()}>
             {composicao.length > 0 ? (
-              <Plot data={[{ type: 'pie', labels: composicao.map((d) => d.name), values: composicao.map((d) => d.value), customdata: composicao.map((d) => fmtBRL(d.value)), hole: 0.7, pull: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 0.05 : 0), marker: { colors: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? d.color : '#222222'), opacity: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 1 : 0.35), line: { color: '#161616', width: 3 } }, textinfo: 'percent', textposition: 'inside', textfont: { size: 11, color: '#ffffff', family: 'Inter', weight: 'bold' }, hovertemplate: '<b>%{label}</b><br>Valor: %{customdata}<br>Participação: %{percent}<extra></extra>' }]} layout={{ ...PLOT_LAYOUT, height: 380, margin: { l: 20, r: 20, t: 10, b: 10 }, showlegend: true, legend: { orientation: 'h', y: -0.1, x: 0.5, xanchor: 'center', font: { color: '#c5d0db', size: 10, family: 'Inter' } }, annotations: [{ text: `<b>TOTAL</b><br><span style="font-size:16px; font-weight:900; font-family:monospace; color:#ffffff;">${fmtValorCurto(metrics.valEstoque)}</span>`, x: 0.5, y: 0.5, font: { size: 12, color: '#8c9ba5' }, showarrow: false }] }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.label) setSelectedFatiaComposicao(prev => prev === e.points[0].label ? null : e.points[0].label) }} />
+              <Plot data={[{ type: 'pie', labels: composicao.map((d) => d.name), values: composicao.map((d) => d.value), customdata: composicao.map((d) => fmtBRL(d.value)), hole: 0.7, pull: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 0.05 : 0), marker: { colors: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? d.color : '#222222'), opacity: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 1 : 0.35), line: { color: '#161616', width: 3 } }, textinfo: 'percent', textposition: 'inside', textfont: { size: 11, color: '#ffffff', family: 'Inter', weight: 'bold' }, hovertemplate: '<b>%{label}</b><br>Valor: %{customdata}<br>Participação: %{percent}<extra></extra>' }]} layout={{ ...PLOT_LAYOUT, height: 380, margin: { l: 20, r: 20, t: 10, b: 10 }, showlegend: true, legend: { orientation: 'h', y: -0.1, x: 0.5, xanchor: 'center', font: { color: '#c5d0db', size: 10, family: 'Inter' } }, annotations: [{ text: `<b>TOTAL</b><br><span style="font-size:16px; font-weight:900; font-family:monospace; color:#ffffff;">${fmtValorCurto(metrics.valEstoque)}</span>`, x: 0.5, y: 0.5, font: { size: 12, color: '#8c9ba5' }, showarrow: false }] }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.label) setSelectedFatiaComposicao(prev => prev === e.points[0].label ? null : e.points[0].label) }} />
             ) : (<p className="text-muted text-center py-16">Sem dados</p>)}
           </div>
         </div>
@@ -1487,7 +1503,7 @@ export default function VisaoGeral({ data }) {
             visComprasConsumo.consumo && { x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), y: timeSeriesAgg.comprasConsumo.map((d) => d.consumo), name: 'Consumo', type: 'scatter', mode: 'lines+markers', line: { color: '#2ecc71', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#2ecc71', line: { color: '#161616', width: 1.5 } }, customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.consumo)), hovertemplate: '<b>%{x}</b><br>Consumo: <span style="color:#2ecc71; font-weight:bold;">%{customdata}</span><extra></extra>' },
           ].filter(Boolean)}
           layout={{ ...PLOT_LAYOUT, height: 350, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapes, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), ticktext: timeSeriesAgg.comprasConsumo.map(d => formatarPeriodoTexto(d.periodo)), showspikes: true, spikemode: 'across', spikedash: 'dot', spikecolor: '#555555', spikethickness: 1 }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false } }}
-          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
+          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
         <div className="mt-5 border border-[#e74c3c]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
@@ -1541,7 +1557,7 @@ export default function VisaoGeral({ data }) {
                   { type: 'bar', orientation: 'h', name: 'Consumo', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.consumo), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.consumo)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
                 ]}
                 layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(280, compraConsumoUnidade.length * 45), margin: { l: 130, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' } } }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraCompraConsumo(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraCompraConsumo(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
               />
             ) : (<p className="text-muted text-center py-10">Sem dados</p>)}
           </div>
@@ -1596,7 +1612,7 @@ export default function VisaoGeral({ data }) {
                   hoverinfo: 'none'
                 }]}
                 layout={{ ...PLOT_LAYOUT, height: Math.max(280, variacaoFiltrada.length * 35), margin: { l: 120, r: 40, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' } } }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
                 onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraVariacao(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
               />
             ) : (<p className="text-muted text-center py-10">Nenhum dado encontrado</p>)}
@@ -1663,7 +1679,7 @@ export default function VisaoGeral({ data }) {
             xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoTexto(d.periodo)), range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] },
             yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] }
           }}
-          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler
+          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
         />
 
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
@@ -1715,7 +1731,7 @@ export default function VisaoGeral({ data }) {
               visGiroCobertura.cobertura && { x: giroCoberturaTempo.map((d) => d.periodo), y: giroCoberturaTempo.map((d) => d.cobertura), name: 'Cobertura', type: 'scatter', mode: 'lines+markers', yaxis: 'y2', line: { color: '#f58220', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#f58220', line: { color: '#fff', width: 1.5 } }, customdata: giroCoberturaTempo.map((d) => fmtMes(d.cobertura)), hovertemplate: '<b>%{x}</b><br>Cobertura: <span style="color:#f58220; font-weight:bold;">%{customdata}</span><extra></extra>' },
             ].filter(Boolean)}
             layout={{ ...PLOT_LAYOUT, height: 380, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapesGiro, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: giroCoberturaTempo.map(d => d.periodo), ticktext: giroCoberturaTempo.map(d => formatarPeriodoTexto(d.periodo)) }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } }}
-            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler
+            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
           />
         ) : (<p className="text-muted text-center py-10">Sem dados suficientes para calcular Giro x Cobertura.</p>)}
       </div>
@@ -1736,7 +1752,7 @@ export default function VisaoGeral({ data }) {
               <Plot
                 data={[{ type: 'scatter', mode: 'lines+markers+text', name: 'Valor Parado (R$)', x: paradosChart.map((d) => d.label), y: paradosChart.map((d) => d.valor), text: paradosChart.map((d) => fmtValorCurto(d.valor)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 2 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>', cliponaxis: false }]}
                 layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 65, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, range: [-0.8, paradosChart.length] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [-(Math.max(...paradosChart.map(d => d.valor), 10) * 0.15), (Math.max(...paradosChart.map(d => d.valor), 10) * 1.45)] } }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
                 onClick={(e) => { if (e?.points?.[0]?.x) { const num = parseInt(e.points[0].x.replace(/\D/g, '')); setFiltroMesParado(prev => prev === num ? null : num) } }}
               />
             </div>
