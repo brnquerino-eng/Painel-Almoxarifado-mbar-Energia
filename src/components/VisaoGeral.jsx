@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import Plot from 'react-plotly.js'
 import {
@@ -245,10 +245,272 @@ const ExecutiveCard = ({
   )
 }
 
+// --- TABELAS COMPONENTIZADAS (Com limite corrigido na navegação por teclado) ---
+
+const TabelaMaioresValores = ({ dados }) => {
+  const [indexSel, setIndexSel] = useState(null)
+  const contRef = useRef(null)
+
+  const handleKeyDown = (e) => {
+    if (!dados || dados.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
+    }
+  }
+
+  useEffect(() => {
+    if (indexSel !== null && contRef.current) {
+      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [indexSel])
+
+  return (
+    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#222222]/50">
+          {dados.length > 0 ? (
+            dados.map((item, idx) => {
+              const isSelected = indexSel === idx;
+              return (
+                <tr 
+                  key={`${item.unidade}-${item.codigo}-${idx}`}
+                  data-index={idx}
+                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
+                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#3498db]' : 'hover:bg-[#1a1a1a]'}`}
+                >
+                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                  <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
+                  <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
+                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                  <td className="p-3.5 text-right font-mono text-[#3498db] font-bold text-xs">{fmtBRL(item.valor)}</td>
+                </tr>
+              )
+            })
+          ) : ( <tr><td colSpan="5" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado no período selecionado.</td></tr> )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const TabelaDuplicados = ({ dados }) => {
+  const [indexSel, setIndexSel] = useState(null)
+  const contRef = useRef(null)
+
+  const handleKeyDown = (e) => {
+    if (!dados || dados.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
+    }
+  }
+
+  useEffect(() => {
+    if (indexSel !== null && contRef.current) {
+      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [indexSel])
+
+  return (
+    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto (Agrupado por Chave)</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Qtd SKUs</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Lista de SKUs</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Qtd Fís.</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#222222]/50">
+          {dados.length > 0 ? (
+            dados.map((item, idx) => {
+              const isSelected = indexSel === idx;
+              return (
+                <tr 
+                  key={`${item.nome}-${idx}`}
+                  data-index={idx}
+                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
+                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f1c40f]' : 'hover:bg-[#1a1a1a]'}`}
+                >
+                  <td className="p-3.5 text-white font-medium text-xs max-w-[250px] truncate" title={item.nome}>{item.nome}</td>
+                  <td className="p-3.5 text-center">
+                    <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">
+                      {item.qtd_skus} SKUs
+                    </span>
+                  </td>
+                  <td className="p-3.5 text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate" title={item.skus_lista}>{item.skus_lista}</td>
+                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                  <td className="p-3.5 text-right font-mono text-[#f1c40f] font-bold text-xs">{fmtBRL(item.valor)}</td>
+                </tr>
+              )
+            })
+          ) : ( <tr><td colSpan="5" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Base limpa! Nenhum cadastro duplicado encontrado no período.</td></tr> )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const TabelaComprasSemConsumo = ({ dados }) => {
+  const [indexSel, setIndexSel] = useState(null)
+  const contRef = useRef(null)
+
+  const handleKeyDown = (e) => {
+    if (!dados || dados.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
+    }
+  }
+
+  useEffect(() => {
+    if (indexSel !== null && contRef.current) {
+      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [indexSel])
+
+  return (
+    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Classificação</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Comprado</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Consumido</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#222222]/50">
+          {dados.length > 0 ? (
+            dados.map((item, idx) => {
+              const isSelected = indexSel === idx;
+              return (
+                <tr 
+                  key={`${item.unidade}-${item.codigo}-${idx}`}
+                  data-index={idx}
+                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
+                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#e74c3c]' : 'hover:bg-[#1a1a1a]'}`}
+                >
+                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                  <td className="p-3.5 text-[#e74c3c] font-mono text-xs">{item.codigo}</td>
+                  <td className="p-3.5 text-white text-xs truncate max-w-[200px]" title={item.nome}>{item.nome || '—'}</td>
+                  <td className="p-3.5 text-center">
+                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
+                      item.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : item.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : item.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
+                    }`}>{item.categoria}</span>
+                  </td>
+                  <td className="p-3.5 text-right font-mono text-[#e74c3c] font-bold text-xs">{fmtBRL(item.comprado)}</td>
+                  <td className="p-3.5 text-right font-mono text-muted font-bold text-xs">R$ 0,00</td>
+                </tr>
+              )
+            })
+          ) : ( <tr><td colSpan="6" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo.</td></tr> )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const TabelaCyberpunk = ({ dados }) => {
+  const [indexSel, setIndexSel] = useState(null)
+  const contRef = useRef(null)
+
+  const handleKeyDown = (e) => {
+    if (!dados || dados.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.min(prev + 1, dados.length - 1)))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setIndexSel(prev => (prev === null ? 0 : Math.max(prev - 1, 0)))
+    }
+  }
+
+  useEffect(() => {
+    if (indexSel !== null && contRef.current) {
+      const row = contRef.current.querySelector(`tr[data-index="${indexSel}"]`)
+      if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [indexSel])
+
+  return (
+    <div ref={contRef} tabIndex={0} onKeyDown={handleKeyDown} className="outline-none focus:ring-1 focus:ring-accent/40 rounded-xl w-full h-full">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Parado</th>
+            <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Meses Parado</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#222222]/50">
+          {dados.length > 0 ? (
+            dados.map((item, idx) => {
+              const isSelected = indexSel === idx;
+              return (
+                <tr 
+                  key={`${item.unidade}-${item.codigo}-${item.mesesParado}-${idx}`}
+                  data-index={idx}
+                  onClick={() => setIndexSel(prev => prev === idx ? null : idx)}
+                  className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f58220]' : 'hover:bg-[#1a1a1a]'}`}
+                >
+                  <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                  <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
+                  <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
+                  <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                  <td className="p-3.5 text-right font-mono text-[#2ecc71] font-bold text-xs">{fmtBRL(item.valor)}</td>
+                  <td className="p-3.5 text-center">
+                    <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{item.mesesParado} Meses</span>
+                  </td>
+                </tr>
+              )
+            })
+          ) : ( <tr><td colSpan="6" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado.</td></tr> )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// --- COMPONENTE PRINCIPAL ---
+
 export default function VisaoGeral({ data }) {
   const [escoposSel, setEscoposSel] = useState(['Ativa'])
   const [unidadesSel, setUnidadesSel] = useState([])
   const [anosSel, setAnosSel] = useState([])
+  
+  // Novo Filtro Global de Tipo de Estoque
+  const [tiposEstoqueSel, setTiposEstoqueSel] = useState(['Todos'])
+  
   const [periodoAtivo, setPeriodoAtivo] = useState(null)
   const [activeCard, setActiveCard] = useState(null)
   
@@ -276,12 +538,6 @@ export default function VisaoGeral({ data }) {
   
   const [listaDuplicadosAberta, setListaDuplicadosAberta] = useState(false)
   const [tabelaDuplicadosExpandida, setTabelaDuplicadosExpandida] = useState(false)
-
-  // Seleção de linhas nas tabelas
-  const [linhaSelMaiores, setLinhaSelMaiores] = useState(null)
-  const [linhaSelDuplicados, setLinhaSelDuplicados] = useState(null)
-  const [linhaSelComprasSemConsumo, setLinhaSelComprasSemConsumo] = useState(null)
-  const [linhaSelParados, setLinhaSelParados] = useState(null)
 
   const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
@@ -312,6 +568,8 @@ export default function VisaoGeral({ data }) {
 
   const dfFiltrado = useMemo(() => {
     let df = data || []
+    
+    // Filtro de Escopo e Unidade
     if (!escoposSel.includes('Todas') && escoposSel.length > 0) {
       let allowed = []
       if (escoposSel.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
@@ -320,8 +578,26 @@ export default function VisaoGeral({ data }) {
     }
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
     if (anosSel.length > 0) df = df.filter((r) => anosSel.includes(r.ano_referencia))
+    
+    // Filtro Global de Tipo de Estoque (Cascade para todo o painel)
+    if (tiposEstoqueSel.length > 0 && !tiposEstoqueSel.includes('Todos')) {
+      df = df.filter(r => {
+        const isCrit = isCritico(r.item_critico);
+        const isObs = isObsoleto(r.nome_local_estoque);
+        const isObr = isObra(r.nome_local_estoque);
+        const isOp = !isCrit && !isObs && !isObr;
+
+        return (
+          (tiposEstoqueSel.includes('Crítico') && isCrit) ||
+          (tiposEstoqueSel.includes('Obsoleto') && isObs) ||
+          (tiposEstoqueSel.includes('Obra') && isObr) ||
+          (tiposEstoqueSel.includes('Operacional') && isOp)
+        );
+      })
+    }
+
     return df
-  }, [data, escoposSel, unidadesSel, anosSel, unidadesAtivas, unidadesGerenciais])
+  }, [data, escoposSel, unidadesSel, anosSel, unidadesAtivas, unidadesGerenciais, tiposEstoqueSel])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (data || [])
@@ -378,7 +654,7 @@ export default function VisaoGeral({ data }) {
     XLSX.writeFile(wb, `maiores_valores_estoque_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
   }, [maioresValoresDataCompleta, periodoEfetivo])
 
-  // --- LÓGICA: CADASTROS DUPLICADOS COM MÉTRICA DE CHAVES (Palavras Ordenadas) ---
+  // --- LÓGICA: CADASTROS DUPLICADOS COM MÉTRICA DE CHAVES ---
   const duplicadosDataCompleta = useMemo(() => {
     if (!snapshot.length) return []
 
@@ -497,7 +773,6 @@ export default function VisaoGeral({ data }) {
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         
-        // Lógica de Duplicados
         if (r.nome_produto) {
           const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
           const palavras = nomeUpper.split(' ').filter(Boolean)
@@ -825,160 +1100,6 @@ export default function VisaoGeral({ data }) {
     )
   }, [])
 
-  const TabelaMaioresValores = () => (
-    <table className="w-full text-left border-collapse">
-      <thead>
-        <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-[#222222]/50">
-        {maioresValoresTabela.length > 0 ? (
-          maioresValoresTabela.map((item) => {
-            const rowKey = `${item.unidade}-${item.codigo}`;
-            const isSelected = linhaSelMaiores === rowKey;
-            return (
-              <tr 
-                key={rowKey}
-                onClick={() => setLinhaSelMaiores(prev => prev === rowKey ? null : rowKey)}
-                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#3498db]' : 'hover:bg-[#1a1a1a]'}`}
-              >
-                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-                <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                <td className="p-3.5 text-right font-mono text-[#3498db] font-bold text-xs">{fmtBRL(item.valor)}</td>
-              </tr>
-            )
-          })
-        ) : ( <tr><td colSpan="5" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado no período selecionado.</td></tr> )}
-      </tbody>
-    </table>
-  )
-
-  const TabelaDuplicados = () => (
-    <table className="w-full text-left border-collapse">
-      <thead>
-        <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto (Agrupado por Chave)</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Qtd SKUs</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Lista de SKUs</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Qtd Fís.</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor em Estoque</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-[#222222]/50">
-        {duplicadosTabela.length > 0 ? (
-          duplicadosTabela.map((item, idx) => {
-            const rowKey = `${item.nome}-${idx}`;
-            const isSelected = linhaSelDuplicados === rowKey;
-            return (
-              <tr 
-                key={rowKey}
-                onClick={() => setLinhaSelDuplicados(prev => prev === rowKey ? null : rowKey)}
-                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f1c40f]' : 'hover:bg-[#1a1a1a]'}`}
-              >
-                <td className="p-3.5 text-white font-medium text-xs max-w-[250px] truncate" title={item.nome}>{item.nome}</td>
-                <td className="p-3.5 text-center">
-                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">
-                    {item.qtd_skus} SKUs
-                  </span>
-                </td>
-                <td className="p-3.5 text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate" title={item.skus_lista}>{item.skus_lista}</td>
-                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                <td className="p-3.5 text-right font-mono text-[#f1c40f] font-bold text-xs">{fmtBRL(item.valor)}</td>
-              </tr>
-            )
-          })
-        ) : ( <tr><td colSpan="5" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Base limpa! Nenhum cadastro duplicado encontrado no período.</td></tr> )}
-      </tbody>
-    </table>
-  )
-
-  const TabelaComprasSemConsumo = () => (
-    <table className="w-full text-left border-collapse">
-      <thead>
-        <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Classificação</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Comprado</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Consumido</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-[#222222]/50">
-        {comprasSemConsumoTabela.length > 0 ? (
-          comprasSemConsumoTabela.map((item) => {
-            const rowKey = `${item.unidade}-${item.codigo}`;
-            const isSelected = linhaSelComprasSemConsumo === rowKey;
-            return (
-              <tr 
-                key={rowKey}
-                onClick={() => setLinhaSelComprasSemConsumo(prev => prev === rowKey ? null : rowKey)}
-                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#e74c3c]' : 'hover:bg-[#1a1a1a]'}`}
-              >
-                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                <td className="p-3.5 text-[#e74c3c] font-mono text-xs">{item.codigo}</td>
-                <td className="p-3.5 text-white text-xs truncate max-w-[200px]" title={item.nome}>{item.nome || '—'}</td>
-                <td className="p-3.5 text-center">
-                  <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
-                    item.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : item.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : item.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
-                  }`}>{item.categoria}</span>
-                </td>
-                <td className="p-3.5 text-right font-mono text-[#e74c3c] font-bold text-xs">{fmtBRL(item.comprado)}</td>
-                <td className="p-3.5 text-right font-mono text-muted font-bold text-xs">R$ 0,00</td>
-              </tr>
-            )
-          })
-        ) : ( <tr><td colSpan="6" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo.</td></tr> )}
-      </tbody>
-    </table>
-  )
-
-  const TabelaCyberpunk = () => (
-    <table className="w-full text-left border-collapse">
-      <thead>
-        <tr className="bg-[#111111] border-b border-[#2A2A2A] sticky top-0 z-10 shadow-md">
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Unidade</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Código SKU</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider">Nome do Produto</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Quantidade</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-right">Valor Parado</th>
-          <th className="p-3.5 text-[#8c9ba5] font-bold text-xs uppercase tracking-wider text-center">Meses Parado</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-[#222222]/50">
-        {itensParadosFiltradosTabela.length > 0 ? (
-          itensParadosFiltradosTabela.map((item) => {
-            const rowKey = `${item.unidade}-${item.codigo}-${item.mesesParado}`;
-            const isSelected = linhaSelParados === rowKey;
-            return (
-              <tr 
-                key={rowKey}
-                onClick={() => setLinhaSelParados(prev => prev === rowKey ? null : rowKey)}
-                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f58220]' : 'hover:bg-[#1a1a1a]'}`}
-              >
-                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-                <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-                <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-                <td className="p-3.5 text-right font-mono text-[#2ecc71] font-bold text-xs">{fmtBRL(item.valor)}</td>
-                <td className="p-3.5 text-center">
-                  <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{item.mesesParado} Meses</span>
-                </td>
-              </tr>
-            )
-          })
-        ) : ( <tr><td colSpan="6" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado.</td></tr> )}
-      </tbody>
-    </table>
-  )
-
   const isRankingSelected = activeCard === 'ranking_unidade'
   const isComposicaoSelected = activeCard === 'composicao_estoque'
   const isCriticoSelected = activeCard === 'rank_critico'
@@ -1003,6 +1124,10 @@ export default function VisaoGeral({ data }) {
           </div>
           
           <div className="flex flex-wrap items-end gap-3 z-30">
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>Tipo</label>
+              <CyberMultiSelect options={['Todos', 'Operacional', 'Crítico', 'Obsoleto', 'Obra']} selected={tiposEstoqueSel} onChange={setTiposEstoqueSel} placeholder="Todos os Tipos" />
+            </div>
             <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>Unidade</label>
               <CyberMultiSelect options={['Todas', 'Ativa', 'Gerencial']} selected={escoposSel} onChange={(val) => { setEscoposSel(val); setUnidadesSel([]); }} placeholder="Selecione Unidade" />
@@ -1080,13 +1205,15 @@ export default function VisaoGeral({ data }) {
           {listaMaioresValoresAberta && (
             <div className="p-4 space-y-4 animate-fade-in bg-[#121212]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor em estoque para a seleção atual.</span>
+                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor em estoque para a seleção atual. (Dica: Clique na tabela e use as setas ↑ ↓ do teclado para navegar)</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelMaioresValores} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"><span>📥</span><span>Exportar Excel</span></button>
                   <button onClick={() => setTabelaMaioresValoresExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaMaioresValores /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
+                <TabelaMaioresValores dados={maioresValoresTabela} />
+              </div>
             </div>
           )}
         </div>
@@ -1214,7 +1341,9 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaComprasSemConsumoExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaComprasSemConsumo /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
+                <TabelaComprasSemConsumo dados={comprasSemConsumoTabela} />
+              </div>
             </div>
           )}
         </div>
@@ -1328,7 +1457,9 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaDuplicadosExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]"><TabelaDuplicados /></div>
+              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
+                <TabelaDuplicados dados={duplicadosTabela} />
+              </div>
             </div>
           )}
         </div>
@@ -1368,7 +1499,7 @@ export default function VisaoGeral({ data }) {
             <div className="mb-6 bg-[#101010] p-4 rounded-xl border border-[#222222]">
               <Plot
                 data={[{ type: 'scatter', mode: 'lines+markers+text', name: 'Valor Parado (R$)', x: paradosChart.map((d) => d.label), y: paradosChart.map((d) => d.valor), text: paradosChart.map((d) => fmtValorCurto(d.valor)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 2 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>', cliponaxis: false }]}
-                layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 55, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, range: [-0.8, paradosChart.length] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [0, (Math.max(...paradosChart.map(d => d.valor), 10) * 1.25)] } }}
+                layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 65, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, range: [-0.8, paradosChart.length] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [-(Math.max(...paradosChart.map(d => d.valor), 10) * 0.15), (Math.max(...paradosChart.map(d => d.valor), 10) * 1.45)] } }}
                 config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
                 onClick={(e) => { if (e?.points?.[0]?.x) { const num = parseInt(e.points[0].x.replace(/\D/g, '')); setFiltroMesParado(prev => prev === num ? null : num) } }}
               />
@@ -1391,7 +1522,9 @@ export default function VisaoGeral({ data }) {
                       <button onClick={() => setTabelaExpandida(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-[#333] text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Janela</span></button>
                     </div>
                   </div>
-                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212]"><TabelaCyberpunk /></div>
+                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212]">
+                    <TabelaCyberpunk dados={itensParadosFiltradosTabela} />
+                  </div>
                 </div>
               )}
             </div>
@@ -1409,7 +1542,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaCyberpunk /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaCyberpunk dados={itensParadosFiltradosTabela} /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1424,7 +1557,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaMaioresValoresExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaMaioresValores /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaMaioresValores dados={maioresValoresTabela} /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1439,7 +1572,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaComprasSemConsumoExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaComprasSemConsumo /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaComprasSemConsumo dados={comprasSemConsumoTabela} /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
@@ -1454,7 +1587,7 @@ export default function VisaoGeral({ data }) {
                   <button onClick={() => setTabelaDuplicadosExpandida(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaDuplicados /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaDuplicados dados={duplicadosTabela} /></div></div></div>
           </div>
         </FullScreenPortal>
       )}
