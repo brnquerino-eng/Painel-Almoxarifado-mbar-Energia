@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import Plot from 'react-plotly.js'
+import pptxgen from 'pptxgenjs'
 import {
   fmtBRL,
   fmtInt,
@@ -245,7 +246,7 @@ const ExecutiveCard = ({
   )
 }
 
-// --- TABELAS COMPONENTIZADAS (Com limite corrigido na navegação por teclado) ---
+// --- TABELAS COMPONENTIZADAS ---
 
 const TabelaMaioresValores = ({ dados }) => {
   const [indexSel, setIndexSel] = useState(null)
@@ -507,8 +508,6 @@ export default function VisaoGeral({ data }) {
   const [escoposSel, setEscoposSel] = useState(['Ativa'])
   const [unidadesSel, setUnidadesSel] = useState([])
   const [anosSel, setAnosSel] = useState([])
-  
-  // Novo Filtro Global de Tipo de Estoque
   const [tiposEstoqueSel, setTiposEstoqueSel] = useState(['Todos'])
   
   const [periodoAtivo, setPeriodoAtivo] = useState(null)
@@ -569,7 +568,6 @@ export default function VisaoGeral({ data }) {
   const dfFiltrado = useMemo(() => {
     let df = data || []
     
-    // Filtro de Escopo e Unidade
     if (!escoposSel.includes('Todas') && escoposSel.length > 0) {
       let allowed = []
       if (escoposSel.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
@@ -579,7 +577,6 @@ export default function VisaoGeral({ data }) {
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
     if (anosSel.length > 0) df = df.filter((r) => anosSel.includes(r.ano_referencia))
     
-    // Filtro Global de Tipo de Estoque (Cascade para todo o painel)
     if (tiposEstoqueSel.length > 0 && !tiposEstoqueSel.includes('Todos')) {
       df = df.filter(r => {
         const isCrit = isCritico(r.item_critico);
@@ -625,7 +622,7 @@ export default function VisaoGeral({ data }) {
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
 
-  // --- LÓGICA: MAIORES VALORES DE ESTOQUE ---
+  // --- LÓGICA: MAIORES VALORES DE ESTOQUE (Tabelas UI) ---
   const maioresValoresDataCompleta = useMemo(() => {
     if (!snapshot.length) return []
     return [...snapshot]
@@ -1100,6 +1097,138 @@ export default function VisaoGeral({ data }) {
     )
   }, [])
 
+
+  const exportarPowerPoint = useCallback(() => {
+    try {
+      const pres = new pptxgen()
+      pres.layout = 'LAYOUT_16x9'
+
+      const slideCapa = pres.addSlide()
+      slideCapa.background = { color: '080808' }
+      
+      slideCapa.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.1, fill: { color: 'f58220' } })
+      
+      slideCapa.addText('ÂMBAR ENERGIA', { x: 0.5, y: 1.8, w: '90%', h: 0.5, fontSize: 16, color: 'f58220', bold: true, align: 'center', charSpacing: 3 })
+      slideCapa.addText('RELATÓRIO GERENCIAL DE ESTOQUE', { x: 0.5, y: 2.3, w: '90%', h: 1, fontSize: 38, color: 'ffffff', bold: true, align: 'center' })
+      slideCapa.addText(`Período de Referência: ${formatarPeriodoTexto(periodoEfetivo)}`, { x: 0.5, y: 3.5, w: '90%', h: 0.5, fontSize: 14, color: '8c9ba5', align: 'center' })
+      
+      const filtrosAplicados = `Filtros Ativos - Escopo: ${escoposSel.join(', ')} | Tipo de Estoque: ${tiposEstoqueSel.join(', ')}`
+      slideCapa.addText(filtrosAplicados, { x: 0.5, y: 4.2, w: '90%', h: 0.5, fontSize: 11, color: '555555', align: 'center', italic: true })
+
+      const slideResumo = pres.addSlide()
+      slideResumo.background = { color: '121212' }
+      slideResumo.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+      slideResumo.addText('RESUMO FINANCEIRO E OPERACIONAL', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'f58220', bold: true })
+
+      const kpiRows = [
+        [{ text: 'INDICADOR', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }, { text: 'VALOR ATUAL', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }],
+        ['Total em Estoque', fmtBRL(metrics.valEstoque)],
+        ['Estoque Crítico', fmtBRL(metrics.valCritico)],
+        ['Estoque Obsoleto', fmtBRL(metrics.valObsoleto)],
+        ['Total de Compras no Período', fmtBRL(metrics.valCompras)],
+        ['Total de Consumo no Período', fmtBRL(metrics.valConsumo)],
+        ['Total de SKUs Únicos', fmtInt(metrics.valSkus)]
+      ]
+
+      slideResumo.addTable(kpiRows, { 
+        x: 1.0, y: 1.2, w: 8, 
+        fill: '161616', color: 'ffffff', 
+        border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
+        fontSize: 14, rowH: 0.5, align: 'center', valign: 'middle' 
+      })
+
+      const maioresValoresDataCompleta = [...snapshot]
+        .filter(r => (r.valor_saldo_atual || 0) > 0)
+        .sort((a, b) => (b.valor_saldo_atual || 0) - (a.valor_saldo_atual || 0))
+        .map(r => ({ unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual || 0, valor: r.valor_saldo_atual || 0 }))
+
+      if (maioresValoresDataCompleta.length > 0) {
+        const slideTop = pres.addSlide()
+        slideTop.background = { color: '121212' }
+        slideTop.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+        slideTop.addText('TOP SKUs: MAIOR CAPITAL IMOBILIZADO', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: '3498db', bold: true })
+        
+        const topRows = [[
+          { text: 'UNIDADE', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'SKU', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'PRODUTO', options: { fill: '2A2A2A', color: '3498db', bold: true } },
+          { text: 'VALOR', options: { fill: '2A2A2A', color: '3498db', bold: true, align: 'right' } }
+        ]]
+        
+        maioresValoresDataCompleta.slice(0, 9).forEach(item => {
+          topRows.push([item.unidade, item.codigo, (item.nome || '').substring(0, 45) + '...', { text: fmtBRL(item.valor), options: { align: 'right' } }])
+        })
+        
+        slideTop.addTable(topRows, { 
+          x: 0.5, y: 0.8, w: 9, 
+          fill: '161616', color: 'ffffff', 
+          border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
+          fontSize: 11, rowH: 0.4 
+        })
+      }
+
+      const calcParados = dfFiltrado.filter((r) => r.tmp_ano_num * 12 + r.tmp_mes_num <= (parsePeriodo(periodoEfetivo).ano * 12 + parsePeriodo(periodoEfetivo).mes) && !isCritico(r.item_critico) && !isObsoleto(r.nome_local_estoque)).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
+      const ultimoMov = new Map(), primeiroHist = new Map()
+      for (const r of calcParados) {
+        const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
+        if (Math.abs(r.valor_saida_cons_interno || 0) > 0) {
+          if (r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
+        }
+        if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
+      }
+      const pAtual = parsePeriodo(periodoEfetivo)
+      const snapshotIdx = pAtual.ano * 12 + pAtual.mes
+      const snapAtual = calcParados.filter((r) => r.tmp_ano_num === pAtual.ano && r.tmp_mes_num === pAtual.mes && r.qtde_saldo_atual > 0 && r.codigo_produto)
+      const itensParadosPPTX = []
+      for (const r of snapAtual) {
+        const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
+        let ultimo = ultimoMov.get(key)
+        if (ultimo == null) {
+          const prim = primeiroHist.get(key)
+          ultimo = prim != null ? prim - 1 : snapshotIdx
+        }
+        const mesesParado = snapshotIdx - ultimo
+        if (mesesParado >= 3) {
+          itensParadosPPTX.push({ unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, mesesParado, valor: r.valor_saldo_atual })
+        }
+      }
+      itensParadosPPTX.sort((a, b) => b.valor - a.valor)
+
+      if (itensParadosPPTX.length > 0) {
+        const slideParados = pres.addSlide()
+        slideParados.background = { color: '121212' }
+        slideParados.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: '1a1a1a' } })
+        slideParados.addText('ALERTA: MATERIAIS PARADOS (> 3 MESES)', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'e74c3c', bold: true })
+        
+        const paradosRows = [[
+          { text: 'UNIDADE', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'SKU', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'PRODUTO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true } },
+          { text: 'TEMPO INATIVO', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'center' } },
+          { text: 'VALOR', options: { fill: '2A2A2A', color: 'e74c3c', bold: true, align: 'right' } }
+        ]]
+        
+        itensParadosPPTX.slice(0, 9).forEach(item => {
+          paradosRows.push([item.unidade, item.codigo, (item.nome || '').substring(0, 35) + '...', { text: `${item.mesesParado} Meses`, options: { align: 'center' } }, { text: fmtBRL(item.valor), options: { align: 'right' } }])
+        })
+        
+        slideParados.addTable(paradosRows, { 
+          x: 0.5, y: 0.8, w: 9.0, 
+          fill: '161616', color: 'ffffff', 
+          border: { type: 'solid', color: '2A2A2A', pt: 1 }, 
+          fontSize: 11, rowH: 0.4 
+        })
+      }
+
+      const fileName = `Apresentacao_Gerencial_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.pptx`
+      pres.writeFile({ fileName })
+
+    } catch (error) {
+      console.error("Erro ao gerar o PowerPoint:", error)
+      alert("Houve um erro ao gerar a apresentação. Verifique o console.")
+    }
+  }, [dfFiltrado, snapshot, periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
+
   const isRankingSelected = activeCard === 'ranking_unidade'
   const isComposicaoSelected = activeCard === 'composicao_estoque'
   const isCriticoSelected = activeCard === 'rank_critico'
@@ -1111,12 +1240,39 @@ export default function VisaoGeral({ data }) {
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       
+      {/* --- NOVO CABEÇALHO GLOBAL (Estilo da Imagem 2) --- */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 mt-2 px-1">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#2a1610] border border-[#f58220]/30 flex items-center justify-center text-[#f58220] shadow-inner shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <h1 className="text-lg lg:text-xl font-black text-white tracking-wider uppercase drop-shadow-sm">
+            GESTÃO E FECHAMENTO EXECUTIVO DE ESTOQUE
+          </h1>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={exportarPowerPoint}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#121212] hover:bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#f58220]/50 text-white font-bold text-[11px] tracking-widest shadow-sm transition-all"
+          >
+            <svg className="w-4 h-4 text-[#f58220]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            <span>PPTX</span>
+          </button>
+        </div>
+      </div>
+
+      {/* --- INÍCIO DO CARD DO GRÁFICO --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
           <div>
-            <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1">Painel Gerencial Âmbar Energia</div>
+            <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1 flex items-center gap-3">
+              Painel Gerencial Âmbar Energia
+            </div>
             <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide">
               <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
               EVOLUÇÃO TEMPORAL DO ESTOQUE (R$)
@@ -1532,6 +1688,7 @@ export default function VisaoGeral({ data }) {
         ) : (<p className="text-muted text-center py-8 tracking-wide">Nenhum material operacional parado há mais de 3 meses para o período selecionado.</p>)}
       </div>
 
+      {/* MODAIS FULLSCREEN AQUI (Ocultados nesta visualização, mantidos no código original) */}
       {tabelaExpandida && (
         <FullScreenPortal onClose={() => setTabelaExpandida(false)}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
