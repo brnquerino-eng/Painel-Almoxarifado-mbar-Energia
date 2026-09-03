@@ -260,7 +260,6 @@ const TabelaGenerica = ({ dados, columns, highlightColor = '#f58220', emptyMessa
   const [indexSel, setIndexSel] = useState(null)
   const contRef = useRef(null)
 
-  // Reset seleção quando os dados mudam
   useEffect(() => {
     setIndexSel(null)
   }, [dados])
@@ -340,7 +339,7 @@ export default function VisaoGeral({ data }) {
   const [escoposSel, setEscoposSel] = useState(['Ativa'])
   const [unidadesSel, setUnidadesSel] = useState([])
   const [anosSel, setAnosSel] = useState([])
-  const [tiposEstoqueSel, setTiposEstoqueSel] = useState([]) // Array vazio = Inteligência de "Todos"
+  const [tiposEstoqueSel, setTiposEstoqueSel] = useState([])
 
   const [periodoAtivo, setPeriodoAtivo] = useState(null)
   const [activeCard, setActiveCard] = useState(null)
@@ -350,11 +349,15 @@ export default function VisaoGeral({ data }) {
   const [selectedBarraCritico, setSelectedBarraCritico] = useState(null)
   const [selectedBarraObsoleto, setSelectedBarraObsoleto] = useState(null)
   const [selectedBarraObra, setSelectedBarraObra] = useState(null)
+  
+  // Controles dos novos gráficos
   const [selectedBarraCompraConsumo, setSelectedBarraCompraConsumo] = useState(null)
+  const [selectedBarraVariacao, setSelectedBarraVariacao] = useState(null)
   const [selectedBarraSkus, setSelectedBarraSkus] = useState(null)
-
-  const [filtroMesParado, setFiltroMesParado] = useState(null)
+  
+  const [abaVariacao, setAbaVariacao] = useState('aumento') // 'aumento' ou 'reducao'
   const [abaSkus, setAbaSkus] = useState('unicos')
+  const [filtroMesParado, setFiltroMesParado] = useState(null)
 
   const [listaAberta, setListaAberta] = useState(false)
   const [tabelaUnidadesSel, setTabelaUnidadesSel] = useState([])
@@ -378,7 +381,6 @@ export default function VisaoGeral({ data }) {
 
   const handleCardClick = useCallback((key) => setActiveCard(prev => prev === key ? null : key), [])
 
-  // --- Opções de filtro ---
   const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
     if (!data || data.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
     const uniques = [...new Set(data.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
@@ -402,7 +404,6 @@ export default function VisaoGeral({ data }) {
 
   const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
 
-  // --- Dados filtrados com categoria pré-classificada ---
   const dfFiltrado = useMemo(() => {
     let df = data || []
 
@@ -413,7 +414,6 @@ export default function VisaoGeral({ data }) {
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
     if (anosSel.length > 0) df = df.filter((r) => anosSel.includes(r.ano_referencia))
 
-    // Pré-classifica categoria uma única vez
     df = df.map(r => ({
       ...r,
       _categoria: classificarRegistro(r)
@@ -426,7 +426,6 @@ export default function VisaoGeral({ data }) {
     return df
   }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas])
 
-  // Reset de focos/seleções quando filtros principais mudam
   useEffect(() => {
     setSelectedBarraRanking(null)
     setSelectedFatiaComposicao(null)
@@ -434,6 +433,7 @@ export default function VisaoGeral({ data }) {
     setSelectedBarraObsoleto(null)
     setSelectedBarraObra(null)
     setSelectedBarraCompraConsumo(null)
+    setSelectedBarraVariacao(null)
     setSelectedBarraSkus(null)
     setActiveCard(null)
     setFiltroMesParado(null)
@@ -467,7 +467,6 @@ export default function VisaoGeral({ data }) {
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
 
-  // --- Agregados consolidados do snapshot ---
   const {
     metrics,
     rankingUnidade,
@@ -475,6 +474,7 @@ export default function VisaoGeral({ data }) {
     rankObsoleto,
     rankObra,
     compraConsumoUnidade,
+    variacaoUnidade,
     skusUnidade,
     composicao,
     maioresValoresDataCompleta,
@@ -489,12 +489,13 @@ export default function VisaoGeral({ data }) {
         valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
       },
       rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [],
-      compraConsumoUnidade: [], skusUnidade: [], composicao: [],
+      compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], composicao: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
     if (!snapshot.length && !snapshotPrev.length) return empty
 
     const mapRank = new Map()
+    const mapRankPrev = new Map() // Para o novo gráfico de variação
     const mapCrit = new Map()
     const mapObs = new Map()
     const mapObra = new Map()
@@ -587,16 +588,35 @@ export default function VisaoGeral({ data }) {
     let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
     let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0
     const skusPrevSet = new Set()
+    
     for (const r of snapshotPrev) {
+      const u = r.unidade_almoxarifado
       const val = r.valor_saldo_atual || 0
       const cat = r._categoria
+      
       valEstoquePrev += val
       valComprasPrev += r.valor_entrada_compras || 0
       valConsumoPrev += Math.abs(r.valor_saida_cons_interno || 0)
+      
+      mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
+
       if (cat === 'Crítico') valCriticoPrev += val
       else if (cat === 'Obsoleto') valObsoletoPrev += val
       else if (cat === 'Obra') valObraPrev += val
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
+    }
+
+    // Cálculo da Variação de Estoque por Unidade
+    const arrVariacao = []
+    const todasUnid = new Set([...mapRank.keys(), ...mapRankPrev.keys()])
+    for (const u of todasUnid) {
+      const atual = mapRank.get(u) || 0
+      const prev = mapRankPrev.get(u) || 0
+      const diff = atual - prev
+      let pct = 0
+      if (prev > 0) pct = (diff / prev) * 100
+      else if (atual > 0) pct = 100 // Saiu do Zero para algo
+      arrVariacao.push({ unidade: u, atual, anterior: prev, diff, pct })
     }
 
     const mapToSort = (m) => [...m.entries()].filter(([, v]) => v > 0).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
@@ -624,7 +644,6 @@ export default function VisaoGeral({ data }) {
       }
     }
     duplicados.sort((a, b) => b.valor - a.valor)
-
     maiores.sort((a, b) => b.valor - a.valor)
     comprasSem.sort((a, b) => b.comprado - a.comprado)
 
@@ -640,6 +659,7 @@ export default function VisaoGeral({ data }) {
       rankObsoleto: mapToSort(mapObs),
       rankObra: mapToSort(mapObra),
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.compras > 0.01 || d.consumo > 0.01).sort((a, b) => a.compras - b.compras),
+      variacaoUnidade: arrVariacao,
       skusUnidade: [...mapSkus.entries()].map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
       composicao: comp,
       maioresValoresDataCompleta: maiores,
@@ -647,6 +667,15 @@ export default function VisaoGeral({ data }) {
       duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
+
+  // Processamento do Gráfico de Variação com base na Aba ativa
+  const variacaoFiltrada = useMemo(() => {
+    if (abaVariacao === 'aumento') {
+      return variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
+    } else {
+      return variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
+    }
+  }, [variacaoUnidade, abaVariacao])
 
   const maioresValoresTabela = useMemo(() => {
     return tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12)
@@ -660,7 +689,6 @@ export default function VisaoGeral({ data }) {
     return tabelaDuplicadosExpandida ? duplicadosDataCompleta.slice(0, 1000) : duplicadosDataCompleta.slice(0, 12)
   }, [duplicadosDataCompleta, tabelaDuplicadosExpandida])
 
-  // --- Séries temporais ---
   const timeSeriesAgg = useMemo(() => {
     const map = new Map()
     for (const r of dfFiltrado) {
@@ -714,8 +742,7 @@ export default function VisaoGeral({ data }) {
     }
   }, [dfFiltrado])
 
-  // --- Giro e Cobertura ---
-  const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw, giroCoberturaTempo } =
+  const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } =
     useMemo(() => {
       const empty = {
         giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0,
@@ -774,7 +801,6 @@ export default function VisaoGeral({ data }) {
       return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
     }, [dfFiltrado, periodoEfetivo])
 
-  // --- Itens parados ---
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
@@ -1158,7 +1184,6 @@ export default function VisaoGeral({ data }) {
     )
   }, [])
 
-  // Colunas das tabelas
   const colsMaioresValores = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
@@ -1210,6 +1235,7 @@ export default function VisaoGeral({ data }) {
   const isObsoletoSelected = activeCard === 'rank_obsoleto'
   const isObraSelected = activeCard === 'rank_obra'
   const isCompraConsumoSelected = activeCard === 'compra_consumo_unidade'
+  const isVariacaoSelected = activeCard === 'variacao_estoque'
   const isSkusUnidadeSelected = activeCard === 'skus_unidade'
 
   return (
@@ -1492,37 +1518,100 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- COMPRA x CONSUMO POR UNIDADE + SKUs --- */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+      {/* --- COMPRA x CONSUMO POR UNIDADE + VARIAÇÃO + SKUs --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
+        
+        {/* COMPRA x CONSUMO */}
         <div onClick={() => handleCardClick('compra_consumo_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isCompraConsumoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isCompraConsumoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-start mb-4">
             <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">COMPRA X CONSUMO POR UNIDADE</span></div>
-            <div className="flex items-center gap-3 text-[11px] text-muted tracking-wider"><span><span className="text-[#e74c3c]">■</span> Compras</span><span><span className="text-[#2ecc71]">■</span> Consumo</span></div>
+            {selectedBarraCompraConsumo && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraCompraConsumo(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar ✕</button>)}
           </div>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-3 text-[11px] text-muted tracking-wider mb-2">
+            <span><span className="text-[#e74c3c]">■</span> Compras</span>
+            <span><span className="text-[#2ecc71]">■</span> Consumo</span>
+          </div>
+          <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             {compraConsumoUnidade.length ? (
               <Plot
                 data={[
                   { type: 'bar', orientation: 'h', name: 'Compras', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.compras), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.compras)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#e74c3c' : 'rgba(231,76,60,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
                   { type: 'bar', orientation: 'h', name: 'Consumo', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.consumo), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.consumo)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
                 ]}
-                layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(300, compraConsumoUnidade.length * 55), margin: { l: 130, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' } } }}
+                layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(280, compraConsumoUnidade.length * 45), margin: { l: 130, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' } } }}
                 config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraCompraConsumo(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
               />
             ) : (<p className="text-muted text-center py-10">Sem dados</p>)}
           </div>
         </div>
 
+        {/* VARIAÇÃO DE ESTOQUE (NOVO GRÁFICO) */}
+        <div onClick={() => handleCardClick('variacao_estoque')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isVariacaoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
+          {isVariacaoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
+          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#f58220]/50 to-transparent pointer-events-none" />
+          
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-[#f58220] shadow-inner shrink-0">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+              </div>
+              <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">VARIAÇÃO DE ESTOQUE (R$)</span>
+            </div>
+            {selectedBarraVariacao && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraVariacao(null); }} className="text-[10px] bg-[#f58220]/20 text-[#f58220] border border-[#f58220]/40 px-2 py-0.5 rounded hover:bg-[#f58220]/30 transition-all font-mono">Limpar ✕</button>)}
+          </div>
+
+          <div className="flex items-center gap-3 text-[10px] font-medium tracking-wider mb-2">
+            <button onClick={(e) => { e.stopPropagation(); setAbaVariacao('aumento'); }} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${abaVariacao === 'aumento' ? 'bg-[#f58220]/15 border-[#f58220]/40 text-white shadow-[0_0_10px_rgba(245,130,32,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-3 h-[2px] bg-[#f58220]"><span className={`absolute w-1.5 h-1.5 rounded-full border border-[#161616] ${abaVariacao === 'aumento' ? 'bg-[#f58220]' : 'bg-[#555]'}`}></span></span>
+              <span>Aumentos</span>
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setAbaVariacao('reducao'); }} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${abaVariacao === 'reducao' ? 'bg-[#2ecc71]/15 border-[#2ecc71]/40 text-white shadow-[0_0_10px_rgba(46,204,113,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-3 h-[2px] bg-[#2ecc71]"><span className={`absolute w-1.5 h-1.5 rounded-full border border-[#161616] ${abaVariacao === 'reducao' ? 'bg-[#2ecc71]' : 'bg-[#555]'}`}></span></span>
+              <span>Reduções / Estável</span>
+            </button>
+          </div>
+
+          <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
+            {variacaoFiltrada.length ? (
+              <Plot
+                data={[{
+                  type: 'bar', orientation: 'h', name: 'Variação',
+                  y: variacaoFiltrada.map((d) => d.unidade),
+                  x: variacaoFiltrada.map((d) => Math.abs(d.diff)), // Exibe sempre positivo na barra, controlamos a direção visualmente
+                  text: variacaoFiltrada.map((d) => {
+                     const valFormatado = fmtValorCurto(Math.abs(d.diff));
+                     const textoVal = d.diff > 0 ? `+${valFormatado}` : (d.diff < 0 ? `-${valFormatado}` : valFormatado);
+                     const textoPct = d.diff > 0 ? `+${d.pct.toFixed(1).replace('.',',')}%` : `${d.pct.toFixed(1).replace('.',',')}%`;
+                     return `${textoVal} (${textoPct})`;
+                  }),
+                  textposition: 'auto',
+                  textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
+                  marker: {
+                    color: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? (abaVariacao === 'aumento' ? '#f58220' : '#2ecc71') : 'rgba(255, 255, 255, 0.15)'),
+                    opacity: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? 1 : 0.3),
+                    line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+                  },
+                  hoverinfo: 'none'
+                }]}
+                layout={{ ...PLOT_LAYOUT, height: Math.max(280, variacaoFiltrada.length * 35), margin: { l: 120, r: 40, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' } } }}
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
+                onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) setSelectedBarraVariacao(prev => prev === e.points[0].y.trim() ? null : e.points[0].y.trim()) }}
+              />
+            ) : (<p className="text-muted text-center py-10">Nenhum dado encontrado</p>)}
+          </div>
+        </div>
+
+        {/* SKUs POR UNIDADE */}
         <div onClick={() => handleCardClick('skus_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isSkusUnidadeSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isSkusUnidadeSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex justify-between items-start mb-4">
             <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">SKUs POR UNIDADE (QTDE)</span></div>
-            {selectedBarraSkus && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraSkus(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
+            {selectedBarraSkus && (<button onClick={(e) => { e.stopPropagation(); setSelectedBarraSkus(null); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar ✕</button>)}
           </div>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain">
+          <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain mt-8">
             {makeInteractiveHBar(skusUnidade, '#3498db', selectedBarraSkus, setSelectedBarraSkus)}
           </div>
         </div>
