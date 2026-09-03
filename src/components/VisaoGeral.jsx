@@ -261,6 +261,7 @@ export default function VisaoGeral({ data }) {
   const [selectedBarraSkus, setSelectedBarraSkus] = useState(null)
 
   const [filtroMesParado, setFiltroMesParado] = useState(null)
+  const [abaSkus, setAbaSkus] = useState('unicos')
   
   const [listaAberta, setListaAberta] = useState(false)
   const [tabelaUnidadesSel, setTabelaUnidadesSel] = useState([])
@@ -275,6 +276,12 @@ export default function VisaoGeral({ data }) {
   
   const [listaDuplicadosAberta, setListaDuplicadosAberta] = useState(false)
   const [tabelaDuplicadosExpandida, setTabelaDuplicadosExpandida] = useState(false)
+
+  // Seleção de linhas nas tabelas
+  const [linhaSelMaiores, setLinhaSelMaiores] = useState(null)
+  const [linhaSelDuplicados, setLinhaSelDuplicados] = useState(null)
+  const [linhaSelComprasSemConsumo, setLinhaSelComprasSemConsumo] = useState(null)
+  const [linhaSelParados, setLinhaSelParados] = useState(null)
 
   const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
@@ -477,7 +484,7 @@ export default function VisaoGeral({ data }) {
     const map = new Map()
     for (const r of dfFiltrado) {
       const key = `${r.tmp_ano_num}-${String(r.tmp_mes_num).padStart(2, '0')}`
-      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, compras: 0, consumo: 0, skus: new Set() })
+      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, compras: 0, consumo: 0, skus: new Set(), chavesMap: new Map() })
       const item = map.get(key)
       const val = r.valor_saldo_atual || 0
       item.total += val
@@ -486,7 +493,20 @@ export default function VisaoGeral({ data }) {
       if (isObra(r.nome_local_estoque)) item.obra += val
       item.compras += r.valor_entrada_compras || 0
       item.consumo += Math.abs(r.valor_saida_cons_interno || 0)
-      if (r.qtde_saldo_atual > 0 && r.codigo_produto) item.skus.add(r.codigo_produto)
+      
+      if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
+        item.skus.add(r.codigo_produto)
+        
+        // Lógica de Duplicados
+        if (r.nome_produto) {
+          const nomeUpper = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase()
+          const palavras = nomeUpper.split(' ').filter(Boolean)
+          palavras.sort()
+          const chave = palavras.join(' ')
+          if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
+          item.chavesMap.get(chave).add(r.codigo_produto)
+        }
+      }
     }
     const sorted = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
     return {
@@ -495,7 +515,15 @@ export default function VisaoGeral({ data }) {
       obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })),
       obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
       comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
-      skus: sorted.map(d => ({ periodo: d.periodo, total: d.skus.size }))
+      skus: sorted.map(d => {
+        let skusDupCount = 0;
+        for (const skusSet of d.chavesMap.values()) {
+          if (skusSet.size > 1) {
+            skusDupCount += skusSet.size;
+          }
+        }
+        return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
+      })
     }
   }, [dfFiltrado])
 
@@ -745,11 +773,12 @@ export default function VisaoGeral({ data }) {
     if (!periodoEfetivo || !timeSeriesAgg.skus.length) return []
     const index = timeSeriesAgg.skus.findIndex((d) => d.periodo === periodoEfetivo)
     if (index === -1) return []
+    const color = abaSkus === 'duplicados' ? '#f1c40f' : '#f58220'
     return [
-      { type: 'line', xref: 'x', yref: 'paper', x0: index, x1: index, y0: 0, y1: 1, line: { color: '#f58220', width: 1.5, dash: 'dot' }, layer: 'below' },
-      { type: 'rect', xref: 'x', yref: 'paper', x0: index - 0.15, x1: index + 0.15, y0: 0, y1: 1, fillcolor: 'rgba(245, 130, 32, 0.08)', line: { width: 0 }, layer: 'below' },
+      { type: 'line', xref: 'x', yref: 'paper', x0: index, x1: index, y0: 0, y1: 1, line: { color: color, width: 1.5, dash: 'dot' }, layer: 'below' },
+      { type: 'rect', xref: 'x', yref: 'paper', x0: index - 0.15, x1: index + 0.15, y0: 0, y1: 1, fillcolor: abaSkus === 'duplicados' ? 'rgba(241, 196, 15, 0.08)' : 'rgba(245, 130, 32, 0.08)', line: { width: 0 }, layer: 'below' },
     ]
-  }, [timeSeriesAgg.skus, periodoEfetivo])
+  }, [timeSeriesAgg.skus, periodoEfetivo, abaSkus])
 
   const chartShapesGiro = useMemo(() => {
     if (!periodoEfetivo || !giroCoberturaTempo.length) return []
@@ -809,15 +838,23 @@ export default function VisaoGeral({ data }) {
       </thead>
       <tbody className="divide-y divide-[#222222]/50">
         {maioresValoresTabela.length > 0 ? (
-          maioresValoresTabela.map((item) => (
-            <tr key={`${item.unidade}-${item.codigo}`} className="hover:bg-[#1a1a1a] transition-colors group">
-              <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-              <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-              <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-              <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-              <td className="p-3.5 text-right font-mono text-[#3498db] font-bold text-xs">{fmtBRL(item.valor)}</td>
-            </tr>
-          ))
+          maioresValoresTabela.map((item) => {
+            const rowKey = `${item.unidade}-${item.codigo}`;
+            const isSelected = linhaSelMaiores === rowKey;
+            return (
+              <tr 
+                key={rowKey}
+                onClick={() => setLinhaSelMaiores(prev => prev === rowKey ? null : rowKey)}
+                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#3498db]' : 'hover:bg-[#1a1a1a]'}`}
+              >
+                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
+                <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
+                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                <td className="p-3.5 text-right font-mono text-[#3498db] font-bold text-xs">{fmtBRL(item.valor)}</td>
+              </tr>
+            )
+          })
         ) : ( <tr><td colSpan="5" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado no período selecionado.</td></tr> )}
       </tbody>
     </table>
@@ -836,19 +873,27 @@ export default function VisaoGeral({ data }) {
       </thead>
       <tbody className="divide-y divide-[#222222]/50">
         {duplicadosTabela.length > 0 ? (
-          duplicadosTabela.map((item, idx) => (
-            <tr key={`${item.nome}-${idx}`} className="hover:bg-[#1a1a1a] transition-colors group">
-              <td className="p-3.5 text-white font-medium text-xs max-w-[250px] truncate" title={item.nome}>{item.nome}</td>
-              <td className="p-3.5 text-center">
-                <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">
-                  {item.qtd_skus} SKUs
-                </span>
-              </td>
-              <td className="p-3.5 text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate" title={item.skus_lista}>{item.skus_lista}</td>
-              <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-              <td className="p-3.5 text-right font-mono text-[#f1c40f] font-bold text-xs">{fmtBRL(item.valor)}</td>
-            </tr>
-          ))
+          duplicadosTabela.map((item, idx) => {
+            const rowKey = `${item.nome}-${idx}`;
+            const isSelected = linhaSelDuplicados === rowKey;
+            return (
+              <tr 
+                key={rowKey}
+                onClick={() => setLinhaSelDuplicados(prev => prev === rowKey ? null : rowKey)}
+                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f1c40f]' : 'hover:bg-[#1a1a1a]'}`}
+              >
+                <td className="p-3.5 text-white font-medium text-xs max-w-[250px] truncate" title={item.nome}>{item.nome}</td>
+                <td className="p-3.5 text-center">
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">
+                    {item.qtd_skus} SKUs
+                  </span>
+                </td>
+                <td className="p-3.5 text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate" title={item.skus_lista}>{item.skus_lista}</td>
+                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                <td className="p-3.5 text-right font-mono text-[#f1c40f] font-bold text-xs">{fmtBRL(item.valor)}</td>
+              </tr>
+            )
+          })
         ) : ( <tr><td colSpan="5" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Base limpa! Nenhum cadastro duplicado encontrado no período.</td></tr> )}
       </tbody>
     </table>
@@ -868,20 +913,28 @@ export default function VisaoGeral({ data }) {
       </thead>
       <tbody className="divide-y divide-[#222222]/50">
         {comprasSemConsumoTabela.length > 0 ? (
-          comprasSemConsumoTabela.map((item) => (
-            <tr key={`${item.unidade}-${item.codigo}`} className="hover:bg-[#1a1a1a] transition-colors group">
-              <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-              <td className="p-3.5 text-[#e74c3c] font-mono text-xs">{item.codigo}</td>
-              <td className="p-3.5 text-white text-xs truncate max-w-[200px]" title={item.nome}>{item.nome || '—'}</td>
-              <td className="p-3.5 text-center">
-                <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
-                  item.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : item.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : item.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
-                }`}>{item.categoria}</span>
-              </td>
-              <td className="p-3.5 text-right font-mono text-[#e74c3c] font-bold text-xs">{fmtBRL(item.comprado)}</td>
-              <td className="p-3.5 text-right font-mono text-muted font-bold text-xs">R$ 0,00</td>
-            </tr>
-          ))
+          comprasSemConsumoTabela.map((item) => {
+            const rowKey = `${item.unidade}-${item.codigo}`;
+            const isSelected = linhaSelComprasSemConsumo === rowKey;
+            return (
+              <tr 
+                key={rowKey}
+                onClick={() => setLinhaSelComprasSemConsumo(prev => prev === rowKey ? null : rowKey)}
+                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#e74c3c]' : 'hover:bg-[#1a1a1a]'}`}
+              >
+                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                <td className="p-3.5 text-[#e74c3c] font-mono text-xs">{item.codigo}</td>
+                <td className="p-3.5 text-white text-xs truncate max-w-[200px]" title={item.nome}>{item.nome || '—'}</td>
+                <td className="p-3.5 text-center">
+                  <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border transition-colors ${
+                    item.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : item.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : item.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'
+                  }`}>{item.categoria}</span>
+                </td>
+                <td className="p-3.5 text-right font-mono text-[#e74c3c] font-bold text-xs">{fmtBRL(item.comprado)}</td>
+                <td className="p-3.5 text-right font-mono text-muted font-bold text-xs">R$ 0,00</td>
+              </tr>
+            )
+          })
         ) : ( <tr><td colSpan="6" className="text-center py-8 text-[#2ecc71] font-bold text-sm tracking-wide">🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo.</td></tr> )}
       </tbody>
     </table>
@@ -901,18 +954,26 @@ export default function VisaoGeral({ data }) {
       </thead>
       <tbody className="divide-y divide-[#222222]/50">
         {itensParadosFiltradosTabela.length > 0 ? (
-          itensParadosFiltradosTabela.map((item) => (
-            <tr key={`${item.unidade}-${item.codigo}-${item.mesesParado}`} className="hover:bg-[#1a1a1a] transition-colors group">
-              <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
-              <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
-              <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
-              <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
-              <td className="p-3.5 text-right font-mono text-[#2ecc71] font-bold text-xs">{fmtBRL(item.valor)}</td>
-              <td className="p-3.5 text-center">
-                <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{item.mesesParado} Meses</span>
-              </td>
-            </tr>
-          ))
+          itensParadosFiltradosTabela.map((item) => {
+            const rowKey = `${item.unidade}-${item.codigo}-${item.mesesParado}`;
+            const isSelected = linhaSelParados === rowKey;
+            return (
+              <tr 
+                key={rowKey}
+                onClick={() => setLinhaSelParados(prev => prev === rowKey ? null : rowKey)}
+                className={`cursor-pointer transition-colors group ${isSelected ? 'bg-[#2a2a2a] shadow-[inset_4px_0_0_0_#f58220]' : 'hover:bg-[#1a1a1a]'}`}
+              >
+                <td className="p-3.5 text-white font-medium text-xs">{item.unidade}</td>
+                <td className="p-3.5 text-accent font-mono text-xs">{item.codigo}</td>
+                <td className="p-3.5 text-white text-xs truncate max-w-[280px]" title={item.nome}>{item.nome || '—'}</td>
+                <td className="p-3.5 text-right font-mono text-white text-xs">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                <td className="p-3.5 text-right font-mono text-[#2ecc71] font-bold text-xs">{fmtBRL(item.valor)}</td>
+                <td className="p-3.5 text-center">
+                  <span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{item.mesesParado} Meses</span>
+                </td>
+              </tr>
+            )
+          })
         ) : ( <tr><td colSpan="6" className="text-center py-8 text-muted text-sm tracking-wide">Nenhum item encontrado.</td></tr> )}
       </tbody>
     </table>
@@ -1195,8 +1256,52 @@ export default function VisaoGeral({ data }) {
       </div>
 
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
-        <div className="flex items-center gap-2.5 mb-4"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE SKUs (QTDE)</span></div>
-        <Plot data={[{ x: timeSeriesAgg.skus.map((d) => d.periodo), y: timeSeriesAgg.skus.map((d) => d.total), type: 'scatter', mode: 'lines+markers+text', text: timeSeriesAgg.skus.map((d) => fmtInt(d.total)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter' }, line: { color: '#3498db', width: 2, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#3498db', width: 1.5 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(52,152,219,0.35)'], ['1', 'rgba(52,152,219,0.0)']] }, fillcolor: 'rgba(52,152,219,0.15)', hoverinfo: 'none' }]} layout={{ ...PLOT_LAYOUT, height: 330, margin: { l: 30, r: 20, t: 30, b: 40 }, shapes: chartShapesSkus, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)), range: [-0.3, Math.max(timeSeriesAgg.skus.length - 0.7, 1)] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => d.total), 10) || 10) * 1.25] } }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center shadow-inner shrink-0 ${abaSkus === 'duplicados' ? 'text-[#f1c40f]' : 'text-[#3498db]'}`}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE SKUs (QTDE)</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] font-medium tracking-wider">
+            <button onClick={() => setAbaSkus('unicos')} className={`flex items-center gap-2 px-3 py-1 rounded-lg border transition-all cursor-pointer ${abaSkus === 'unicos' ? 'bg-[#3498db]/15 border-[#3498db]/40 text-white shadow-[0_0_10px_rgba(52,152,219,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-4 h-[2px] bg-[#3498db]"><span className={`absolute w-2 h-2 rounded-full border-2 border-[#161616] ${abaSkus === 'unicos' ? 'bg-[#3498db]' : 'bg-[#555]'}`}></span></span>
+              <span>SKUs Únicos</span>
+            </button>
+            <button onClick={() => setAbaSkus('duplicados')} className={`flex items-center gap-2 px-3 py-1 rounded-lg border transition-all cursor-pointer ${abaSkus === 'duplicados' ? 'bg-[#f1c40f]/15 border-[#f1c40f]/40 text-white shadow-[0_0_10px_rgba(241,196,15,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-4 h-[2px] bg-[#f1c40f]"><span className={`absolute w-2 h-2 rounded-full border-2 border-[#161616] ${abaSkus === 'duplicados' ? 'bg-[#f1c40f]' : 'bg-[#555]'}`}></span></span>
+              <span>SKUs Duplicados</span>
+            </button>
+          </div>
+        </div>
+        
+        <Plot 
+          data={[{ 
+            x: timeSeriesAgg.skus.map((d) => d.periodo), 
+            y: timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 
+            type: 'scatter', 
+            mode: 'lines+markers+text', 
+            text: timeSeriesAgg.skus.map((d) => fmtInt(abaSkus === 'duplicados' ? d.duplicados : d.total)), 
+            textposition: 'top center', 
+            textfont: { color: 'white', size: 11, family: 'Inter' }, 
+            line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 }, 
+            marker: { size: 8, color: '#080808', line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } }, 
+            fill: 'tozeroy', 
+            fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] }, 
+            fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)', 
+            hoverinfo: 'none',
+            cliponaxis: false
+          }]} 
+          layout={{ 
+            ...PLOT_LAYOUT, 
+            height: 330, 
+            margin: { l: 30, r: 20, t: 40, b: 40 }, 
+            shapes: chartShapesSkus, 
+            xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoElite(d.periodo, periodoEfetivo)), range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] }, 
+            yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] } 
+          }} 
+          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%' }} useResizeHandler 
+        />
 
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
           <div onClick={() => setListaDuplicadosAberta(!listaDuplicadosAberta)} className="flex items-center justify-between p-3 sm:p-4 bg-[#1a180f] hover:bg-[#201e12] cursor-pointer transition-colors border-b border-[#f1c40f]/20">
@@ -1262,8 +1367,8 @@ export default function VisaoGeral({ data }) {
           <>
             <div className="mb-6 bg-[#101010] p-4 rounded-xl border border-[#222222]">
               <Plot
-                data={[{ type: 'scatter', mode: 'lines+markers+text', name: 'Valor Parado (R$)', x: paradosChart.map((d) => d.label), y: paradosChart.map((d) => d.valor), text: paradosChart.map((d) => fmtValorCurto(d.valor)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 2 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>' }]}
-                layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 35, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, range: [-0.6, paradosChart.length - 0.4] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [0, (Math.max(...paradosChart.map(d => d.valor), 10) * 1.25)] } }}
+                data={[{ type: 'scatter', mode: 'lines+markers+text', name: 'Valor Parado (R$)', x: paradosChart.map((d) => d.label), y: paradosChart.map((d) => d.valor), text: paradosChart.map((d) => fmtValorCurto(d.valor)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 2 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>', cliponaxis: false }]}
+                layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 55, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, range: [-0.8, paradosChart.length] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [0, (Math.max(...paradosChart.map(d => d.valor), 10) * 1.25)] } }}
                 config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', cursor: 'pointer' }} useResizeHandler
                 onClick={(e) => { if (e?.points?.[0]?.x) { const num = parseInt(e.points[0].x.replace(/\D/g, '')); setFiltroMesParado(prev => prev === num ? null : num) } }}
               />
