@@ -1,9 +1,11 @@
 import { useMemo, useState, useCallback, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import Plot from 'react-plotly.js'
-import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
 import * as XLSX from 'xlsx'
-import pptxgen from 'pptxgenjs' // <-- Nova importação para gerar o PowerPoint
+import pptxgen from 'pptxgenjs'
+
+import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
+import { FullScreenPortal } from './FullScreenPortal.jsx'
+import { CyberMultiSelect } from './CyberMultiSelect.jsx'
 
 const MAPA_MESES = {
   '1': '01 - Janeiro', '2': '02 - Fevereiro', '3': '03 - Março', '4': '04 - Abril',
@@ -44,99 +46,7 @@ const PLOT_LAYOUT = {
   showlegend: false,
   hovermode: 'closest',
   dragmode: false,
-}
-
-const FullScreenPortal = ({ children, onClose }) => {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-
-    const handleEsc = (e) => {
-      if (e.key === 'Escape' && typeof onClose === 'function') onClose()
-    }
-    window.addEventListener('keydown', handleEsc)
-
-    return () => {
-      document.body.style.overflow = prevOverflow
-      window.removeEventListener('keydown', handleEsc)
-    }
-  }, [onClose])
-
-  if (!mounted) return null
-  return createPortal(children, document.body)
-}
-
-const CyberMultiSelect = ({ options = [], selected = [], onChange, placeholder }) => {
-  const [isOpen, setIsOpen] = useState(false)
-  const [busca, setBusca] = useState('')
-
-  const filtradas = useMemo(() => {
-    return options
-      .filter(o => String(o).toLowerCase().includes(busca.toLowerCase()))
-      .filter(o => String(o).toLowerCase() !== 'todas' && String(o).toLowerCase() !== 'todos')
-  }, [options, busca])
-
-  const hasActiveSelection = selected.length > 0 && !selected.includes('Todas') && !selected.includes('Todos')
-
-  const toggleOption = useCallback((opt) => {
-    if (selected.includes(opt)) {
-      onChange(selected.filter(item => item !== opt))
-    } else {
-      onChange([...selected, opt])
-    }
-  }, [selected, onChange])
-
-  return (
-    <div className="relative">
-      <div
-        className={`transition-all duration-300 rounded-lg px-3 py-1.5 text-xs text-white cursor-pointer min-w-[170px] h-[34px] flex justify-between items-center group ${
-          hasActiveSelection
-            ? 'bg-gradient-to-r from-[#161616] via-[#1c1612] to-[#161616] border border-accent/70 shadow-[0_0_15px_rgba(245,130,32,0.22)]'
-            : 'bg-[#161616] border border-[#2A2A2A] hover:border-accent/50 shadow-inner'
-        }`}
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <span className="truncate max-w-[140px] font-medium tracking-wide flex items-center gap-1.5 text-xs">
-          {hasActiveSelection && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shadow-[0_0_8px_#f58220]" />}
-          {selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : `${selected.length} selecionadas`}
-        </span>
-        <span className={`text-[10px] transition-transform duration-300 ${hasActiveSelection ? 'text-accent font-bold' : 'text-muted group-hover:text-accent'}`}>
-          {isOpen ? '▲' : '▼'}
-        </span>
-      </div>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-          <div className="absolute top-full left-0 mt-1.5 w-full min-w-[240px] bg-[#161616] border border-[#2A2A2A] rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.9)] z-50 flex flex-col overflow-hidden animate-fade-in p-1.5">
-            <div className="p-1.5 border-b border-[#2A2A2A] bg-[#0c0c0c] rounded-lg mb-1.5 relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-accent/80 text-[11px]">🔍</span>
-              <input type="text" className="w-full bg-[#161616] border border-[#2A2A2A] rounded-md pl-7 pr-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent focus:shadow-[0_0_8px_rgba(245,130,32,0.2)] placeholder-dark-400 font-medium transition-all" placeholder="Digite para buscar..." value={busca} onChange={(e) => setBusca(e.target.value)} autoFocus />
-            </div>
-            <div className="grid grid-cols-2 gap-2 px-1 pb-2 border-b border-[#2A2A2A]">
-              <button type="button" onClick={() => onChange([...options])} className="bg-[#1a1a1a] hover:bg-accent/10 hover:text-accent hover:border-accent/50 text-white text-[10px] font-bold py-2 rounded-md transition-all border border-[#2A2A2A] tracking-widest uppercase shadow-sm">Todas</button>
-              <button type="button" onClick={() => onChange([])} className="bg-[#1a1a1a] hover:bg-danger/10 hover:text-danger hover:border-danger/50 text-white text-[10px] font-bold py-2 rounded-md transition-all border border-[#2A2A2A] tracking-widest uppercase shadow-sm">Limpar</button>
-            </div>
-            <div className="max-h-48 overflow-y-auto custom-scrollbar p-1 space-y-0.5 mt-1 relative z-50">
-              {filtradas.length === 0 && <div className="text-muted text-xs p-3 text-center tracking-wide">Nenhuma opção encontrada</div>}
-              {filtradas.map(opt => (
-                <label key={String(opt)} className="flex items-center gap-3 px-2.5 py-2 hover:bg-[#222222] rounded-lg cursor-pointer text-xs text-white transition-colors font-medium group">
-                  <input type="checkbox" className="hidden" checked={selected.includes(opt)} onChange={() => toggleOption(opt)} />
-                  <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center transition-all shrink-0 ${selected.includes(opt) ? 'bg-accent border-accent shadow-[0_0_8px_rgba(245,130,32,0.5)]' : 'border-[#444] group-hover:border-accent/50'}`}>
-                    {selected.includes(opt) && <svg className="w-2.5 h-2.5 text-[#101010]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                  </div>
-                  <span className="truncate">{opt}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
+  autosize: true, // Força o redimensionamento dinâmico automático
 }
 
 export default function PainelInventarios({ data = [] }) {
@@ -501,7 +411,6 @@ export default function PainelInventarios({ data = [] }) {
     document.body.removeChild(link);
   }, [stats, mesClicado]);
 
-  // Função exclusiva para gerar o PowerPoint (PPTX) dinâmico
   const handleExportPPTX = useCallback(() => {
     const pres = new pptxgen();
     pres.author = 'Painel Gerencial - Âmbar Energia';
@@ -509,10 +418,9 @@ export default function PainelInventarios({ data = [] }) {
     pres.title = 'Relatório de Inventários';
     pres.layout = 'LAYOUT_16x9';
 
-    // SLIDE 1: Capa (Visual moderno e escuro)
     const slideCapa = pres.addSlide();
     slideCapa.background = { color: '161616' };
-    slideCapa.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '10%', h: '100%', fill: { color: 'f58220' } }); // Detalhe lateral laranja
+    slideCapa.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '10%', h: '100%', fill: { color: 'f58220' } }); 
     
     slideCapa.addText('ÂMBAR ENERGIA', { 
       x: 1, y: 1.8, w: '80%', color: 'f58220', fontSize: 44, bold: true, align: 'center', fontFace: 'Arial' 
@@ -524,7 +432,6 @@ export default function PainelInventarios({ data = [] }) {
       x: 1, y: 3.5, w: '80%', color: '8c9ba5', fontSize: 16, align: 'center', fontFace: 'Arial', bold: true
     });
 
-    // SLIDE 2: Resumo Consolidado (Geral do Filtro)
     const slideResumo = pres.addSlide();
     slideResumo.background = { color: 'F5F5F5' };
     slideResumo.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
@@ -542,18 +449,15 @@ export default function PainelInventarios({ data = [] }) {
       { text: `• Diferença Líquida: ${fmtBRL(stats.diffLiquida)}`, options: { fontSize: 14, color: stats.diffLiquida < 0 ? 'e74c3c' : '2ecc71', bold: true } }
     ], { x: 0.5, y: 1.2, w: '80%', h: 3.5 });
 
-    // SLIDE 3 em diante: Um slide detalhado para cada unidade filtrada na tela (ex: Lages, Araucária)
     empresasDisponiveis.forEach(emp => {
       const slideEmp = pres.addSlide();
       slideEmp.background = { color: 'FFFFFF' };
 
-      // Header do Slide por Unidade
       slideEmp.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
       slideEmp.addText(`PERFORMANCE ALMOXARIFADO - ${emp.toUpperCase()}`, { 
         x: 0.2, y: 0.1, w: '90%', h: 0.6, color: 'f58220', fontSize: 20, bold: true, fontFace: 'Arial' 
       });
 
-      // Cálculos restritos àquela unidade específica para exibir no Slide
       const dadosEmp = dfInv.filter(r => r.empresa_nome === emp || r.unidade === emp);
       const valCongeladoEmp = dadosEmp.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0);
       const skusEmp = new Set(dadosEmp.map(r => r.codigo_produto).filter(Boolean)).size;
@@ -562,7 +466,6 @@ export default function PainelInventarios({ data = [] }) {
       const valPerdasEmp = dadosEmp.filter(r => (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0) < 0).reduce((s, r) => s + (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0), 0);
       const diffLiquidaEmp = valSobrasEmp + valPerdasEmp;
 
-      // Montando os dados na tela do slide de forma limpa e executiva
       slideEmp.addText('INDICADORES DE FECHAMENTO', { x: 0.5, y: 1.2, w: 4, h: 0.5, color: '161616', fontSize: 16, bold: true });
       
       slideEmp.addText(`Unidade Analisada: ${emp}`, { x: 0.5, y: 1.8, w: 8, color: '555555', fontSize: 14, bold: true });
@@ -579,7 +482,6 @@ export default function PainelInventarios({ data = [] }) {
       });
     });
 
-    // Baixa o arquivo PPTX automaticamente
     const nomeArquivo = `Apresentacao_Inventarios_${mesClicado ? mesClicado.replace('/','-') : 'Geral'}.pptx`;
     pres.writeFile({ fileName: nomeArquivo });
   }, [stats, empresasDisponiveis, dfInv, mesClicado]);
@@ -746,6 +648,13 @@ export default function PainelInventarios({ data = [] }) {
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       
+      {/* CSS PARA FORÇAR O CURSOR MÃOZINHA NO PLOTLY E MELHORAR UI */}
+      <style>{`
+        .js-plotly-plot .plotly .cursor-crosshair {
+          cursor: pointer !important;
+        }
+      `}</style>
+
       {/* CABEÇALHO SUPERIOR */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
         <div className="flex items-center gap-2.5">
@@ -759,8 +668,6 @@ export default function PainelInventarios({ data = [] }) {
            <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#1a2e22] text-[#2ecc71] border border-[#2ecc71]/40 hover:bg-[#203a2b] transition-all flex items-center gap-1.5 shadow-sm"><span>📥</span> Excel</button>
            <button onClick={handleExportPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1616] text-[#e74c3c] border border-[#e74c3c]/40 hover:bg-[#3a1c1c] transition-all flex items-center gap-1.5 shadow-sm"><span>📄</span> PDF</button>
            <button onClick={handleExportWord} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#162432] text-[#3498db] border border-[#3498db]/40 hover:bg-[#1c2e40] transition-all flex items-center gap-1.5 shadow-sm"><span>📝</span> Word</button>
-           
-           {/* NOVO BOTÃO DE POWERPOINT */}
            <button onClick={handleExportPPTX} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1b16] text-[#f58220] border border-[#f58220]/40 hover:bg-[#3a251c] transition-all flex items-center gap-1.5 shadow-sm ml-1 border-l-2 border-l-[#f58220]"><span>📊</span> PPTX</button>
         </div>
       </div>
@@ -858,7 +765,7 @@ export default function PainelInventarios({ data = [] }) {
               ) : (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-2 px-4 mx-auto shadow-inner w-fit">
                    <div className="flex items-center gap-2 text-center">
-                      <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">Dica: Clique em qualquer ponto/mês do gráfico acima para filtrar todo o painel.</span>
                    </div>
                 </div>
@@ -866,10 +773,22 @@ export default function PainelInventarios({ data = [] }) {
             </div>
          </div>
 
-         {/* Detalhamentos da Tabela (Ocultável) */}
+         {/* Detalhamentos da Tabela (Ocultável) - ARIA e Navegação Acessível Injetados */}
          <div className="border border-[#2A2A2A] rounded-xl shadow-lg bg-[#111111]/40 transition-colors relative z-30">
-            <div className="px-4 py-3 border-b border-[#2A2A2A] bg-[#111111]/80 hover:bg-[#161616] flex items-center justify-between gap-4 cursor-pointer transition-colors w-full rounded-t-xl" onClick={(e) => { if (!e.target.closest('.filtros-tabela')) { setExpanded(!expanded) } }}>
-               <div className="flex items-center gap-3 shrink-0">
+            <div 
+              role="button" 
+              tabIndex={0}
+              aria-expanded={expanded}
+              onClick={(e) => { if (!e.target.closest('.filtros-tabela')) { setExpanded(!expanded) } }}
+              onKeyDown={(e) => { 
+                if (e.key === 'Enter' || e.key === ' ') { 
+                  e.preventDefault(); 
+                  if (!e.target.closest('.filtros-tabela')) setExpanded(!expanded);
+                } 
+              }}
+              className="px-4 py-3 border-b border-[#2A2A2A] bg-[#111111]/80 hover:bg-[#161616] flex items-center justify-between gap-4 cursor-pointer transition-colors w-full rounded-t-xl focus:outline-none focus:ring-1 focus:ring-accent/50"
+            >
+               <div className="flex items-center gap-3 shrink-0 pointer-events-none">
                   <span className="w-8 h-8 rounded-lg bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-inner">
                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                   </span>
@@ -878,7 +797,7 @@ export default function PainelInventarios({ data = [] }) {
                <div className="flex items-center gap-3 shrink-0 filtros-tabela" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-2 border-r border-[#333] pr-3"><span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase hidden sm:block">Tipo</span><CyberMultiSelect options={listasMaster.tiposVisual} selected={tipoSel} onChange={setTipoSel} placeholder="Todos" /></div>
                   <div className="flex items-center gap-2 border-r border-[#333] pr-3"><span className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase hidden sm:block">Nº ID</span><CyberMultiSelect options={idsInventariosDisponiveis} selected={idInvSel} onChange={setIdInvSel} placeholder="Todos IDs" /></div>
-                  <button onClick={() => setExpanded(!expanded)} className="text-muted text-xs p-1 hover:text-accent transition-colors flex items-center justify-center">{expanded ? '▲' : '▼'}</button>
+                  <button onClick={() => setExpanded(!expanded)} tabIndex={-1} className="text-muted text-xs p-1 hover:text-accent transition-colors flex items-center justify-center focus:outline-none">{expanded ? '▲' : '▼'}</button>
                </div>
             </div>
             {expanded && (
@@ -968,7 +887,7 @@ export default function PainelInventarios({ data = [] }) {
                 </span>
               </div>
 
-              {/* Sobras e Perdas (Rótulo Qtde cinza e discreto) */}
+              {/* Sobras e Perdas */}
               <div className="bg-[#101010] border-x border-t border-[#222222] rounded-t-xl p-5 shadow-inner flex flex-col items-center justify-center text-center">
                 <span className="text-[11px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] mb-1.5">ITENS DIVERGENTES</span>
                 <span className="text-2xl font-black font-mono tracking-tight text-white">{fmtInt(stats.itensDivergentes)} <span className="text-sm font-medium text-muted">registros</span></span>
