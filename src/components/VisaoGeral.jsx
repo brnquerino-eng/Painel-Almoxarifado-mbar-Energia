@@ -24,6 +24,7 @@ const PLOT_LAYOUT = {
   showlegend: false,
   hovermode: 'closest',
   dragmode: false,
+  autosize: true, // <-- ADICIONADO: Força o Plotly a se adaptar dinamicamente ao container pai
 }
 
 const MAPA_ABR_MESES = {
@@ -467,16 +468,23 @@ export default function VisaoGeral({ data }) {
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
 
-  // Corrige gráficos Plotly invisíveis no 1º paint (container ainda sem dimensão).
-  // Dispara resize após o browser estabilizar o layout — custo desprezível.
+  // 1. Corrige gráficos invisíveis no carregamento da tela (Bug do Esmagamento Inicial)
+  useEffect(() => {
+    // 200ms garante que o layout do navegador e as animações flex/grid estabilizaram
+    const t = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 200)
+    return () => clearTimeout(t)
+  }, []) // <-- Executa apenas na montagem inicial do painel
+
+  // 2. Corrige layout dos gráficos quando os dados mudam e as larguras se reajustam
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       window.dispatchEvent(new Event('resize'))
     })
-    // Segundo kick leve: cobre casos em que o layout ainda muda após o 1º frame
     const t = setTimeout(() => {
       window.dispatchEvent(new Event('resize'))
-    }, 80)
+    }, 150)
     return () => {
       cancelAnimationFrame(id)
       clearTimeout(t)
@@ -1256,6 +1264,13 @@ export default function VisaoGeral({ data }) {
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
+      
+      {/* INJEÇÃO CSS PARA FORÇAR O CURSOR MÃOZINHA NOS GRÁFICOS DO PLOTLY */}
+      <style>{`
+        .js-plotly-plot .plotly .cursor-crosshair {
+          cursor: pointer !important;
+        }
+      `}</style>
 
       {/* --- CABEÇALHO GLOBAL --- */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 mt-2 px-1">
