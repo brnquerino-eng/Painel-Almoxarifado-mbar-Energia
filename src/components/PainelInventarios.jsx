@@ -46,7 +46,7 @@ const PLOT_LAYOUT = {
   showlegend: false,
   hovermode: 'closest',
   dragmode: false,
-  autosize: true, // Força o redimensionamento dinâmico automático
+  autosize: true,
 }
 
 export default function PainelInventarios({ data = [] }) {
@@ -70,6 +70,29 @@ export default function PainelInventarios({ data = [] }) {
   const [selAcuraciaCard, setSelAcuraciaCard] = useState(null)
   const [selDivRow, setSelDivRow] = useState(null)
 
+  // Suporte global para a tecla ESC (fecha modal, gaveta de detalhamentos e limpa seleções)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsModalOpen(false)
+        setExpanded(false)
+        setSelEmpresaRow(null)
+        setSelResumoRow(null)
+        setSelEvolucaoRow(null)
+        setSelAcuraciaCard(null)
+        setSelDivRow(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Reseta filtros dependentes ao mudar o período no gráfico mestre
+  useEffect(() => {
+    setIdInvSel([])
+    setTipoSel([])
+  }, [mesClicado])
+
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
 
   const dfMaster = useMemo(() => {
@@ -92,24 +115,40 @@ export default function PainelInventarios({ data = [] }) {
   }, [listasMaster])
 
   const chartEvolucao = useMemo(() => {
+    let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
+    if (empresaSel.length) dfBaseAnos = dfBaseAnos.filter(r => empresaSel.includes(r.empresa_nome))
+
+    // Identifica o último ano e mês com dados reais na base
+    let maxAnoDados = 0
+    let maxMesDados = 0
+    dfBaseAnos.forEach(r => {
+      const a = Number(r.ano_referencia)
+      const m = Number(r.mes_referencia)
+      if (a && m) {
+        if (a > maxAnoDados || (a === maxAnoDados && m > maxMesDados)) {
+          maxAnoDados = a
+          maxMesDados = m
+        }
+      }
+    })
+
     let anosAlvo = anoSel.length > 0 ? anoSel.map(String) : null
     if (!anosAlvo || anosAlvo.length === 0) {
-      let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
-      if (empresaSel.length) dfBaseAnos = dfBaseAnos.filter(r => empresaSel.includes(r.empresa_nome))
       anosAlvo = [...new Set(dfBaseAnos.map(r => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
     }
     if (!anosAlvo.length) {
       anosAlvo = [String(new Date().getFullYear())]
     }
 
-    const agora = new Date()
-    const anoAtualNum = agora.getFullYear()
-    const mesAtualNum = agora.getMonth() + 1
-
     const grupos = {}
     anosAlvo.sort().forEach(ano => {
       const numAno = Number(ano)
-      const limiteMes = numAno === anoAtualNum ? mesAtualNum : (numAno < anoAtualNum ? 12 : 0)
+      let limiteMes = 12
+      if (numAno === maxAnoDados) {
+        limiteMes = maxMesDados
+      } else if (numAno > maxAnoDados) {
+        limiteMes = 0
+      }
 
       for (let m = 1; m <= limiteMes; m++) {
         const mesStr = String(m)
@@ -648,7 +687,6 @@ export default function PainelInventarios({ data = [] }) {
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       
-      {/* CSS PARA FORÇAR O CURSOR MÃOZINHA NO PLOTLY E MELHORAR UI */}
       <style>{`
         .js-plotly-plot .plotly .cursor-crosshair {
           cursor: pointer !important;
@@ -689,11 +727,11 @@ export default function PainelInventarios({ data = [] }) {
                <div className="flex flex-wrap items-end gap-3 z-30">
                   <div>
                      <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Empresa</label>
-                     <CyberMultiSelect options={listasMaster.empresas} selected={empresaSel} onChange={setEmpresaSel} placeholder="Todas" />
+                     <CyberMultiSelect options={listasMaster.empresas} selected={empresaSel} onChange={setEmpresaSel} placeholder="Todas as Empresas" />
                   </div>
                   <div>
                      <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Ano</label>
-                     <CyberMultiSelect options={listasMaster.anos} selected={anoSel} onChange={setAnoSel} placeholder="Todos" />
+                     <CyberMultiSelect options={listasMaster.anos} selected={anoSel} onChange={setAnoSel} placeholder="Todos os Anos" />
                   </div>
                </div>
             </div>
@@ -705,25 +743,25 @@ export default function PainelInventarios({ data = [] }) {
                  { key: 'rotativo', label: 'Rotativos', color: '#2ecc71', bg: 'rgba(46,204,113,0.15)', shadow: 'rgba(46,204,113,0.3)' },
                  { key: 'divergentes', label: 'Divergentes', color: '#e74c3c', bg: 'rgba(231,76,60,0.15)', shadow: 'rgba(231,76,60,0.3)' } 
                ].map(({ key, label, color, bg, shadow }) => {
-                 const isActive = vis[key]
-                 const hasData = chartEvolucao[key] && chartEvolucao[key].some(v => v > 0)
-                 return (
-                   <button 
-                     key={key} 
-                     onClick={() => hasData && toggleVis(key)} 
-                     disabled={!hasData} 
-                     className={`relative flex items-center justify-center gap-2 px-3 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border ${
-                       !hasData ? 'opacity-30 grayscale cursor-not-allowed border-transparent text-dark-400 bg-transparent' : 
-                       !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]' : 
-                       'font-bold text-white'
-                     }`}
-                     style={isActive && hasData ? { borderColor: color, backgroundColor: bg, boxShadow: `0 0 15px ${shadow}, inset 0 0 10px ${bg}` } : {}}
-                   >
-                     {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[3px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 10px ${color}` }} />}
-                     <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 12px ${color}` } : {}} />
-                     <span className={isActive ? 'drop-shadow-md tracking-wide text-white truncate' : 'tracking-wide truncate'}>{label}</span>
-                   </button>
-                 )
+                  const isActive = vis[key]
+                  const hasData = chartEvolucao[key] && chartEvolucao[key].some(v => v > 0)
+                  return (
+                    <button 
+                      key={key} 
+                      onClick={() => hasData && toggleVis(key)} 
+                      disabled={!hasData} 
+                      className={`relative flex items-center justify-center gap-2 px-3 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border ${
+                        !hasData ? 'opacity-30 grayscale cursor-not-allowed border-transparent text-dark-400 bg-transparent' : 
+                        !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]' : 
+                        'font-bold text-white'
+                      }`}
+                      style={isActive && hasData ? { borderColor: color, backgroundColor: bg, boxShadow: `0 0 15px ${shadow}, inset 0 0 10px ${bg}` } : {}}
+                    >
+                      {isActive && hasData && <span className="absolute bottom-0 left-0 w-full h-[3px] transition-all" style={{ backgroundColor: color, boxShadow: `0 -2px 10px ${color}` }} />}
+                      <span className={`w-2 h-2 rounded-full transition-all ${!hasData ? 'bg-dark-500' : isActive ? 'animate-pulse' : 'bg-[#555]'}`} style={(isActive && hasData) ? { backgroundColor: color, boxShadow: `0 0 12px ${color}` } : {}} />
+                      <span className={isActive ? 'drop-shadow-md tracking-wide text-white truncate' : 'tracking-wide truncate'}>{label}</span>
+                    </button>
+                  )
                })}
             </div>
             
@@ -765,7 +803,7 @@ export default function PainelInventarios({ data = [] }) {
               ) : (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-2 px-4 mx-auto shadow-inner w-fit">
                    <div className="flex items-center gap-2 text-center">
-                      <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">Dica: Clique em qualquer ponto/mês do gráfico acima para filtrar todo o painel.</span>
                    </div>
                 </div>
@@ -773,7 +811,7 @@ export default function PainelInventarios({ data = [] }) {
             </div>
          </div>
 
-         {/* Detalhamentos da Tabela (Ocultável) - ARIA e Navegação Acessível Injetados */}
+         {/* Detalhamentos da Tabela (Ocultável) */}
          <div className="border border-[#2A2A2A] rounded-xl shadow-lg bg-[#111111]/40 transition-colors relative z-30">
             <div 
               role="button" 
@@ -820,20 +858,15 @@ export default function PainelInventarios({ data = [] }) {
          </div>
       </div>
 
-      {/* =========================================================================
-          🌟 MASTER COMMAND CENTER (GRID DUPLO)
-      ============================================================================= */}
+      {/* MASTER COMMAND CENTER (GRID DUPLO) */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.6)] overflow-hidden mt-6 relative z-10 transition-all duration-300">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#3498db]/50 to-transparent pointer-events-none" />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-[#2A2A2A]">
           
-          {/* ==========================================
-              COLUNA ESQUERDA (OPERACIONAL & RAIO-X)
-          ============================================= */}
+          {/* COLUNA ESQUERDA (OPERACIONAL & RAIO-X) */}
           <div className="lg:col-span-6 p-5 sm:p-6 flex flex-col gap-6 bg-[#161616]">
             
-            {/* Bloco: Resumo da Conciliação */}
             <div>
               <div className="flex justify-between items-center mb-5">
                 <div className="flex items-center gap-2.5">
@@ -850,7 +883,6 @@ export default function PainelInventarios({ data = [] }) {
                 </div>
               </div>
 
-              {/* Tabela Unificada com Grid Visível Estilizado e Clique Exclusivo */}
               <div className="bg-[#111111] border border-[#222222] rounded-xl p-4 shadow-inner flex flex-col mb-5">
                 <div className="grid grid-cols-12 pb-3 border-b border-[#333333] mb-2 px-2 text-[10px] font-bold text-[#8c9ba5] uppercase tracking-widest">
                   <div className="col-span-5">Métrica</div>
@@ -868,7 +900,6 @@ export default function PainelInventarios({ data = [] }) {
                 </div>
               </div>
 
-              {/* Valores Iniciais e Finais */}
               <div className="bg-[#0c0c0c] border-t border-x border-[#222222] rounded-t-xl p-4 shadow-inner grid grid-cols-2 gap-3 divide-x divide-[#222222]">
                 <div className="flex flex-col justify-center pr-2">
                   <span className="block text-[10px] tracking-[0.15em] text-[#8c9ba5] font-bold uppercase mb-1">VALOR INICIAL</span>
@@ -887,7 +918,6 @@ export default function PainelInventarios({ data = [] }) {
                 </span>
               </div>
 
-              {/* Sobras e Perdas */}
               <div className="bg-[#101010] border-x border-t border-[#222222] rounded-t-xl p-5 shadow-inner flex flex-col items-center justify-center text-center">
                 <span className="text-[11px] text-[#8c9ba5] uppercase font-bold tracking-[0.2em] mb-1.5">ITENS DIVERGENTES</span>
                 <span className="text-2xl font-black font-mono tracking-tight text-white">{fmtInt(stats.itensDivergentes)} <span className="text-sm font-medium text-muted">registros</span></span>
@@ -910,7 +940,6 @@ export default function PainelInventarios({ data = [] }) {
               </div>
             </div>
 
-            {/* Bloco: Raio-X dos Inventários */}
             <div className="mt-auto pt-6 border-t border-[#2A2A2A]">
               <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#2A2A2A]">
                 <h3 className="text-xs font-bold tracking-[0.18em] text-white uppercase flex items-center gap-2">
@@ -920,7 +949,6 @@ export default function PainelInventarios({ data = [] }) {
               </div>
               
               <div className="grid grid-cols-2 gap-4 divide-x divide-[#222222] pt-1">
-                {/* PENDENTES */}
                 <div className="flex flex-col pr-2">
                   <span className="text-sm text-[#f1c40f] font-bold uppercase mb-1.5 flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#f1c40f] animate-pulse"></span> PENDENTES
@@ -936,7 +964,6 @@ export default function PainelInventarios({ data = [] }) {
                   </div>
                 </div>
 
-                {/* DIVERGENTES */}
                 <div className="flex flex-col pl-4">
                   <span className="text-sm text-accent font-bold uppercase mb-1.5 flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-accent animate-pulse"></span> DIVERGENTES
@@ -956,12 +983,9 @@ export default function PainelInventarios({ data = [] }) {
 
           </div>
 
-          {/* ==========================================
-              COLUNA DIREITA (ACURÁCIAS EXPANDIDAS & EVOLUÇÃO)
-          ============================================= */}
+          {/* COLUNA DIREITA (ACURÁCIAS EXPANDIDAS & EVOLUÇÃO) */}
           <div className="lg:col-span-6 flex flex-col justify-between bg-[#161616] divide-y divide-[#2A2A2A]">
             
-            {/* 1. ACURÁCIA FINANCEIRA BRUTA */}
             <div onClick={() => setSelAcuraciaCard(selAcuraciaCard === 'bruta' ? null : 'bruta')} className={`p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between relative overflow-hidden group transition-colors flex-1 cursor-pointer ${selAcuraciaCard === 'bruta' ? 'bg-[#1c1612] shadow-[inset_0_0_20px_rgba(245,130,32,0.1)]' : 'hover:bg-[#1a1a1a]'}`}>
               <div className="w-full sm:w-2/3 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
                 <div className="flex items-center gap-2 mb-2">
@@ -983,7 +1007,6 @@ export default function PainelInventarios({ data = [] }) {
               </div>
             </div>
 
-            {/* 2. ACURÁCIA FINANCEIRA LÍQUIDA */}
             <div onClick={() => setSelAcuraciaCard(selAcuraciaCard === 'liquida' ? null : 'liquida')} className={`p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between relative overflow-hidden group transition-colors flex-1 cursor-pointer ${selAcuraciaCard === 'liquida' ? 'bg-[#1c1612] shadow-[inset_0_0_20px_rgba(245,130,32,0.1)]' : 'hover:bg-[#1a1a1a]'}`}>
               <div className="w-full sm:w-2/3 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
                 <div className="flex items-center gap-2 mb-2">
@@ -1005,7 +1028,6 @@ export default function PainelInventarios({ data = [] }) {
               </div>
             </div>
 
-            {/* 3. ACURÁCIA FÍSICA */}
             <div onClick={() => setSelAcuraciaCard(selAcuraciaCard === 'fisica' ? null : 'fisica')} className={`p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between relative overflow-hidden group transition-colors flex-1 cursor-pointer ${selAcuraciaCard === 'fisica' ? 'bg-[#1c1612] shadow-[inset_0_0_20px_rgba(245,130,32,0.1)]' : 'hover:bg-[#1a1a1a]'}`}>
               <div className="w-full sm:w-2/3 flex flex-col items-center sm:items-start text-center sm:text-left mb-4 sm:mb-0">
                 <div className="flex items-center gap-2 mb-2">
@@ -1027,7 +1049,6 @@ export default function PainelInventarios({ data = [] }) {
               </div>
             </div>
 
-            {/* 4. EVOLUÇÃO COMPARATIVA COM GRID VISÍVEL ESTILIZADO */}
             <div className="p-4 sm:p-5 flex flex-col">
               <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#2A2A2A]">
                 <h3 className="text-xs font-bold tracking-[0.18em] text-white uppercase flex items-center gap-2">
@@ -1097,9 +1118,7 @@ export default function PainelInventarios({ data = [] }) {
           </div>
         </div>
 
-        {/* ==========================================
-            FULL WIDTH BOTTOM ROW (TABELA DIVERGÊNCIAS LIMITADA A 50 ITENS NA JANELA)
-        ============================================= */}
+        {/* FULL WIDTH BOTTOM ROW (TABELA DIVERGÊNCIAS) */}
         <div className="bg-[#0c0c0c] border-t border-[#2A2A2A] p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-[11px] font-bold tracking-widest text-[#e74c3c] uppercase flex items-center gap-2">
@@ -1119,66 +1138,62 @@ export default function PainelInventarios({ data = [] }) {
           </div>
 
           {stats.linhasDivergentes.length > 0 ? (
-            <>
-              {/* Limitando a altura para exibir aproximadamente 10 itens (rolagem para ver os 50 carregados) */}
-              <div className="overflow-x-auto overflow-y-auto custom-scrollbar border border-[#222222] rounded-xl shadow-inner bg-[#111111] max-h-[380px]">
-                <table className="w-full text-left text-[10px] whitespace-nowrap relative">
-                  <thead className="bg-[#1a1a1a] border-b border-[#333333] sticky top-0 z-10">
-                    <tr className="text-[#8c9ba5] uppercase font-bold tracking-wider">
-                      <th className="py-2.5 px-3">Unidade</th>
-                      <th className="py-2.5 px-3">Nº Inv.</th>
-                      <th className="py-2.5 px-3">Código SKU</th>
-                      <th className="py-2.5 px-3">Nome do Produto</th>
-                      <th className="py-2.5 px-3 text-right">Sistema</th>
-                      <th className="py-2.5 px-3 text-right">Físico</th>
-                      <th className="py-2.5 px-3 text-right">Divergência</th>
-                      <th className="py-2.5 px-3 text-right">Preço Médio</th>
-                      <th className="py-2.5 px-3 text-right">Valor Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#222222]">
-                    {/* Exibe até 50 itens de forma leve com clique exclusivo */}
-                    {stats.linhasDivergentes.slice(0, 50).map((row, idx) => {
-                      const emp = row.empresa_nome || row.unidade || '—'
-                      const idInv = limparId(row.id_inventario)
-                      const cod = row.codigo_produto || row.codigo || '—'
-                      const nome = row.nome_produto ?? row.descricao_produto ?? row.nome ?? row.descricao ?? row.produto ?? '—'
-                      
-                      const sis = row.saldo_anterior_consolidado ?? row.saldo_anterior ?? row.saldo_sistema ?? row.qtd_sistema ?? row.sistema ?? 0
-                      const fis = row.inventario_consolidado ?? row.quantidade_contada ?? row.qtd_fisica ?? row.fisico ?? 0
-                      
-                      const divQtd = row.diferenca_consolidada ?? row.diferenca_qtd ?? row.qtd_diferenca ?? row.diff_qtd ?? (fis - sis)
-                      const prMedio = row.custo_unitario ?? row.preco_medio ?? row.valor_unitario ?? 0
-                      const divVal = row.diferenca_val ?? row.val_diferenca ?? row.diff_val ?? (divQtd * prMedio)
-                      
-                      const isNeg = divQtd < 0 || divVal < 0
-                      const colorClass = isNeg ? 'text-[#e74c3c]' : 'text-white'
-                      
-                      const rowKey = `${idInv}_${cod}_${idx}`
-                      const isActive = selDivRow === rowKey
+            <div className="overflow-x-auto overflow-y-auto custom-scrollbar border border-[#222222] rounded-xl shadow-inner bg-[#111111] max-h-[380px]">
+              <table className="w-full text-left text-[10px] whitespace-nowrap relative">
+                <thead className="bg-[#1a1a1a] border-b border-[#333333] sticky top-0 z-10">
+                  <tr className="text-[#8c9ba5] uppercase font-bold tracking-wider">
+                    <th className="py-2.5 px-3">Unidade</th>
+                    <th className="py-2.5 px-3">Nº Inv.</th>
+                    <th className="py-2.5 px-3">Código SKU</th>
+                    <th className="py-2.5 px-3">Nome do Produto</th>
+                    <th className="py-2.5 px-3 text-right">Sistema</th>
+                    <th className="py-2.5 px-3 text-right">Físico</th>
+                    <th className="py-2.5 px-3 text-right">Divergência</th>
+                    <th className="py-2.5 px-3 text-right">Preço Médio</th>
+                    <th className="py-2.5 px-3 text-right">Valor Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#222222]">
+                  {stats.linhasDivergentes.slice(0, 50).map((row, idx) => {
+                    const emp = row.empresa_nome || row.unidade || '—'
+                    const idInv = limparId(row.id_inventario)
+                    const cod = row.codigo_produto || row.codigo || '—'
+                    const nome = row.nome_produto ?? row.descricao_produto ?? row.nome ?? row.descricao ?? row.produto ?? '—'
+                    
+                    const sis = row.saldo_anterior_consolidado ?? row.saldo_anterior ?? row.saldo_sistema ?? row.qtd_sistema ?? row.sistema ?? 0
+                    const fis = row.inventario_consolidado ?? row.quantidade_contada ?? row.qtd_fisica ?? row.fisico ?? 0
+                    
+                    const divQtd = row.diferenca_consolidada ?? row.diferenca_qtd ?? row.qtd_diferenca ?? row.diff_qtd ?? (fis - sis)
+                    const prMedio = row.custo_unitario ?? row.preco_medio ?? row.valor_unitario ?? 0
+                    const divVal = row.diferenca_val ?? row.val_diferenca ?? row.diff_val ?? (divQtd * prMedio)
+                    
+                    const isNeg = divQtd < 0 || divVal < 0
+                    const colorClass = isNeg ? 'text-[#e74c3c]' : 'text-white'
+                    
+                    const rowKey = `${idInv}_${cod}_${idx}`
+                    const isActive = selDivRow === rowKey
 
-                      return (
-                        <tr 
-                          key={idx} 
-                          onClick={() => setSelDivRow(isActive ? null : rowKey)}
-                          className={`cursor-pointer transition-colors ${isActive ? 'bg-[#1c1612] shadow-[inset_0_0_15px_rgba(245,130,32,0.15)] border-accent/30' : 'hover:bg-[#1f1f1f]'}`}
-                        >
-                          <td className="py-2.5 px-3 text-white font-medium max-w-[140px] truncate" title={emp}>{emp}</td>
-                          <td className="py-2.5 px-3 text-white font-mono">{idInv}</td>
-                          <td className="py-2.5 px-3 text-[#60a5fa] font-mono">{cod}</td>
-                          <td className="py-2.5 px-3 text-white truncate max-w-[300px]" title={nome}>{nome}</td>
-                          <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(sis)}</td>
-                          <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(fis)}</td>
-                          <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</td>
-                          <td className="py-2.5 px-3 text-white font-mono text-right">{fmtBRL(prMedio)}</td>
-                          <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                    return (
+                      <tr 
+                        key={idx} 
+                        onClick={() => setSelDivRow(isActive ? null : rowKey)}
+                        className={`cursor-pointer transition-colors ${isActive ? 'bg-[#1c1612] shadow-[inset_0_0_15px_rgba(245,130,32,0.15)] border-accent/30' : 'hover:bg-[#1f1f1f]'}`}
+                      >
+                        <td className="py-2.5 px-3 text-white font-medium max-w-[140px] truncate" title={emp}>{emp}</td>
+                        <td className="py-2.5 px-3 text-white font-mono">{idInv}</td>
+                        <td className="py-2.5 px-3 text-[#60a5fa] font-mono">{cod}</td>
+                        <td className="py-2.5 px-3 text-white truncate max-w-[300px]" title={nome}>{nome}</td>
+                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(sis)}</td>
+                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(fis)}</td>
+                        <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</td>
+                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtBRL(prMedio)}</td>
+                        <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="bg-[#111111] border border-[#222222] rounded-xl p-6 text-center flex flex-col items-center justify-center">
               <span className="w-8 h-8 rounded-full bg-[#2ecc71]/10 text-[#2ecc71] border border-[#2ecc71]/30 flex items-center justify-center text-sm font-bold mb-2">✓</span>
@@ -1190,9 +1205,7 @@ export default function PainelInventarios({ data = [] }) {
 
       </div>
 
-      {/* =========================================================================
-          🌟 MODAL EM TELA CHEIA (LIMITADO A 1000 ITENS PARA DESEMPENHO)
-      ============================================================================= */}
+      {/* MODAL EM TELA CHEIA */}
       {isModalOpen && (
         <FullScreenPortal onClose={() => setIsModalOpen(false)}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
@@ -1213,7 +1226,6 @@ export default function PainelInventarios({ data = [] }) {
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative space-y-4">
               <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" />
               
-              {/* Barra de Filtros Interna no Modal */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-[#161616] p-4 rounded-xl border border-[#2A2A2A]">
                 <div>
                   <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Unidade:</label>
@@ -1231,7 +1243,6 @@ export default function PainelInventarios({ data = [] }) {
                 </div>
               </div>
 
-              {/* Tabela Completa (Trava de Segurança de até 1.000 itens) */}
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col flex-grow">
                 <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh]">
                   <table className="w-full text-left text-xs whitespace-nowrap">

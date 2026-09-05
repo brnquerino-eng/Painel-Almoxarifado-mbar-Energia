@@ -1,8 +1,22 @@
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 
 export function CyberMultiSelect({ options = [], selected = [], onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false)
   const [busca, setBusca] = useState('')
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown)
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
 
   const filtradas = useMemo(() => {
     return (options || []).filter(o => String(o).toLowerCase().includes(busca.toLowerCase()))

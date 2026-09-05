@@ -72,6 +72,18 @@ function reducer(state, action) {
       return { ...state, [action.field]: !state[action.field] }
     case 'SET_FIELD':
       return { ...state, [action.field]: action.payload }
+    case 'CLOSE_ALL_DRAWERS':
+      return {
+        ...state,
+        listaMaioresValoresAberta: false,
+        listaComprasSemConsumoAberta: false,
+        listaDuplicadosAberta: false,
+        listaAberta: false,
+        tabelaExpandida: false,
+        tabelaMaioresValoresExpandida: false,
+        tabelaComprasSemConsumoExpandida: false,
+        tabelaDuplicadosExpandida: false,
+      }
     case 'RESET_SELECOES_FILTRO':
       return {
         ...state,
@@ -145,6 +157,17 @@ export default function VisaoGeral({ data }) {
     listaComprasSemConsumoAberta, tabelaComprasSemConsumoExpandida,
     listaDuplicadosAberta, tabelaDuplicadosExpandida
   } = state
+
+  // Efeito global para fechamento via tecla ESC (Gavetas, Listas e Modais)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        dispatch({ type: 'CLOSE_ALL_DRAWERS' })
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // Estados locais para controle de exibição de gráficos de linhas (não interferem em lógicas complexas)
   const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false })
@@ -371,7 +394,7 @@ export default function VisaoGeral({ data }) {
   const variacaoFiltrada = useMemo(() => {
     return abaVariacao === 'aumento' 
       ? variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
-      : variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
+      : variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => a.diff - b.diff)
   }, [variacaoUnidade, abaVariacao])
 
   const maioresValoresTabela = useMemo(() => tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12), [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
