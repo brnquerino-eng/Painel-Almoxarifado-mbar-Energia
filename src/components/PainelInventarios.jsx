@@ -95,24 +95,27 @@ export default function PainelInventarios({ data = [] }) {
 
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
 
+  // 1. Gera as listas de filtro globais a partir da base pura (resolve o bug de sumir opções)
+  const listasMaster = useMemo(() => {
+    const dadosValidos = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
+    const empresas = [...new Set(dadosValidos.map((r) => r.empresa_nome).filter(Boolean))].sort()
+    const tiposBruto = [...new Set(dadosValidos.map((r) => r.tipo_inventario).filter(Boolean))].sort()
+    const tiposVisual = tiposBruto.map((t) => MAPA_TIPOS[t] || t)
+    const anos = [...new Set(dadosValidos.map((r) => r.ano_referencia).filter(Boolean))].sort((a, b) => Number(b) - Number(a))
+    return { empresas, tiposVisual, anos }
+  }, [data])
+
+  useMemo(() => {
+    if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
+  }, [listasMaster])
+
+  // 2. dfMaster aplica os filtros selecionados
   const dfMaster = useMemo(() => {
     let df = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
     if (empresaSel.length) df = df.filter((r) => empresaSel.includes(r.empresa_nome))
     if (anoSel.length) df = df.filter((r) => anoSel.includes(String(r.ano_referencia)))
     return df
   }, [data, empresaSel, anoSel])
-
-  const listasMaster = useMemo(() => {
-    const empresas = [...new Set(dfMaster.map((r) => r.empresa_nome).filter(Boolean))].sort()
-    const tiposBruto = [...new Set(dfMaster.map((r) => r.tipo_inventario).filter(Boolean))].sort()
-    const tiposVisual = tiposBruto.map((t) => MAPA_TIPOS[t] || t)
-    const anos = [...new Set(dfMaster.map((r) => r.ano_referencia).filter(Boolean))].sort((a, b) => Number(b) - Number(a))
-    return { empresas, tiposVisual, anos }
-  }, [dfMaster])
-
-  useMemo(() => {
-    if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
-  }, [listasMaster])
 
   const chartEvolucao = useMemo(() => {
     let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
