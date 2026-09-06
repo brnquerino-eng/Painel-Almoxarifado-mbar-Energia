@@ -217,7 +217,11 @@ export default function VisaoGeral({ data }) {
       df = df.filter(r => allowed.includes(r.unidade_almoxarifado))
     }
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
-    if (anosSel.length > 0) df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
+    
+    // Filtro de anos ajustado para considerar vazio ou seleção total como sem restrição
+    if (anosSel.length > 0 && anosSel.length < anoOpcoes.length) {
+      df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
+    }
 
     df = df.map(r => ({ ...r, _categoria: classificarRegistro(r) }))
 
@@ -226,7 +230,7 @@ export default function VisaoGeral({ data }) {
     }
 
     return df
-  }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas])
+  }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes.length])
 
   useEffect(() => {
     dispatch({ type: 'RESET_SELECOES_FILTRO' })
@@ -668,6 +672,8 @@ export default function VisaoGeral({ data }) {
     return anns
   }, [timeSeriesAgg, vis])
 
+  const maxValRanking = useMemo(() => Math.max(...rankingUnidade.map((d) => d.valor), 1), [rankingUnidade])
+
   const plotDataRanking = useMemo(() => [{
     type: 'bar', orientation: 'h',
     y: rankingUnidade.map((d) => d.unidade),
@@ -685,6 +691,7 @@ export default function VisaoGeral({ data }) {
 
   const makeInteractiveHBar = useCallback((items, color, selectedBar, fieldName) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
+    const maxValItems = Math.max(...items.map((d) => d.valor ?? d.total), 1)
     return (
       <div onClick={(e) => e.stopPropagation()}>
         <Plot
@@ -706,7 +713,7 @@ export default function VisaoGeral({ data }) {
             ...PLOT_LAYOUT,
             height: Math.max(300, items.length * 32),
             margin: { l: 180, r: 20, t: 10, b: 10 },
-            xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false },
+            xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxValItems * 0.15, maxValItems * 1.25] },
             yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' }, tickpad: 15, automargin: true }
           }}
           config={{ displayModeBar: false, responsive: true }}
@@ -803,7 +810,7 @@ export default function VisaoGeral({ data }) {
             <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Tipo</label><CyberMultiSelect options={['Operacional', 'Crítico', 'Obsoleto', 'Obra']} selected={tiposEstoqueSel} onChange={(val) => dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: val })} placeholder={tiposEstoqueSel.length === 0 ? 'Todos os Tipos' : tiposEstoqueSel.join(', ')} /></div>
             <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label><CyberMultiSelect options={['Ativa', 'Gerencial']} selected={escoposSel} onChange={(val) => dispatch({ type: 'SET_ESCOPOS', payload: val })} placeholder={escoposSel.length === 0 || escoposSel.length === 2 ? 'Todas' : escoposSel.join(', ')} /></div>
             <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Local</label><CyberMultiSelect options={opcoesUnid} selected={unidadesSel} onChange={(val) => dispatch({ type: 'SET_UNIDADES', payload: val })} placeholder={unidadesSel.length === 0 ? 'Todas as Unidades' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} /></div>
-            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label><CyberMultiSelect options={anoOpcoes} selected={anosSel} onChange={(val) => dispatch({ type: 'SET_ANOS', payload: val })} placeholder={anosSel.length === 0 ? 'Todos os Anos' : anosSel.join(', ')} /></div>
+            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label><CyberMultiSelect options={anoOpcoes} selected={anosSel} onChange={(val) => dispatch({ type: 'SET_ANOS', payload: val })} placeholder={anosSel.length === 0 || anosSel.length === anoOpcoes.length ? 'Todos os Anos' : anosSel.join(', ')} /></div>
           </div>
         </div>
 
@@ -958,7 +965,7 @@ export default function VisaoGeral({ data }) {
           <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             <Plot
               data={plotDataRanking}
-              layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 180, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' }, tickpad: 15, automargin: true } }}
+              layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 180, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxValRanking * 0.15, maxValRanking * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' }, tickpad: 15, automargin: true } }}
               config={{ displayModeBar: false, responsive: true }}
               style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
               useResizeHandler
@@ -1076,16 +1083,19 @@ export default function VisaoGeral({ data }) {
             <span><span className="text-[#2ecc71]">■</span> Consumo</span>
           </div>
           <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
-            {compraConsumoUnidade.length ? (
-              <Plot
-                data={[
-                  { type: 'bar', orientation: 'h', name: 'Compras', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.compras), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.compras)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#e74c3c' : 'rgba(231,76,60,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
-                  { type: 'bar', orientation: 'h', name: 'Consumo', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.consumo), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.consumo)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
-                ]}
-                layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(280, compraConsumoUnidade.length * 45), margin: { l: 180, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraCompraConsumo', payload: e.points[0].y.trim() }) }}
-              />
-            ) : (<p className="text-muted text-center py-10">Sem dados</p>)}
+            {compraConsumoUnidade.length ? (() => {
+              const maxCC = Math.max(...compraConsumoUnidade.map((d) => Math.max(d.compras, d.consumo)), 1)
+              return (
+                <Plot
+                  data={[
+                    { type: 'bar', orientation: 'h', name: 'Compras', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.compras), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.compras)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#e74c3c' : 'rgba(231,76,60,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
+                    { type: 'bar', orientation: 'h', name: 'Consumo', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.consumo), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.consumo)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
+                  ]}
+                  layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(280, compraConsumoUnidade.length * 45), margin: { l: 180, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [-maxCC * 0.15, maxCC * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
+                  config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraCompraConsumo', payload: e.points[0].y.trim() }) }}
+                />
+              )
+            })() : (<p className="text-muted text-center py-10">Sem dados</p>)}
           </div>
         </div>
 
@@ -1115,32 +1125,35 @@ export default function VisaoGeral({ data }) {
           </div>
 
           <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
-            {variacaoFiltrada.length ? (
-              <Plot
-                data={[{
-                  type: 'bar', orientation: 'h', name: 'Variação',
-                  y: variacaoFiltrada.map((d) => d.unidade),
-                  x: variacaoFiltrada.map((d) => Math.abs(d.diff)),
-                  text: variacaoFiltrada.map((d) => {
-                     const valFormatado = fmtValorCurto(Math.abs(d.diff));
-                     const textoVal = d.diff > 0 ? `+${valFormatado}` : (d.diff < 0 ? `-${valFormatado}` : valFormatado);
-                     const textoPct = d.diff > 0 ? `+${d.pct.toFixed(1).replace('.',',')}%` : `${d.pct.toFixed(1).replace('.',',')}%`;
-                     return `${textoVal} (${textoPct})`;
-                  }),
-                  textposition: 'auto',
-                  textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
-                  marker: {
-                    color: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? (abaVariacao === 'aumento' ? '#f58220' : '#2ecc71') : 'rgba(255, 255, 255, 0.15)'),
-                    opacity: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? 1 : 0.3),
-                    line: { color: 'rgba(255,255,255,0.08)', width: 1 }
-                  },
-                  hoverinfo: 'none'
-                }]}
-                layout={{ ...PLOT_LAYOUT, height: Math.max(280, variacaoFiltrada.length * 35), margin: { l: 180, r: 40, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
-                onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraVariacao', payload: e.points[0].y.trim() }) }}
-              />
-            ) : (<p className="text-muted text-center py-10">Nenhum dado encontrado</p>)}
+            {variacaoFiltrada.length ? (() => {
+              const maxVar = Math.max(...variacaoFiltrada.map((d) => Math.abs(d.diff)), 1)
+              return (
+                <Plot
+                  data={[{
+                    type: 'bar', orientation: 'h', name: 'Variação',
+                    y: variacaoFiltrada.map((d) => d.unidade),
+                    x: variacaoFiltrada.map((d) => Math.abs(d.diff)),
+                    text: variacaoFiltrada.map((d) => {
+                       const valFormatado = fmtValorCurto(Math.abs(d.diff));
+                       const textoVal = d.diff > 0 ? `+${valFormatado}` : (d.diff < 0 ? `-${valFormatado}` : valFormatado);
+                       const textoPct = d.diff > 0 ? `+${d.pct.toFixed(1).replace('.',',')}%` : `${d.pct.toFixed(1).replace('.',',')}%`;
+                       return `${textoVal} (${textoPct})`;
+                    }),
+                    textposition: 'auto',
+                    textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
+                    marker: {
+                      color: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? (abaVariacao === 'aumento' ? '#f58220' : '#2ecc71') : 'rgba(255, 255, 255, 0.15)'),
+                      opacity: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? 1 : 0.3),
+                      line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+                    },
+                    hoverinfo: 'none'
+                  }]}
+                  layout={{ ...PLOT_LAYOUT, height: Math.max(280, variacaoFiltrada.length * 35), margin: { l: 180, r: 40, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxVar * 0.15, maxVar * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
+                  config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
+                  onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraVariacao', payload: e.points[0].y.trim() }) }}
+                />
+              )
+            })() : (<p className="text-muted text-center py-10">Nenhum dado encontrado</p>)}
           </div>
         </div>
 
