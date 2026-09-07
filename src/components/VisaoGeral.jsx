@@ -659,21 +659,38 @@ export default function VisaoGeral({ data }) {
 
   const chartAnnotations = useMemo(() => {
     let anns = []
-    const createAnns = (dataArr, color, yOffset) => dataArr.map(d => ({
-      x: d.periodo, y: d.valor, text: `<b>${fmtValorCurto(d.valor)}</b>`, showarrow: true, arrowhead: 0, arrowcolor: 'rgba(0,0,0,0)',
-      ax: 0, ay: yOffset, font: { size: 10, color: '#ffffff', family: 'Inter' }, bgcolor: 'rgba(22, 22, 22, 0.85)', bordercolor: color, borderwidth: 1, borderpad: 4,
-    }))
-    if (vis.total) anns.push(...createAnns(timeSeriesAgg.total, 'rgba(245,130,32,0.6)', -22))
-    if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, 'rgba(231,76,60,0.8)', 24))
-    if (vis.obsoleto) anns.push(...createAnns(timeSeriesAgg.obsoleto, 'rgba(155,89,182,0.6)', -22))
-    if (vis.obra) anns.push(...createAnns(timeSeriesAgg.obra, 'rgba(26,188,156,0.6)', 24))
+    const createAnns = (dataArr, color, yOffset) => dataArr.map(d => {
+      const isSelected = d.periodo === periodoEfetivo
+      return {
+        x: d.periodo, 
+        y: d.valor, 
+        text: `<b>${fmtValorCurto(d.valor)}</b>`, 
+        showarrow: true, 
+        arrowhead: 0, 
+        arrowcolor: 'rgba(0,0,0,0)',
+        ax: 0, 
+        ay: yOffset, 
+        font: { 
+          size: 10, 
+          color: isSelected ? '#080808' : '#ffffff', 
+          family: 'Inter' 
+        }, 
+        bgcolor: isSelected ? color : 'rgba(22, 22, 22, 0.85)', 
+        bordercolor: color, 
+        borderwidth: 1, 
+        borderpad: 4,
+      }
+    })
+    if (vis.total) anns.push(...createAnns(timeSeriesAgg.total, '#f58220', -22))
+    if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, '#e74c3c', 24))
+    if (vis.obsoleto) anns.push(...createAnns(timeSeriesAgg.obsoleto, '#9b59b6', -22))
+    if (vis.obra) anns.push(...createAnns(timeSeriesAgg.obra, '#1abc9c', 24))
     return anns
-  }, [timeSeriesAgg, vis])
+  }, [timeSeriesAgg, vis, periodoEfetivo])
 
   const maxValRanking = useMemo(() => Math.max(...rankingUnidade.map((d) => d.valor), 1), [rankingUnidade])
 
   const plotDataRanking = useMemo(() => [
-    // Trace 0: Fundo invisível para capturar o clique em qualquer parte da linha
     {
       type: 'bar', orientation: 'h',
       y: rankingUnidade.map((d) => d.unidade),
@@ -682,7 +699,6 @@ export default function VisaoGeral({ data }) {
       hoverinfo: 'none',
       showlegend: false
     },
-    // Trace 1: Dados Reais
     {
       type: 'bar', orientation: 'h',
       y: rankingUnidade.map((d) => d.unidade),
@@ -712,7 +728,6 @@ export default function VisaoGeral({ data }) {
       <div onClick={(e) => e.stopPropagation()}>
         <Plot
           data={[
-            // Hitbox Trace (invisível)
             {
               type: 'bar', orientation: 'h',
               y: items.map((d) => d.unidade),
@@ -721,7 +736,6 @@ export default function VisaoGeral({ data }) {
               hoverinfo: 'none',
               showlegend: false
             },
-            // Main Trace
             {
               type: 'bar', orientation: 'h',
               y: items.map((d) => d.unidade),
@@ -748,7 +762,7 @@ export default function VisaoGeral({ data }) {
             barmode: 'overlay', 
             bargap: 0.4,
             height: Math.max(300, items.length * 32),
-            margin: { l: 115, r: 80, t: 10, b: 10 }, // Margem alinhada na esquerda
+            margin: { l: 115, r: 80, t: 10, b: 10 },
             xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValItems * 1.25] },
             yaxis: {
               showgrid: true,
@@ -759,7 +773,6 @@ export default function VisaoGeral({ data }) {
               ticktext: items.map((d) => {
                 const isSelected = !selectedBar || d.unidade === selectedBar
                 const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
-                // O &nbsp;&nbsp; no final do texto FORÇA o espaçamento HTML entre a legenda e a linha do eixo
                 return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
               }),
               ticklen: 0, 
@@ -918,12 +931,94 @@ export default function VisaoGeral({ data }) {
           <Plot
             data={[
               { x: timeSeriesAgg.total.map((d) => d.periodo), y: timeSeriesAgg.total.map(() => maxValorGlobal * 1.3), type: 'bar', name: 'clickArea', marker: { color: 'rgba(245, 130, 32, 0.02)' }, hoverinfo: 'none', showlegend: false, cliponaxis: false },
-              vis.total && { x: timeSeriesAgg.total.map((d) => d.periodo), y: timeSeriesAgg.total.map((d) => d.valor), name: 'Estoque Total', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#f58220', width: 2, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 1.5 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', cliponaxis: false },
-              vis.critico && timeSeriesAgg.critico.length > 0 && { x: timeSeriesAgg.critico.map((d) => d.periodo), y: timeSeriesAgg.critico.map((d) => d.valor), name: 'Estoque Crítico', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#e74c3c', width: 1.5, dash: 'dash', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#e74c3c', width: 1.5 } }, cliponaxis: false },
-              vis.obsoleto && timeSeriesAgg.obsoleto.length > 0 && { x: timeSeriesAgg.obsoleto.map((d) => d.periodo), y: timeSeriesAgg.obsoleto.map((d) => d.valor), name: 'Estoque Obsoleto', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#9b59b6', width: 1.5, dash: 'dot', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#9b59b6', width: 1.5 } }, cliponaxis: false },
-              vis.obra && timeSeriesAgg.obra.length > 0 && { x: timeSeriesAgg.obra.map((d) => d.periodo), y: timeSeriesAgg.obra.map((d) => d.valor), name: 'Estoque Obra', type: 'scatter', mode: 'lines+markers', hoverinfo: 'none', line: { color: '#1abc9c', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#080808', line: { color: '#1abc9c', width: 1.5 } }, cliponaxis: false },
+              vis.total && { 
+                x: timeSeriesAgg.total.map((d) => d.periodo), 
+                y: timeSeriesAgg.total.map((d) => d.valor), 
+                name: 'Estoque Total', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                hoverinfo: 'none', 
+                line: { color: '#f58220', width: 2, shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: timeSeriesAgg.total.map(d => d.periodo === periodoEfetivo ? 12 : 10), 
+                  color: timeSeriesAgg.total.map(d => d.periodo === periodoEfetivo ? '#f58220' : '#080808'), 
+                  line: { color: '#f58220', width: 1.5 } 
+                }, 
+                fill: 'tozeroy', 
+                fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, 
+                fillcolor: 'rgba(245,130,32,0.15)', 
+                cliponaxis: false 
+              },
+              vis.critico && timeSeriesAgg.critico.length > 0 && { 
+                x: timeSeriesAgg.critico.map((d) => d.periodo), 
+                y: timeSeriesAgg.critico.map((d) => d.valor), 
+                name: 'Estoque Crítico', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                hoverinfo: 'none', 
+                line: { color: '#e74c3c', width: 1.5, dash: 'dash', shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: timeSeriesAgg.critico.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: timeSeriesAgg.critico.map(d => d.periodo === periodoEfetivo ? '#e74c3c' : '#080808'), 
+                  line: { color: '#e74c3c', width: 1.5 } 
+                }, 
+                cliponaxis: false 
+              },
+              vis.obsoleto && timeSeriesAgg.obsoleto.length > 0 && { 
+                x: timeSeriesAgg.obsoleto.map((d) => d.periodo), 
+                y: timeSeriesAgg.obsoleto.map((d) => d.valor), 
+                name: 'Estoque Obsoleto', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                hoverinfo: 'none', 
+                line: { color: '#9b59b6', width: 1.5, dash: 'dot', shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: timeSeriesAgg.obsoleto.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: timeSeriesAgg.obsoleto.map(d => d.periodo === periodoEfetivo ? '#9b59b6' : '#080808'), 
+                  line: { color: '#9b59b6', width: 1.5 } 
+                }, 
+                cliponaxis: false 
+              },
+              vis.obra && timeSeriesAgg.obra.length > 0 && { 
+                x: timeSeriesAgg.obra.map((d) => d.periodo), 
+                y: timeSeriesAgg.obra.map((d) => d.valor), 
+                name: 'Estoque Obra', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                hoverinfo: 'none', 
+                line: { color: '#1abc9c', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? '#1abc9c' : '#080808'), 
+                  line: { color: '#1abc9c', width: 1.5 } 
+                }, 
+                cliponaxis: false 
+              },
             ].filter(Boolean)}
-            layout={{ ...PLOT_LAYOUT, hovermode: 'closest', height: 350, bargap: 0, margin: { l: 20, r: 20, t: 40, b: 45 }, shapes: chartShapes, annotations: chartAnnotations, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.total.map(d => d.periodo), ticktext: timeSeriesAgg.total.map(d => formatarPeriodoTexto(d.periodo)), tickpad: 12, automargin: true, range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } }}
+            layout={{ 
+              ...PLOT_LAYOUT, 
+              hovermode: 'closest', 
+              height: 350, 
+              bargap: 0, 
+              margin: { l: 20, r: 20, t: 40, b: 45 }, 
+              shapes: chartShapes, 
+              annotations: chartAnnotations, 
+              xaxis: { 
+                showgrid: false, 
+                zeroline: false, 
+                tickmode: 'array', 
+                tickvals: timeSeriesAgg.total.map(d => d.periodo), 
+                ticktext: timeSeriesAgg.total.map(d => {
+                  const isSelected = d.periodo === periodoEfetivo
+                  const label = formatarPeriodoTexto(d.periodo)
+                  return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
+                }), 
+                tickpad: 12, 
+                automargin: true, 
+                range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] 
+              }, 
+              yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } 
+            }}
             config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
           />
         </div>
@@ -1136,10 +1231,64 @@ export default function VisaoGeral({ data }) {
         </div>
         <Plot
           data={[
-            visComprasConsumo.compras && { x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), y: timeSeriesAgg.comprasConsumo.map((d) => d.compras), name: 'Compras', type: 'scatter', mode: 'lines+markers', line: { color: '#e74c3c', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#e74c3c', line: { color: '#161616', width: 1.5 } }, customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.compras)), hovertemplate: '<b>%{x}</b><br>Compras: <span style="color:#e74c3c; font-weight:bold;">%{customdata}</span><extra></extra>' },
-            visComprasConsumo.consumo && { x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), y: timeSeriesAgg.comprasConsumo.map((d) => d.consumo), name: 'Consumo', type: 'scatter', mode: 'lines+markers', line: { color: '#2ecc71', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#2ecc71', line: { color: '#161616', width: 1.5 } }, customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.consumo)), hovertemplate: '<b>%{x}</b><br>Consumo: <span style="color:#2ecc71; font-weight:bold;">%{customdata}</span><extra></extra>' },
+            visComprasConsumo.compras && { 
+              x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), 
+              y: timeSeriesAgg.comprasConsumo.map((d) => d.compras), 
+              name: 'Compras', 
+              type: 'scatter', 
+              mode: 'lines+markers', 
+              line: { color: '#e74c3c', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
+              marker: { 
+                size: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                color: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? '#e74c3c' : '#080808'), 
+                line: { color: '#e74c3c', width: 1.5 } 
+              }, 
+              customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.compras)), 
+              hovertemplate: '<b>%{x}</b><br>Compras: <span style="color:#e74c3c; font-weight:bold;">%{customdata}</span><extra></extra>' 
+            },
+            visComprasConsumo.consumo && { 
+              x: timeSeriesAgg.comprasConsumo.map((d) => d.periodo), 
+              y: timeSeriesAgg.comprasConsumo.map((d) => d.consumo), 
+              name: 'Consumo', 
+              type: 'scatter', 
+              mode: 'lines+markers', 
+              line: { color: '#2ecc71', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
+              marker: { 
+                size: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                color: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? '#2ecc71' : '#080808'), 
+                line: { color: '#2ecc71', width: 1.5 } 
+              }, 
+              customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.consumo)), 
+              hovertemplate: '<b>%{x}</b><br>Consumo: <span style="color:#2ecc71; font-weight:bold;">%{customdata}</span><extra></extra>' 
+            },
           ].filter(Boolean)}
-          layout={{ ...PLOT_LAYOUT, height: 350, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapes, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), ticktext: timeSeriesAgg.comprasConsumo.map(d => formatarPeriodoTexto(d.periodo)), showspikes: true, spikemode: 'across', spikedash: 'dot', spikecolor: '#555555', spikethickness: 1, tickpad: 12, automargin: true }, yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false } }}
+          layout={{ 
+            ...PLOT_LAYOUT, 
+            height: 350, 
+            showlegend: false, 
+            hovermode: 'x unified', 
+            hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, 
+            shapes: chartShapes, 
+            xaxis: { 
+              showgrid: false, 
+              zeroline: false, 
+              tickmode: 'array', 
+              tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), 
+              ticktext: timeSeriesAgg.comprasConsumo.map(d => {
+                const isSelected = d.periodo === periodoEfetivo
+                const label = formatarPeriodoTexto(d.periodo)
+                return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
+              }), 
+              showspikes: true, 
+              spikemode: 'across', 
+              spikedash: 'dot', 
+              spikecolor: '#555555', 
+              spikethickness: 1, 
+              tickpad: 12, 
+              automargin: true 
+            }, 
+            yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false } 
+          }}
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
@@ -1198,7 +1347,6 @@ export default function VisaoGeral({ data }) {
               return (
                 <Plot
                   data={[
-                    // Trace Hitbox na X2
                     {
                       type: 'bar', orientation: 'h', name: 'Hitbox',
                       y: compraConsumoUnidade.map((d) => d.unidade),
@@ -1208,7 +1356,6 @@ export default function VisaoGeral({ data }) {
                       showlegend: false,
                       xaxis: 'x2'
                     },
-                    // Traces Principais
                     {
                       type: 'bar', orientation: 'h', name: 'Consumo',
                       y: compraConsumoUnidade.map((d) => d.unidade),
@@ -1306,7 +1453,6 @@ export default function VisaoGeral({ data }) {
               return (
                 <Plot
                   data={[
-                    // Hitbox Trace
                     {
                       type: 'bar', orientation: 'h',
                       y: variacaoFiltrada.map((d) => d.unidade),
@@ -1315,7 +1461,6 @@ export default function VisaoGeral({ data }) {
                       hoverinfo: 'none',
                       showlegend: false
                     },
-                    // Main Trace
                     {
                       type: 'bar', orientation: 'h',
                       y: variacaoFiltrada.map((d) => d.unidade),
@@ -1391,7 +1536,7 @@ export default function VisaoGeral({ data }) {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2.5">
             <div className={`w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center shadow-inner shrink-0 ${abaSkus === 'duplicados' ? 'text-[#f1c40f]' : 'text-[#3498db]'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10L4 7v10l8 4" /></svg>
             </div>
             <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE SKUs (QTDE)</span>
           </div>
@@ -1419,7 +1564,11 @@ export default function VisaoGeral({ data }) {
             textposition: 'top center',
             textfont: { color: 'white', size: 11, family: 'Inter' },
             line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 },
-            marker: { size: 8, color: '#080808', line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } },
+            marker: { 
+              size: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+              color: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? (abaSkus === 'duplicados' ? '#f1c40f' : '#3498db') : '#080808'), 
+              line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } 
+            },
             fill: 'tozeroy',
             fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] },
             fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)',
@@ -1431,7 +1580,20 @@ export default function VisaoGeral({ data }) {
             height: 330,
             margin: { l: 30, r: 20, t: 40, b: 40 },
             shapes: chartShapesSkus,
-            xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: timeSeriesAgg.skus.map(d => d.periodo), ticktext: timeSeriesAgg.skus.map(d => formatarPeriodoTexto(d.periodo)), tickpad: 12, automargin: true, range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] },
+            xaxis: { 
+              showgrid: false, 
+              zeroline: false, 
+              tickmode: 'array', 
+              tickvals: timeSeriesAgg.skus.map(d => d.periodo), 
+              ticktext: timeSeriesAgg.skus.map(d => {
+                const isSelected = d.periodo === periodoEfetivo
+                const label = formatarPeriodoTexto(d.periodo)
+                return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
+              }), 
+              tickpad: 12, 
+              automargin: true, 
+              range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] 
+            },
             yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] }
           }}
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
@@ -1489,10 +1651,61 @@ export default function VisaoGeral({ data }) {
         {giroCoberturaTempo.length ? (
           <Plot
             data={[
-              visGiroCobertura.giro && { x: giroCoberturaTempo.map((d) => d.periodo), y: giroCoberturaTempo.map((d) => d.giro), name: 'Giro Mensal', type: 'scatter', mode: 'lines+markers', line: { color: '#3498db', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#3498db', line: { color: '#fff', width: 1.5 } }, customdata: giroCoberturaTempo.map((d) => fmtDec(d.giro)), hovertemplate: '<b>%{x}</b><br>Giro Mensal: <span style="color:#3498db; font-weight:bold;">%{customdata}</span><extra></extra>' },
-              visGiroCobertura.cobertura && { x: giroCoberturaTempo.map((d) => d.periodo), y: giroCoberturaTempo.map((d) => d.cobertura), name: 'Cobertura', type: 'scatter', mode: 'lines+markers', yaxis: 'y2', line: { color: '#f58220', width: 2.5, shape: 'spline', smoothing: 1.3 }, marker: { size: 8, color: '#f58220', line: { color: '#fff', width: 1.5 } }, customdata: giroCoberturaTempo.map((d) => fmtMes(d.cobertura)), hovertemplate: '<b>%{x}</b><br>Cobertura: <span style="color:#f58220; font-weight:bold;">%{customdata}</span><extra></extra>' },
+              visGiroCobertura.giro && { 
+                x: giroCoberturaTempo.map((d) => d.periodo), 
+                y: giroCoberturaTempo.map((d) => d.giro), 
+                name: 'Giro Mensal', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                line: { color: '#3498db', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? '#3498db' : '#080808'), 
+                  line: { color: '#3498db', width: 1.5 } 
+                }, 
+                customdata: giroCoberturaTempo.map((d) => fmtDec(d.giro)), 
+                hovertemplate: '<b>%{x}</b><br>Giro Mensal: <span style="color:#3498db; font-weight:bold;">%{customdata}</span><extra></extra>' 
+              },
+              visGiroCobertura.cobertura && { 
+                x: giroCoberturaTempo.map((d) => d.periodo), 
+                y: giroCoberturaTempo.map((d) => d.cobertura), 
+                name: 'Cobertura', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                yaxis: 'y2', 
+                line: { color: '#f58220', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? '#f58220' : '#080808'), 
+                  line: { color: '#f58220', width: 1.5 } 
+                }, 
+                customdata: giroCoberturaTempo.map((d) => fmtMes(d.cobertura)), 
+                hovertemplate: '<b>%{x}</b><br>Cobertura: <span style="color:#f58220; font-weight:bold;">%{customdata}</span><extra></extra>' 
+              },
             ].filter(Boolean)}
-            layout={{ ...PLOT_LAYOUT, height: 380, showlegend: false, hovermode: 'x unified', hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, shapes: chartShapesGiro, xaxis: { showgrid: false, zeroline: false, tickmode: 'array', tickvals: giroCoberturaTempo.map(d => d.periodo), ticktext: giroCoberturaTempo.map(d => formatarPeriodoTexto(d.periodo)), tickpad: 12, automargin: true }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } }}
+            layout={{ 
+              ...PLOT_LAYOUT, 
+              height: 380, 
+              showlegend: false, 
+              hovermode: 'x unified', 
+              hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, 
+              shapes: chartShapesGiro, 
+              xaxis: { 
+                showgrid: false, 
+                zeroline: false, 
+                tickmode: 'array', 
+                tickvals: giroCoberturaTempo.map(d => d.periodo), 
+                ticktext: giroCoberturaTempo.map(d => {
+                  const isSelected = d.periodo === periodoEfetivo
+                  const label = formatarPeriodoTexto(d.periodo)
+                  return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
+                }), 
+                tickpad: 12, 
+                automargin: true 
+              }, 
+              yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, 
+              yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } 
+            }}
             config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
           />
         ) : (<p className="text-muted text-center py-10">Sem dados suficientes para calcular Giro x Cobertura.</p>)}
@@ -1512,8 +1725,47 @@ export default function VisaoGeral({ data }) {
           <>
             <div className="mb-6 bg-[#101010] p-4 rounded-xl border border-[#222222]">
               <Plot
-                data={[{ type: 'scatter', mode: 'lines+markers+text', name: 'Valor Parado (R$)', x: paradosChart.map((d) => d.label), y: paradosChart.map((d) => d.valor), text: paradosChart.map((d) => fmtValorCurto(d.valor)), textposition: 'top center', textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, marker: { size: 10, color: '#080808', line: { color: '#f58220', width: 2 } }, fill: 'tozeroy', fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, fillcolor: 'rgba(245,130,32,0.15)', customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>', cliponaxis: false }]}
-                layout={{ ...PLOT_LAYOUT, height: 320, margin: { l: 50, r: 50, t: 65, b: 40 }, showlegend: false, hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, xaxis: { showgrid: false, tickfont: { color: '#94a3b8', family: 'Inter' }, tickpad: 12, automargin: true, range: [-0.8, paradosChart.length] }, yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [-(Math.max(...paradosChart.map(d => d.valor), 10) * 0.15), (Math.max(...paradosChart.map(d => d.valor), 10) * 1.45)] } }}
+                data={[{ 
+                  type: 'scatter', 
+                  mode: 'lines+markers+text', 
+                  name: 'Valor Parado (R$)', 
+                  x: paradosChart.map((d) => d.label), 
+                  y: paradosChart.map((d) => d.valor), 
+                  text: paradosChart.map((d) => fmtValorCurto(d.valor)), 
+                  textposition: 'top center', 
+                  textfont: { color: 'white', size: 11, family: 'Inter', weight: 600 }, 
+                  line: { color: '#f58220', width: 3, shape: 'spline', smoothing: 1.3 }, 
+                  marker: { 
+                    size: paradosChart.map(d => d.meses === filtroMesParado ? 12 : 10), 
+                    color: paradosChart.map(d => d.meses === filtroMesParado ? '#f58220' : '#080808'), 
+                    line: { color: '#f58220', width: 2 } 
+                  }, 
+                  fill: 'tozeroy', 
+                  fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(245,130,32,0.35)'], ['1', 'rgba(245,130,32,0.0)']] }, 
+                  fillcolor: 'rgba(245,130,32,0.15)', 
+                  customdata: paradosChart.map((d) => `<span style="color:#2ecc71; font-weight:bold;">${fmtBRL(d.valor)}</span><br>Qtd SKUs: <span style="color:#3498db; font-weight:bold;">${Number(d.skus).toLocaleString('pt-BR')} SKUs</span>`), 
+                  hovertemplate: '<b>%{x}</b><br>Valor: %{customdata}<extra></extra>', 
+                  cliponaxis: false 
+                }]}
+                layout={{ 
+                  ...PLOT_LAYOUT, 
+                  height: 320, 
+                  margin: { l: 50, r: 50, t: 65, b: 40 }, 
+                  showlegend: false, 
+                  hoverlabel: { bgcolor: '#161616', bordercolor: '#2A2A2A', font: { color: '#ffffff', family: 'Inter', size: 12 } }, 
+                  xaxis: { 
+                    showgrid: false, 
+                    tickfont: { color: '#94a3b8', family: 'Inter' }, 
+                    ticktext: paradosChart.map(d => {
+                      const isSelected = d.meses === filtroMesParado
+                      return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${d.label} •</span>` : d.label
+                    }),
+                    tickpad: 12, 
+                    automargin: true, 
+                    range: [-0.8, paradosChart.length] 
+                  }, 
+                  yaxis: { showgrid: true, gridcolor: '#2A2A2A', showticklabels: false, range: [-(Math.max(...paradosChart.map(d => d.valor), 10) * 0.15), (Math.max(...paradosChart.map(d => d.valor), 10) * 1.45)] } 
+                }}
                 config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
                 onClick={(e) => { if (e?.points?.[0]?.x) { const num = parseInt(e.points[0].x.replace(/\D/g, '')); dispatch({ type: 'TOGGLE_FIELD', field: 'filtroMesParado', payload: num }) } }}
               />
@@ -1616,6 +1868,4 @@ export default function VisaoGeral({ data }) {
 
     </div>
   )
- }
- 
-
+}
