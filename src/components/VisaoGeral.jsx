@@ -184,24 +184,49 @@ export default function VisaoGeral({ data }) {
 
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [])
 
+// 1. SANITIZAÇÃO EXTREMA (Resolve Unicode de acentos e caracteres invisíveis)
+const dadosSanitizados = useMemo(() => {
+  if (!data || !Array.isArray(data)) return []
+  
+  return data.map(r => {
+    let unidadeLimpa = r.unidade_almoxarifado;
+
+    if (unidadeLimpa) {
+      unidadeLimpa = String(unidadeLimpa)
+        .normalize('NFC') // Padroniza o código do acento "Á" para ser igual em todos
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Arranca caracteres invisíveis (zero-width) do Excel
+        .trim() // Tira espaços normais das pontas
+        .toUpperCase(); // Tudo maiúsculo
+    }
+
+    return {
+      ...r,
+      unidade_almoxarifado: unidadeLimpa
+    }
+  })
+}, [data])
+
   const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
-    if (!data || data.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
-    const uniques = [...new Set(data.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
-    const ativas = uniques.filter((u) => !u.includes('GERENCIAL'))
-    const gerenciais = uniques.filter((u) => u.includes('GERENCIAL'))
-    const anos = [...new Set(data.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
+    if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
+    const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
+    
+    // Convertendo para String(...) para garantir que o '.includes' não quebre
+    const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
+    const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
+    
+    const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
     return { unidadesOpcoes: uniques, unidadesAtivas: ativas, unidadesGerenciais: gerenciais, anoOpcoes: anos }
-  }, [data])
+  }, [dadosSanitizados])
 
   useEffect(() => {
-    if (anoOpcoes.length > 0 && initialLoad) {
+    if (anoOpcoes && anoOpcoes.length > 0 && initialLoad) {
       dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
       setInitialLoad(false)
     }
   }, [anoOpcoes, initialLoad])
 
   const getUnidadesPermitidas = useCallback((escopos) => {
-    if (escopos.length === 0) return unidadesOpcoes
+    if (!escopos || escopos.length === 0) return unidadesOpcoes
     let allowed = []
     if (escopos.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
     if (escopos.includes('Gerencial')) allowed = [...allowed, ...unidadesGerenciais]
@@ -211,13 +236,13 @@ export default function VisaoGeral({ data }) {
   const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
 
   const dfFiltrado = useMemo(() => {
-    let df = data || []
+    let df = dadosSanitizados || []
     if (escoposSel.length > 0) {
       const allowed = getUnidadesPermitidas(escoposSel)
       df = df.filter(r => allowed.includes(r.unidade_almoxarifado))
     }
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
-    if (anosSel.length > 0 && anosSel.length < anoOpcoes.length) {
+    if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length) {
       df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
     }
     df = df.map(r => ({ ...r, _categoria: classificarRegistro(r) }))
@@ -225,14 +250,14 @@ export default function VisaoGeral({ data }) {
       df = df.filter(r => tiposEstoqueSel.includes(r._categoria))
     }
     return df
-  }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes.length])
+  }, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes])
 
   useEffect(() => {
     dispatch({ type: 'RESET_SELECOES_FILTRO' })
   }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel])
 
   const periodoMaximo = useMemo(() => {
-    const source = dfFiltrado.length ? dfFiltrado : (data || [])
+    const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
     if (!source.length) return '01/2026'
     let maxAno = 0, maxMes = 0
     for (const r of source) {
@@ -243,7 +268,7 @@ export default function VisaoGeral({ data }) {
     }
     if (!maxAno) return '01/2026'
     return periodoLabel(maxMes, maxAno)
-  }, [dfFiltrado, data])
+  }, [dfFiltrado, dadosSanitizados])
 
   const periodoEfetivo = periodoAtivo || periodoMaximo
 
@@ -317,7 +342,8 @@ export default function VisaoGeral({ data }) {
           if (r.nome_produto) {
             if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
             const mapUnid = mapChavesPorUnidade.get(u)
-            const chave = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+            // String(...) protege contra dados numéricos em nome_produto
+            const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
             if (!mapUnid.has(chave)) mapUnid.set(chave, new Set())
             mapUnid.get(chave).add(r.codigo_produto)
           }
@@ -331,7 +357,8 @@ export default function VisaoGeral({ data }) {
       }
 
       if (r.nome_produto && u) {
-        const chaveGerada = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+        // String(...) protege contra dados numéricos
+        const chaveGerada = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
         if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), unidades: new Set(), quantidade: 0, valor: 0 })
         const item = mapChaves.get(chaveGerada)
         if (r.codigo_produto) item.skus.add(r.codigo_produto)
@@ -451,7 +478,8 @@ export default function VisaoGeral({ data }) {
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
-          const chave = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+          // String(...) protege contra dados numéricos
+          const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
           if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
           item.chavesMap.get(chave).add(r.codigo_produto)
         }
