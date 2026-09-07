@@ -859,10 +859,45 @@ export default function VisaoGeral({ data }) {
           </div>
 
           <div className="flex flex-wrap items-end gap-3 z-30">
-            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Tipo</label><CyberMultiSelect options={['Operacional', 'Crítico', 'Obsoleto', 'Obra']} selected={tiposEstoqueSel} onChange={(val) => dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: val })} placeholder={tiposEstoqueSel.length === 0 ? 'Todos os Tipos' : tiposEstoqueSel.join(', ')} /></div>
-            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label><CyberMultiSelect options={['Ativa', 'Gerencial']} selected={escoposSel} onChange={(val) => dispatch({ type: 'SET_ESCOPOS', payload: val })} placeholder={escoposSel.length === 0 || escoposSel.length === 2 ? 'Todas' : escoposSel.join(', ')} /></div>
-            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Local</label><CyberMultiSelect options={opcoesUnid} selected={unidadesSel} onChange={(val) => dispatch({ type: 'SET_UNIDADES', payload: val })} placeholder={unidadesSel.length === 0 ? 'Todas as Unidades' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} /></div>
-            <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label><CyberMultiSelect options={anoOpcoes} selected={anosSel} onChange={(val) => dispatch({ type: 'SET_ANOS', payload: val })} placeholder={anosSel.length === 0 || anosSel.length === anoOpcoes.length ? 'Todos os Anos' : anosSel.join(', ')} /></div>
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Tipo</label>
+              <CyberMultiSelect 
+                options={['Operacional', 'Crítico', 'Obsoleto', 'Obra']} 
+                selected={tiposEstoqueSel} 
+                onChange={(val) => dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: val })} 
+                placeholder={tiposEstoqueSel.length === 0 || tiposEstoqueSel.length === 4 ? 'Todos os Tipos' : tiposEstoqueSel.join(', ')} 
+              />
+            </div>
+            
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label>
+              <CyberMultiSelect 
+                options={['Ativa', 'Gerencial']} 
+                selected={escoposSel} 
+                onChange={(val) => dispatch({ type: 'SET_ESCOPOS', payload: val })} 
+                placeholder={escoposSel.length === 0 || escoposSel.length === 2 ? 'Todas' : escoposSel.join(', ')} 
+              />
+            </div>
+            
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Local</label>
+              <CyberMultiSelect 
+                options={opcoesUnid} 
+                selected={unidadesSel} 
+                onChange={(val) => dispatch({ type: 'SET_UNIDADES', payload: val })} 
+                placeholder={unidadesSel.length === 0 || unidadesSel.length === opcoesUnid.length ? 'Todas as Unidades' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} 
+              />
+            </div>
+            
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label>
+              <CyberMultiSelect 
+                options={anoOpcoes} 
+                selected={anosSel} 
+                onChange={(val) => dispatch({ type: 'SET_ANOS', payload: val })} 
+                placeholder={anosSel.length === 0 || anosSel.length === anoOpcoes.length ? 'Todos os Anos' : anosSel.join(', ')} 
+              />
+            </div>
           </div>
         </div>
 
@@ -1033,7 +1068,6 @@ export default function VisaoGeral({ data }) {
                   ticktext: rankingUnidade.map((d) => {
                     const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
                     const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
-                    // Adicionado &nbsp;&nbsp; para forçar o espaçamento
                     return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
                   }),
                   ticklen: 0,
