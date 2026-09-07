@@ -39,6 +39,7 @@ const initialState = {
   selectedBarraSkus: null,
   abaVariacao: 'aumento',
   abaSkus: 'unicos',
+  abaSkusUnidade: 'unicos',
   filtroMesParado: null,
   listaAberta: false,
   tabelaUnidadesSel: [],
@@ -159,7 +160,7 @@ export default function VisaoGeral({ data }) {
     selectedFatiaComposicao, selectedBarraCritico,
     selectedBarraObsoleto, selectedBarraObra,
     selectedBarraCompraConsumo, selectedBarraVariacao,
-    selectedBarraSkus, abaVariacao, abaSkus, filtroMesParado,
+    selectedBarraSkus, abaVariacao, abaSkus, abaSkusUnidade, filtroMesParado,
     listaAberta, tabelaUnidadesSel, tabelaMesesSel, tabelaExpandida,
     listaMaioresValoresAberta, tabelaMaioresValoresExpandida,
     listaComprasSemConsumoAberta, tabelaComprasSemConsumoExpandida,
@@ -282,7 +283,7 @@ export default function VisaoGeral({ data }) {
 
     const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map()
     const mapObs = new Map(), mapObra = new Map(), mapCC = new Map()
-    const mapSkus = new Map(), mapChaves = new Map()
+    const mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
 
     let valEstoque = 0, valCompras = 0, valConsumo = 0
     let valCritico = 0, valObsoleto = 0, valObra = 0
@@ -312,6 +313,14 @@ export default function VisaoGeral({ data }) {
         if (u) {
           if (!mapSkus.has(u)) mapSkus.set(u, new Set())
           mapSkus.get(u).add(r.codigo_produto)
+
+          if (r.nome_produto) {
+            if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
+            const mapUnid = mapChavesPorUnidade.get(u)
+            const chave = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+            if (!mapUnid.has(chave)) mapUnid.set(chave, new Set())
+            mapUnid.get(chave).add(r.codigo_produto)
+          }
         }
       }
 
@@ -381,6 +390,16 @@ export default function VisaoGeral({ data }) {
     maiores.sort((a, b) => b.valor - a.valor)
     comprasSem.sort((a, b) => b.comprado - a.comprado)
 
+    const skusUnidadeArr = [...mapSkus.entries()].map(([u, setSkus]) => {
+      let duplicadosUnidade = 0
+      if (mapChavesPorUnidade.has(u)) {
+        for (const setChaves of mapChavesPorUnidade.get(u).values()) {
+          if (setChaves.size > 1) duplicadosUnidade += setChaves.size
+        }
+      }
+      return { unidade: u, total: setSkus.size, duplicados: duplicadosUnidade }
+    }).filter(d => d.unidade && d.total > 0).sort((a, b) => a.total - b.total)
+
     return {
       metrics: {
         valEstoque, valCompras, valConsumo, valSkus: skusSet.size,
@@ -394,7 +413,7 @@ export default function VisaoGeral({ data }) {
       rankObra: mapToSort(mapObra),
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
       variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
-      skusUnidade: [...mapSkus.entries()].filter(([unidade, set]) => unidade && set.size > 0).map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
+      skusUnidade: skusUnidadeArr,
       composicao: comp, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
@@ -403,6 +422,13 @@ export default function VisaoGeral({ data }) {
     if (abaVariacao === 'aumento') return variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
     return variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
   }, [variacaoUnidade, abaVariacao])
+
+  const skusUnidadeFiltrado = useMemo(() => {
+    return skusUnidade.map(d => ({
+        unidade: d.unidade,
+        total: abaSkusUnidade === 'duplicados' ? d.duplicados : d.total
+    })).sort((a, b) => a.total - b.total);
+  }, [skusUnidade, abaSkusUnidade])
 
   const maioresValoresTabela = useMemo(() => tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12), [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
   const comprasSemConsumoTabela = useMemo(() => tabelaComprasSemConsumoExpandida ? comprasSemConsumoDataCompleta.slice(0, 1000) : comprasSemConsumoDataCompleta.slice(0, 12), [comprasSemConsumoDataCompleta, tabelaComprasSemConsumoExpandida])
@@ -1521,12 +1547,30 @@ export default function VisaoGeral({ data }) {
         <div onClick={() => handleCardClick('skus_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isSkusUnidadeSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isSkusUnidadeSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+          
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">SKUs POR UNIDADE (QTDE)</span></div>
-            {selectedBarraSkus && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar ✕</button>)}
+            <div className="flex items-center gap-2.5">
+              <div className={`w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center shadow-inner shrink-0 ${abaSkusUnidade === 'duplicados' ? 'text-[#f1c40f]' : 'text-[#3498db]'}`}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+              </div>
+              <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">SKUs POR UNIDADE (QTDE)</span>
+            </div>
+            {selectedBarraSkus && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null }); }} className={`text-[10px] px-2 py-0.5 rounded transition-all font-mono ${abaSkusUnidade === 'duplicados' ? 'bg-[#f1c40f]/20 text-[#f1c40f] border border-[#f1c40f]/40 hover:bg-[#f1c40f]/30' : 'bg-[#3498db]/20 text-[#3498db] border border-[#3498db]/40 hover:bg-[#3498db]/30'}`}>Limpar ✕</button>)}
           </div>
-          <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain mt-8">
-            {makeInteractiveHBar(skusUnidade, '#3498db', selectedBarraSkus, 'selectedBarraSkus')}
+
+          <div role="tablist" aria-label="Visualização de SKUs Unidade" className="flex items-center gap-3 text-[10px] font-medium tracking-wider mb-2">
+            <button role="tab" aria-selected={abaSkusUnidade === 'unicos'} onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'abaSkusUnidade', payload: 'unicos' }); }} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent/50 ${abaSkusUnidade === 'unicos' ? 'bg-[#3498db]/15 border-[#3498db]/40 text-white shadow-[0_0_10px_rgba(52,152,219,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-3 h-[2px] bg-[#3498db]"><span className={`absolute w-1.5 h-1.5 rounded-full border border-[#161616] ${abaSkusUnidade === 'unicos' ? 'bg-[#3498db]' : 'bg-[#555]'}`}></span></span>
+              <span>Únicos</span>
+            </button>
+            <button role="tab" aria-selected={abaSkusUnidade === 'duplicados'} onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'abaSkusUnidade', payload: 'duplicados' }); }} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent/50 ${abaSkusUnidade === 'duplicados' ? 'bg-[#f1c40f]/15 border-[#f1c40f]/40 text-white shadow-[0_0_10px_rgba(241,196,15,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
+              <span className="relative flex items-center justify-center w-3 h-[2px] bg-[#f1c40f]"><span className={`absolute w-1.5 h-1.5 rounded-full border border-[#161616] ${abaSkusUnidade === 'duplicados' ? 'bg-[#f1c40f]' : 'bg-[#555]'}`}></span></span>
+              <span>Duplicados</span>
+            </button>
+          </div>
+
+          <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain mt-2" onClick={(e) => e.stopPropagation()}>
+            {makeInteractiveHBar(skusUnidadeFiltrado, abaSkusUnidade === 'duplicados' ? '#f1c40f' : '#3498db', selectedBarraSkus, 'selectedBarraSkus')}
           </div>
         </div>
       </div>
@@ -1596,7 +1640,7 @@ export default function VisaoGeral({ data }) {
             },
             yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] }
           }}
-          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
+          config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
@@ -1706,7 +1750,7 @@ export default function VisaoGeral({ data }) {
               yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false }, 
               yaxis2: { overlaying: 'y', side: 'right', showgrid: false, showticklabels: false } 
             }}
-            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300 }} useResizeHandler
+            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
           />
         ) : (<p className="text-muted text-center py-10">Sem dados suficientes para calcular Giro x Cobertura.</p>)}
       </div>
