@@ -211,24 +211,18 @@ export default function VisaoGeral({ data }) {
 
   const dfFiltrado = useMemo(() => {
     let df = data || []
-
     if (escoposSel.length > 0) {
       const allowed = getUnidadesPermitidas(escoposSel)
       df = df.filter(r => allowed.includes(r.unidade_almoxarifado))
     }
     if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
-    
-    // Filtro de anos ajustado para considerar vazio ou seleção total como sem restrição
     if (anosSel.length > 0 && anosSel.length < anoOpcoes.length) {
       df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
     }
-
     df = df.map(r => ({ ...r, _categoria: classificarRegistro(r) }))
-
     if (tiposEstoqueSel.length > 0) {
       df = df.filter(r => tiposEstoqueSel.includes(r._categoria))
     }
-
     return df
   }, [data, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes.length])
 
@@ -261,11 +255,6 @@ export default function VisaoGeral({ data }) {
     const snapPrev = dfFiltrado.filter((r) => r.tmp_ano_num === aPrev && r.tmp_mes_num === mPrev)
     return { snapshot: snap, snapshotPrev: snapPrev }
   }, [dfFiltrado, periodoEfetivo])
-
-  useEffect(() => {
-    const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 200)
-    return () => clearTimeout(t)
-  }, [])
 
   useEffect(() => {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
@@ -306,20 +295,24 @@ export default function VisaoGeral({ data }) {
       valCompras += r.valor_entrada_compras || 0
       valConsumo += Math.abs(r.valor_saida_cons_interno || 0)
 
-      mapRank.set(u, (mapRank.get(u) || 0) + val)
+      if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
 
-      if (cat === 'Crítico') { mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val } 
-      else if (cat === 'Obsoleto') { mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val } 
-      else if (cat === 'Obra') { mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
+      if (cat === 'Crítico') { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val } 
+      else if (cat === 'Obsoleto') { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val } 
+      else if (cat === 'Obra') { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
 
-      if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
-      mapCC.get(u).compras += r.valor_entrada_compras || 0
-      mapCC.get(u).consumo += Math.abs(r.valor_saida_cons_interno || 0)
+      if (u) {
+        if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
+        mapCC.get(u).compras += r.valor_entrada_compras || 0
+        mapCC.get(u).consumo += Math.abs(r.valor_saida_cons_interno || 0)
+      }
 
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
-        if (!mapSkus.has(u)) mapSkus.set(u, new Set())
-        mapSkus.get(u).add(r.codigo_produto)
+        if (u) {
+          if (!mapSkus.has(u)) mapSkus.set(u, new Set())
+          mapSkus.get(u).add(r.codigo_produto)
+        }
       }
 
       if (val > 0) maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual || 0, valor: val })
@@ -328,7 +321,7 @@ export default function VisaoGeral({ data }) {
         comprasSem.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, categoria: cat, comprado: r.valor_entrada_compras || 0 })
       }
 
-      if (r.nome_produto) {
+      if (r.nome_produto && u) {
         const chaveGerada = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
         if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), unidades: new Set(), quantidade: 0, valor: 0 })
         const item = mapChaves.get(chaveGerada)
@@ -349,7 +342,7 @@ export default function VisaoGeral({ data }) {
       valEstoquePrev += val
       valComprasPrev += r.valor_entrada_compras || 0
       valConsumoPrev += Math.abs(r.valor_saida_cons_interno || 0)
-      mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
+      if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
 
       if (cat === 'Crítico') valCriticoPrev += val
       else if (cat === 'Obsoleto') valObsoletoPrev += val
@@ -360,14 +353,16 @@ export default function VisaoGeral({ data }) {
     const arrVariacao = []
     const todasUnid = new Set([...mapRank.keys(), ...mapRankPrev.keys()])
     for (const u of todasUnid) {
+      if (!u) continue
       const atual = mapRank.get(u) || 0, prev = mapRankPrev.get(u) || 0, diff = atual - prev
+      if (atual === 0 && prev === 0) continue 
       let pct = 0
       if (prev > 0) pct = (diff / prev) * 100
       else if (atual > 0) pct = 100
       arrVariacao.push({ unidade: u, atual, anterior: prev, diff, pct })
     }
 
-    const mapToSort = (m) => [...m.entries()].filter(([, v]) => v > 0).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
+    const mapToSort = (m) => [...m.entries()].filter(([unidade, v]) => unidade && v > 0.01).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
     const valOp = Math.max(0, valEstoque - (valObsoleto + valObra + valCritico))
     const comp = [
       { name: 'Estoque Crítico', value: valCritico, color: '#e74c3c' },
@@ -393,18 +388,20 @@ export default function VisaoGeral({ data }) {
         valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size,
         valCriticoPrev, valObsoletoPrev, valObraPrev
       },
-      rankingUnidade: mapToSort(mapRank), rankCritico: mapToSort(mapCrit), rankObsoleto: mapToSort(mapObs), rankObra: mapToSort(mapObra),
-      compraConsumoUnidade: [...mapCC.values()].filter((d) => d.compras > 0.01 || d.consumo > 0.01).sort((a, b) => a.compras - b.compras),
-      variacaoUnidade: arrVariacao,
-      skusUnidade: [...mapSkus.entries()].map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
+      rankingUnidade: mapToSort(mapRank),
+      rankCritico: mapToSort(mapCrit),
+      rankObsoleto: mapToSort(mapObs),
+      rankObra: mapToSort(mapObra),
+      compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
+      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
+      skusUnidade: [...mapSkus.entries()].filter(([unidade, set]) => unidade && set.size > 0).map(([unidade, set]) => ({ unidade, total: set.size })).sort((a, b) => a.total - b.total),
       composicao: comp, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
 
   const variacaoFiltrada = useMemo(() => {
-    return abaVariacao === 'aumento' 
-      ? variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
-      : variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => a.diff - b.diff)
+    if (abaVariacao === 'aumento') return variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
+    return variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
   }, [variacaoUnidade, abaVariacao])
 
   const maioresValoresTabela = useMemo(() => tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12), [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
@@ -427,7 +424,7 @@ export default function VisaoGeral({ data }) {
 
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
-        if (r.nome_produto) {
+        if (r.nome_produto && r.unidade_almoxarifado) {
           const chave = r.nome_produto.trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
           if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
           item.chavesMap.get(chave).add(r.codigo_produto)
@@ -496,7 +493,7 @@ export default function VisaoGeral({ data }) {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
     const snapshotIdx = p.ano * 12 + p.mes
-    const calc = dfFiltrado.filter((r) => r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto').map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
+    const calc = dfFiltrado.filter((r) => r.unidade_almoxarifado && r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto').map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
 
     const ultimoMov = new Map(), primeiroHist = new Map()
     for (const r of calc) {
@@ -509,6 +506,7 @@ export default function VisaoGeral({ data }) {
     const result = []
 
     for (const r of snapAtual) {
+      if (!r.unidade_almoxarifado) continue
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
       let ultimo = ultimoMov.get(key)
       if (ultimo == null) {
@@ -674,20 +672,38 @@ export default function VisaoGeral({ data }) {
 
   const maxValRanking = useMemo(() => Math.max(...rankingUnidade.map((d) => d.valor), 1), [rankingUnidade])
 
-  const plotDataRanking = useMemo(() => [{
-    type: 'bar', orientation: 'h',
-    y: rankingUnidade.map((d) => d.unidade),
-    x: rankingUnidade.map((d) => d.valor),
-    text: rankingUnidade.map((d) => fmtValorCurto(d.valor)),
-    textposition: 'auto',
-    textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
-    marker: {
-      color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'),
-      opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3),
-      line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+  const plotDataRanking = useMemo(() => [
+    // Trace 0: Fundo invisível para capturar o clique em qualquer parte da linha
+    {
+      type: 'bar', orientation: 'h',
+      y: rankingUnidade.map((d) => d.unidade),
+      x: rankingUnidade.map(() => maxValRanking * 1.25),
+      marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
+      hoverinfo: 'none',
+      showlegend: false
     },
-    hoverinfo: 'none'
-  }], [rankingUnidade, selectedBarraRanking])
+    // Trace 1: Dados Reais
+    {
+      type: 'bar', orientation: 'h',
+      y: rankingUnidade.map((d) => d.unidade),
+      x: rankingUnidade.map((d) => d.valor),
+      cliponaxis: false,
+      textposition: 'outside',
+      text: rankingUnidade.map((d) => {
+        const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
+        const rawText = fmtValorCurto(d.valor)
+        const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+        return `<span style="color: ${textColor}; margin-left: 6px;">${rawText}</span>`
+      }),
+      textfont: { size: 10, family: 'Inter', weight: 600 },
+      marker: {
+        color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'),
+        opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3),
+        line: { color: '#080808', width: 1 }
+      },
+      hoverinfo: 'none'
+    }
+  ], [rankingUnidade, selectedBarraRanking, maxValRanking])
 
   const makeInteractiveHBar = useCallback((items, color, selectedBar, fieldName) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
@@ -695,26 +711,62 @@ export default function VisaoGeral({ data }) {
     return (
       <div onClick={(e) => e.stopPropagation()}>
         <Plot
-          data={[{
-            type: 'bar', orientation: 'h',
-            y: items.map((d) => d.unidade),
-            x: items.map((d) => d.valor ?? d.total),
-            text: items.map((d) => d.total != null ? `${fmtInt(d.total)} SKUs` : fmtValorCurto(d.valor)),
-            textposition: 'auto',
-            textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
-            marker: {
-              color: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? color : 'rgba(255, 255, 255, 0.15)'),
-              opacity: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? 1 : 0.3),
-              line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+          data={[
+            // Hitbox Trace (invisível)
+            {
+              type: 'bar', orientation: 'h',
+              y: items.map((d) => d.unidade),
+              x: items.map(() => maxValItems * 1.25),
+              marker: { color: 'rgba(255, 255, 255, 0.01)' },
+              hoverinfo: 'none',
+              showlegend: false
             },
-            hoverinfo: 'none'
-          }]}
+            // Main Trace
+            {
+              type: 'bar', orientation: 'h',
+              y: items.map((d) => d.unidade),
+              x: items.map((d) => d.valor ?? d.total),
+              cliponaxis: false,
+              textposition: 'outside',
+              text: items.map((d) => {
+                const isSelected = !selectedBar || d.unidade === selectedBar
+                const rawText = d.total != null ? `${fmtInt(d.total)} SKUs` : fmtValorCurto(d.valor)
+                const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                return `<span style="color: ${textColor}; margin-left: 6px;">${rawText}</span>`
+              }),
+              textfont: { size: 10, family: 'Inter', weight: 600 },
+              marker: {
+                color: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? color : 'rgba(255, 255, 255, 0.15)'),
+                opacity: items.map((d) => (!selectedBar || d.unidade === selectedBar) ? 1 : 0.3),
+                line: { color: '#080808', width: 1 }
+              },
+              hoverinfo: 'none'
+            }
+          ]}
           layout={{
             ...PLOT_LAYOUT,
+            barmode: 'overlay', 
+            bargap: 0.4,
             height: Math.max(300, items.length * 32),
-            margin: { l: 180, r: 20, t: 10, b: 10 },
-            xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxValItems * 0.15, maxValItems * 1.25] },
-            yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' }, tickpad: 15, automargin: true }
+            margin: { l: 115, r: 80, t: 10, b: 10 }, // Margem alinhada na esquerda
+            xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValItems * 1.25] },
+            yaxis: {
+              showgrid: true,
+              gridcolor: '#4A4A4A', 
+              tickson: 'boundaries',
+              tickmode: 'array',
+              tickvals: items.map((d) => d.unidade),
+              ticktext: items.map((d) => {
+                const isSelected = !selectedBar || d.unidade === selectedBar
+                const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
+                // O &nbsp;&nbsp; no final do texto FORÇA o espaçamento HTML entre a legenda e a linha do eixo
+                return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
+              }),
+              ticklen: 0, 
+              tickcolor: 'rgba(0,0,0,0)', 
+              tickpad: 8,
+              automargin: true
+            }
           }}
           config={{ displayModeBar: false, responsive: true }}
           style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
@@ -965,7 +1017,31 @@ export default function VisaoGeral({ data }) {
           <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             <Plot
               data={plotDataRanking}
-              layout={{ ...PLOT_LAYOUT, height: Math.max(300, rankingUnidade.length * 32), margin: { l: 180, r: 20, t: 10, b: 10 }, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxValRanking * 0.15, maxValRanking * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 11, color: '#d1d8df', family: 'Inter' }, tickpad: 15, automargin: true } }}
+              layout={{
+                ...PLOT_LAYOUT,
+                barmode: 'overlay', 
+                bargap: 0.4,
+                height: Math.max(300, rankingUnidade.length * 32),
+                margin: { l: 115, r: 90, t: 10, b: 10 },
+                xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValRanking * 1.25] },
+                yaxis: {
+                  showgrid: true,
+                  gridcolor: '#4A4A4A',
+                  tickson: 'boundaries',
+                  tickmode: 'array',
+                  tickvals: rankingUnidade.map((d) => d.unidade),
+                  ticktext: rankingUnidade.map((d) => {
+                    const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
+                    const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
+                    // Adicionado &nbsp;&nbsp; para forçar o espaçamento
+                    return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
+                  }),
+                  ticklen: 0,
+                  tickcolor: 'rgba(0,0,0,0)',
+                  tickpad: 8,
+                  automargin: true
+                }
+              }}
               config={{ displayModeBar: false, responsive: true }}
               style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
               useResizeHandler
@@ -1079,8 +1155,8 @@ export default function VisaoGeral({ data }) {
             {selectedBarraCompraConsumo && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraCompraConsumo', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar ✕</button>)}
           </div>
           <div className="flex items-center gap-3 text-[11px] text-muted tracking-wider mb-2">
-            <span><span className="text-[#e74c3c]">■</span> Compras</span>
             <span><span className="text-[#2ecc71]">■</span> Consumo</span>
+            <span><span className="text-[#e74c3c]">■</span> Compras</span>
           </div>
           <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             {compraConsumoUnidade.length ? (() => {
@@ -1088,10 +1164,76 @@ export default function VisaoGeral({ data }) {
               return (
                 <Plot
                   data={[
-                    { type: 'bar', orientation: 'h', name: 'Compras', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.compras), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.compras)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#e74c3c' : 'rgba(231,76,60,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
-                    { type: 'bar', orientation: 'h', name: 'Consumo', y: compraConsumoUnidade.map((d) => d.unidade), x: compraConsumoUnidade.map((d) => d.consumo), text: compraConsumoUnidade.map((d) => fmtValorCurto(d.consumo)), textposition: 'auto', textfont: { color: 'white', size: 10, family: 'Inter' }, marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3) }, hoverinfo: 'none' },
+                    // Trace Hitbox na X2
+                    {
+                      type: 'bar', orientation: 'h', name: 'Hitbox',
+                      y: compraConsumoUnidade.map((d) => d.unidade),
+                      x: compraConsumoUnidade.map(() => maxCC * 1.25),
+                      marker: { color: 'rgba(255, 255, 255, 0.01)' },
+                      hoverinfo: 'none',
+                      showlegend: false,
+                      xaxis: 'x2'
+                    },
+                    // Traces Principais
+                    {
+                      type: 'bar', orientation: 'h', name: 'Consumo',
+                      y: compraConsumoUnidade.map((d) => d.unidade),
+                      x: compraConsumoUnidade.map((d) => d.consumo),
+                      cliponaxis: false,
+                      textposition: 'outside',
+                      text: compraConsumoUnidade.map((d) => {
+                        const isSelected = !selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo
+                        const rawText = fmtValorCurto(d.consumo)
+                        const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                        return `<span style="color: ${textColor}; margin-left: 4px;">${rawText}</span>`
+                      }),
+                      textfont: { size: 10, family: 'Inter' },
+                      marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#2ecc71' : 'rgba(46,204,113,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3), line: { color: '#080808', width: 1 } },
+                      hoverinfo: 'none'
+                    },
+                    {
+                      type: 'bar', orientation: 'h', name: 'Compras',
+                      y: compraConsumoUnidade.map((d) => d.unidade),
+                      x: compraConsumoUnidade.map((d) => d.compras),
+                      cliponaxis: false,
+                      textposition: 'outside',
+                      text: compraConsumoUnidade.map((d) => {
+                        const isSelected = !selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo
+                        const rawText = fmtValorCurto(d.compras)
+                        const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                        return `<span style="color: ${textColor}; margin-left: 4px;">${rawText}</span>`
+                      }),
+                      textfont: { size: 10, family: 'Inter' },
+                      marker: { color: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? '#e74c3c' : 'rgba(231,76,60,0.25)'), opacity: compraConsumoUnidade.map((d) => (!selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo) ? 1 : 0.3), line: { color: '#080808', width: 1 } },
+                      hoverinfo: 'none'
+                    }
                   ]}
-                  layout={{ ...PLOT_LAYOUT, barmode: 'group', height: Math.max(280, compraConsumoUnidade.length * 45), margin: { l: 180, r: 30, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [-maxCC * 0.15, maxCC * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
+                  layout={{
+                    ...PLOT_LAYOUT,
+                    barmode: 'group',
+                    bargap: 0.35,
+                    height: Math.max(280, compraConsumoUnidade.length * 45),
+                    margin: { l: 115, r: 90, t: 10, b: 10 },
+                    showlegend: false,
+                    xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxCC * 1.25] },
+                    xaxis2: { overlaying: 'x', showgrid: false, zeroline: false, showticklabels: false, range: [0, maxCC * 1.25] },
+                    yaxis: {
+                      showgrid: true,
+                      gridcolor: '#4A4A4A',
+                      tickson: 'boundaries',
+                      tickmode: 'array',
+                      tickvals: compraConsumoUnidade.map((d) => d.unidade),
+                      ticktext: compraConsumoUnidade.map((d) => {
+                        const isSelected = !selectedBarraCompraConsumo || d.unidade === selectedBarraCompraConsumo
+                        const textColor = isSelected ? '#c5d0db' : 'rgba(140, 155, 165, 0.3)'
+                        return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
+                      }),
+                      ticklen: 0,
+                      tickcolor: 'rgba(0,0,0,0)',
+                      tickpad: 8,
+                      automargin: true
+                    }
+                  }}
                   config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraCompraConsumo', payload: e.points[0].y.trim() }) }}
                 />
               )
@@ -1129,26 +1271,66 @@ export default function VisaoGeral({ data }) {
               const maxVar = Math.max(...variacaoFiltrada.map((d) => Math.abs(d.diff)), 1)
               return (
                 <Plot
-                  data={[{
-                    type: 'bar', orientation: 'h', name: 'Variação',
-                    y: variacaoFiltrada.map((d) => d.unidade),
-                    x: variacaoFiltrada.map((d) => Math.abs(d.diff)),
-                    text: variacaoFiltrada.map((d) => {
-                       const valFormatado = fmtValorCurto(Math.abs(d.diff));
-                       const textoVal = d.diff > 0 ? `+${valFormatado}` : (d.diff < 0 ? `-${valFormatado}` : valFormatado);
-                       const textoPct = d.diff > 0 ? `+${d.pct.toFixed(1).replace('.',',')}%` : `${d.pct.toFixed(1).replace('.',',')}%`;
-                       return `${textoVal} (${textoPct})`;
-                    }),
-                    textposition: 'auto',
-                    textfont: { color: 'white', size: 10, family: 'Inter', weight: 600 },
-                    marker: {
-                      color: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? (abaVariacao === 'aumento' ? '#f58220' : '#2ecc71') : 'rgba(255, 255, 255, 0.15)'),
-                      opacity: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? 1 : 0.3),
-                      line: { color: 'rgba(255,255,255,0.08)', width: 1 }
+                  data={[
+                    // Hitbox Trace
+                    {
+                      type: 'bar', orientation: 'h',
+                      y: variacaoFiltrada.map((d) => d.unidade),
+                      x: variacaoFiltrada.map(() => maxVar * 1.35),
+                      marker: { color: 'rgba(255, 255, 255, 0.01)' },
+                      hoverinfo: 'none',
+                      showlegend: false
                     },
-                    hoverinfo: 'none'
-                  }]}
-                  layout={{ ...PLOT_LAYOUT, height: Math.max(280, variacaoFiltrada.length * 35), margin: { l: 180, r: 40, t: 10, b: 10 }, showlegend: false, xaxis: { showgrid: true, gridcolor: '#1f1f1f', showticklabels: false, zeroline: false, range: [-maxVar * 0.15, maxVar * 1.25] }, yaxis: { showgrid: false, tickfont: { size: 10, color: '#c5d0db', family: 'Inter' }, tickpad: 15, automargin: true } }}
+                    // Main Trace
+                    {
+                      type: 'bar', orientation: 'h',
+                      y: variacaoFiltrada.map((d) => d.unidade),
+                      x: variacaoFiltrada.map((d) => Math.abs(d.diff)),
+                      cliponaxis: false,
+                      textposition: 'outside',
+                      text: variacaoFiltrada.map((d) => {
+                         const isSelected = !selectedBarraVariacao || d.unidade === selectedBarraVariacao
+                         const valFormatado = fmtValorCurto(Math.abs(d.diff));
+                         const textoVal = d.diff > 0 ? `+${valFormatado}` : (d.diff < 0 ? `-${valFormatado}` : valFormatado);
+                         const textoPct = d.diff > 0 ? `+${d.pct.toFixed(1).replace('.',',')}%` : `${d.pct.toFixed(1).replace('.',',')}%`;
+                         const rawText = `${textoVal} (${textoPct})`;
+                         const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                         return `<span style="color: ${textColor}; margin-left: 6px;">${rawText}</span>`
+                      }),
+                      textfont: { size: 10, family: 'Inter', weight: 600 },
+                      marker: {
+                        color: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? (abaVariacao === 'aumento' ? '#f58220' : '#2ecc71') : 'rgba(255, 255, 255, 0.15)'),
+                        opacity: variacaoFiltrada.map((d) => (!selectedBarraVariacao || d.unidade === selectedBarraVariacao) ? 1 : 0.3),
+                        line: { color: '#080808', width: 1 }
+                      },
+                      hoverinfo: 'none'
+                    }
+                  ]}
+                  layout={{
+                    ...PLOT_LAYOUT,
+                    barmode: 'overlay',
+                    bargap: 0.4,
+                    height: Math.max(280, variacaoFiltrada.length * 35),
+                    margin: { l: 115, r: 90, t: 10, b: 10 },
+                    showlegend: false,
+                    xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxVar * 1.35] },
+                    yaxis: {
+                      showgrid: true,
+                      gridcolor: '#4A4A4A',
+                      tickson: 'boundaries',
+                      tickmode: 'array',
+                      tickvals: variacaoFiltrada.map((d) => d.unidade),
+                      ticktext: variacaoFiltrada.map((d) => {
+                        const isSelected = !selectedBarraVariacao || d.unidade === selectedBarraVariacao
+                        const textColor = isSelected ? '#c5d0db' : 'rgba(140, 155, 165, 0.3)'
+                        return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
+                      }),
+                      ticklen: 0,
+                      tickcolor: 'rgba(0,0,0,0)',
+                      tickpad: 8,
+                      automargin: true
+                    }
+                  }}
                   config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
                   onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraVariacao', payload: e.points[0].y.trim() }) }}
                 />
