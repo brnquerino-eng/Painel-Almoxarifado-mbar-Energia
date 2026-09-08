@@ -143,7 +143,11 @@ function formatarPeriodoTexto(periodoStr) {
 }
 
 function classificarRegistro(r) {
-  if (isObsoleto(r.nome_local_estoque)) return 'Obsoleto'
+  const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
+  const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
+  const isWartsila = nomeLocal.includes('WARTSILA') || unidadeAlmox.includes('WARTSILA')
+
+  if (isObsoleto(r.nome_local_estoque) || isWartsila) return 'Obsoleto'
   if (isObra(r.nome_local_estoque)) return 'Obra'
   if (isCritico(r.item_critico)) return 'Crítico'
   return 'Operacional'
@@ -184,33 +188,32 @@ export default function VisaoGeral({ data }) {
 
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [])
 
-// 1. SANITIZAÇÃO EXTREMA (Resolve Unicode de acentos e caracteres invisíveis)
-const dadosSanitizados = useMemo(() => {
-  if (!data || !Array.isArray(data)) return []
-  
-  return data.map(r => {
-    let unidadeLimpa = r.unidade_almoxarifado;
+  // 1. SANITIZAÇÃO DE TEXTOS E ACENTOS
+  const dadosSanitizados = useMemo(() => {
+    if (!data || !Array.isArray(data)) return []
+    
+    return data.map(r => {
+      let unidadeLimpa = r.unidade_almoxarifado;
 
-    if (unidadeLimpa) {
-      unidadeLimpa = String(unidadeLimpa)
-        .normalize('NFC') // Padroniza o código do acento "Á" para ser igual em todos
-        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Arranca caracteres invisíveis (zero-width) do Excel
-        .trim() // Tira espaços normais das pontas
-        .toUpperCase(); // Tudo maiúsculo
-    }
+      if (unidadeLimpa) {
+        unidadeLimpa = String(unidadeLimpa)
+          .normalize('NFC')
+          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+          .trim()
+          .toUpperCase();
+      }
 
-    return {
-      ...r,
-      unidade_almoxarifado: unidadeLimpa
-    }
-  })
-}, [data])
+      return {
+        ...r,
+        unidade_almoxarifado: unidadeLimpa
+      }
+    })
+  }, [data])
 
   const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
     if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
     const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
     
-    // Convertendo para String(...) para garantir que o '.includes' não quebre
     const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
     const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
     
@@ -342,7 +345,6 @@ const dadosSanitizados = useMemo(() => {
           if (r.nome_produto) {
             if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
             const mapUnid = mapChavesPorUnidade.get(u)
-            // String(...) protege contra dados numéricos em nome_produto
             const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
             if (!mapUnid.has(chave)) mapUnid.set(chave, new Set())
             mapUnid.get(chave).add(r.codigo_produto)
@@ -357,7 +359,6 @@ const dadosSanitizados = useMemo(() => {
       }
 
       if (r.nome_produto && u) {
-        // String(...) protege contra dados numéricos
         const chaveGerada = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
         if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), unidades: new Set(), quantidade: 0, valor: 0 })
         const item = mapChaves.get(chaveGerada)
@@ -478,7 +479,6 @@ const dadosSanitizados = useMemo(() => {
       if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
-          // String(...) protege contra dados numéricos
           const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
           if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
           item.chavesMap.get(chave).add(r.codigo_produto)
