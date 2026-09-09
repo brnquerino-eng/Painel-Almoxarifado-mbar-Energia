@@ -4,6 +4,7 @@ import { supabase, TABLE_ESTOQUE } from '../lib/supabase'
 // --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
 const DB_NAME = 'AmbarCacheDB'
 const STORE_NAME = 'cache_store'
+const CACHE_KEY = 'estoqueData_v2' // <-- MUDAMOS A CHAVE AQUI PARA FORÇAR LIMPEZA DO CACHE ANTIGO
 
 function getDB() {
   return new Promise((resolve, reject) => {
@@ -58,7 +59,9 @@ const COLS = [
   'qtde_saldo_atual',
   'item_critico',
   'nome_local_estoque',
-  'codigo_local_estoque', // <-- NOVA COLUNA ADICIONADA AQUI
+  'codigo_local_estoque',
+  'ge',
+  'preco_medio'
 ].join(',')
 
 function cleanStr(val) {
@@ -83,7 +86,9 @@ function normalizeRow(row) {
     nome_produto: cleanStr(row.nome_produto),
     item_critico: cleanStr(row.item_critico),
     nome_local_estoque: cleanStr(row.nome_local_estoque),
-    codigo_local_estoque: cleanStr(row.codigo_local_estoque), // <-- NOVA COLUNA ADICIONADA AQUI
+    codigo_local_estoque: cleanStr(row.codigo_local_estoque),
+    ge: cleanStr(row.ge),
+    preco_medio: toNum(row.preco_medio),
     valor_saldo_atual: toNum(row.valor_saldo_atual),
     valor_entrada_compras: toNum(row.valor_entrada_compras),
     valor_saida_cons_interno: toNum(row.valor_saida_cons_interno),
@@ -104,18 +109,16 @@ export function useEstoqueData() {
     setError(null)
     setProgress(0)
 
-    // 1. Ao iniciar, só vai olhar o Cache e PARAR. Não toca no Supabase!
     if (!forceReload) {
-      const cachedData = await getCache('estoqueData')
+      const cachedData = await getCache(CACHE_KEY)
       if (cachedData) {
         setData(cachedData)
         setProgress(100)
       }
       setLoading(false)
-      return // ESSE É O SEGREDO! O código morre aqui se você só deu F5.
+      return 
     }
 
-    // 2. Se for forceReload (Clico no Botão), ignora cache e vai pro Supabase
     try {
       const { count, error: countErr } = await supabase
         .from(TABLE_ESTOQUE)
@@ -167,7 +170,7 @@ export function useEstoqueData() {
       }
 
       setData(all)
-      await setCache('estoqueData', all)
+      await setCache(CACHE_KEY, all)
 
     } catch (err) {
       console.error('Erro ao carregar estoque:', err)
@@ -178,7 +181,6 @@ export function useEstoqueData() {
     }
   }, [])
 
-  // 3. Volta o useEffect, mas passando FALSE para ele só ler o cache ao abrir!
   useEffect(() => {
     load(false)
   }, [load])

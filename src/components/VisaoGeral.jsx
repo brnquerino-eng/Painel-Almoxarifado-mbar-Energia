@@ -161,7 +161,7 @@ function parseNumber(val) {
   return isNaN(n) ? 0 : n;
 }
 
-// LÓGICA DE LENTES INDEPENDENTES (Atributos Absolutos Multi-Tag)
+// LÓGICA DE LENTES INDEPENDENTES
 function aplicarLentesIndependentes(r) {
   const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
@@ -173,8 +173,6 @@ function aplicarLentesIndependentes(r) {
   const _isObra = isObra(r.nome_local_estoque)
   const _isCritico = isCritico(r.item_critico)
   const _isInsumo = CODIGOS_INSUMO.includes(codigoLocal)
-  
-  // O Operacional puro é aquilo que não sofre incidência de nenhuma tag especial
   const _isOperacional = !_isObsoleto && !_isObra && !_isCritico && !_isInsumo
 
   return { ...r, _isObsoleto, _isObra, _isCritico, _isInsumo, _isOperacional }
@@ -213,7 +211,7 @@ export default function VisaoGeral({ data }) {
 
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [])
 
-  // 1. SANITIZAÇÃO DE TEXTOS E ACENTOS
+  // 1. SANITIZAÇÃO
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
     return data.map(r => {
@@ -251,7 +249,6 @@ export default function VisaoGeral({ data }) {
 
   const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
 
-  // Aplicação dos Filtros Mestre - Permitindo a sobreposição se o usuário selecionar múltiplas tags
   const dfFiltrado = useMemo(() => {
     let df = dadosSanitizados || []
     if (escoposSel.length > 0) {
@@ -263,7 +260,6 @@ export default function VisaoGeral({ data }) {
       df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
     }
     
-    // Anexa as flags independentes a cada registro
     df = df.map(r => aplicarLentesIndependentes(r))
     
     if (tiposEstoqueSel.length > 0) {
@@ -344,15 +340,15 @@ export default function VisaoGeral({ data }) {
       const val = parseNumber(r.valor_saldo_atual)
       const valEntrada = parseNumber(r.valor_entrada_compras)
       const valSaida = parseNumber(r.valor_saida_cons_interno)
+      const qtdAtual = parseNumber(r.qtde_saldo_atual)
+      const qtdEntrada = parseNumber(r.qtde_entrada_compras || r.qtde_entrada || 0)
       
-      // Total Global Único (Não Duplica)
       valEstoque += val
       valCompras += valEntrada
       valConsumo += Math.abs(valSaida)
 
       if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
 
-      // Lentes Independentes (Absolutas)
       if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
       if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
       if (r._isObra) { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
@@ -365,7 +361,7 @@ export default function VisaoGeral({ data }) {
         mapCC.get(u).consumo += Math.abs(valSaida)
       }
 
-      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
+      if (qtdAtual > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
         if (u) {
           if (!mapSkus.has(u)) mapSkus.set(u, new Set())
@@ -380,16 +376,34 @@ export default function VisaoGeral({ data }) {
         }
       }
 
-      if (val > 0) maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: val })
+      if (val > 0) {
+        // Usa o preço médio que vem do BD, com fallback matemático se zerado.
+        const precoMedioBase = r.preco_medio > 0 ? r.preco_medio : (qtdAtual > 0 ? val / qtdAtual : 0)
+        const geBase = r.ge || '—'
+        const itemCriticoStr = r._isCritico ? 'Sim' : 'Não'
+        
+        maiores.push({ 
+          _rowKey: `${u}-${r.codigo_produto}`, 
+          unidade: u, 
+          ge: geBase,
+          codigo: r.codigo_produto, 
+          nome: r.nome_produto, 
+          quantidade: qtdAtual, 
+          precoMedio: precoMedioBase,
+          itemCritico: itemCriticoStr,
+          valor: val 
+        })
+      }
       
       if (valEntrada > 0 || Math.abs(valSaida) > 0) {
         const skuKey = `${u}-${r.codigo_produto}`
         if (!mapSkuAggComprasSemConsumo.has(skuKey)) {
-          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0 })
+          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0, qtdeComprada: 0 })
         }
         const item = mapSkuAggComprasSemConsumo.get(skuKey)
         item.entrada += valEntrada
         item.saida += Math.abs(valSaida)
+        item.qtdeComprada += qtdEntrada
       }
 
       if (r.nome_produto && u) {
@@ -398,14 +412,22 @@ export default function VisaoGeral({ data }) {
         const item = mapChaves.get(chaveGerada)
         if (r.codigo_produto) item.skus.add(r.codigo_produto)
         item.unidades.add(u)
-        item.quantidade += parseNumber(r.qtde_saldo_atual)
+        item.quantidade += qtdAtual
         item.valor += val
       }
     }
 
     for (const item of mapSkuAggComprasSemConsumo.values()) {
       if (item.entrada > 0.01 && item.saida < 0.01) {
-        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, comprado: item.entrada })
+        comprasSem.push({ 
+          _rowKey: `${item.u}-${item.cod}`, 
+          unidade: item.u, 
+          codigo: item.cod, 
+          nome: item.nome, 
+          flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, 
+          qtdeComprada: item.qtdeComprada,
+          comprado: item.entrada 
+        })
       }
     }
 
@@ -446,7 +468,6 @@ export default function VisaoGeral({ data }) {
 
     const mapToSort = (m) => [...m.entries()].filter(([unidade, v]) => unidade && v > 0.01).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
     
-    // Substituindo Pizza por Gráfico de Barras de Exposição Absoluta
     const exposicao = [
       { name: 'Estoque Operacional', value: valOp, color: '#3498db' },
       { name: 'Estoque Insumo', value: valInsumo, color: '#f1c40f' },
@@ -458,7 +479,18 @@ export default function VisaoGeral({ data }) {
     const duplicados = []
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
-        duplicados.push({ _rowKey: dados.nomeExemplo, nome: dados.nomeExemplo, qtd_skus: dados.skus.size, skus_lista: Array.from(dados.skus).join(', '), unidades_lista: Array.from(dados.unidades).join(', '), quantidade: dados.quantidade, valor: dados.valor })
+        // Preço Médio desse grupo (vários SKUs). Divisão Total é o mais acurado para agrupamentos.
+        const precoMedioDup = dados.quantidade > 0 ? dados.valor / dados.quantidade : 0
+        duplicados.push({ 
+          _rowKey: dados.nomeExemplo, 
+          nome: dados.nomeExemplo, 
+          qtd_skus: dados.skus.size, 
+          skus_lista: Array.from(dados.skus).join(', '), 
+          unidades_lista: Array.from(dados.unidades).join(', '), 
+          quantidade: dados.quantidade, 
+          precoMedio: precoMedioDup,
+          valor: dados.valor 
+        })
       }
     }
     duplicados.sort((a, b) => b.valor - a.valor)
@@ -565,7 +597,6 @@ export default function VisaoGeral({ data }) {
       const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
       if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
       const item = map.get(key)
-      // Para o Giro e Cobertura, ignoramos histórico de itens que hoje são considerados paralisados por risco
       if (!r._isCritico && !r._isObsoleto) {
         item.estoque_op += parseNumber(r.valor_saldo_atual)
         item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
@@ -665,7 +696,17 @@ export default function VisaoGeral({ data }) {
     if (!maioresValoresDataCompleta.length) return
     setExportando(true)
     try {
-      const wsData = maioresValoresDataCompleta.map(item => ({ 'Unidade': item.unidade, 'Código SKU': item.codigo, 'Nome do Produto': item.nome, 'Quantidade': item.quantidade, 'Valor em Estoque (R$)': item.valor, 'Período': formatarPeriodoTexto(periodoEfetivo) }))
+      const wsData = maioresValoresDataCompleta.map(item => ({ 
+        'Unidade': item.unidade, 
+        'GE': item.ge,
+        'Código SKU': item.codigo, 
+        'Nome do Produto': item.nome, 
+        'Item Crítico': item.itemCritico,
+        'Quantidade': item.quantidade, 
+        'Preço Médio (R$)': item.precoMedio,
+        'Valor em Estoque (R$)': item.valor, 
+        'Período': formatarPeriodoTexto(periodoEfetivo) 
+      }))
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Maiores Valores')
       XLSX.writeFile(wb, `maiores_valores_estoque_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
     } finally { setExportando(false) }
@@ -675,7 +716,16 @@ export default function VisaoGeral({ data }) {
     if (!duplicadosDataCompleta.length) return
     setExportando(true)
     try {
-      const wsData = duplicadosDataCompleta.map(item => ({ 'Nome do Produto': item.nome, 'Qtd SKUs Diferentes': item.qtd_skus, 'Códigos SKUs': item.skus_lista, 'Unidades Afetadas': item.unidades_lista, 'Quantidade Total': item.quantidade, 'Valor Imobilizado (R$)': item.valor, 'Período': formatarPeriodoTexto(periodoEfetivo) }))
+      const wsData = duplicadosDataCompleta.map(item => ({ 
+        'Nome do Produto': item.nome, 
+        'Qtd SKUs Diferentes': item.qtd_skus, 
+        'Códigos SKUs': item.skus_lista, 
+        'Unidades Afetadas': item.unidades_lista, 
+        'Quantidade Total': item.quantidade, 
+        'Preço Médio (R$)': item.precoMedio,
+        'Valor Imobilizado (R$)': item.valor, 
+        'Período': formatarPeriodoTexto(periodoEfetivo) 
+      }))
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Cadastros Duplicados')
       XLSX.writeFile(wb, `cadastros_duplicados_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
     } finally { setExportando(false) }
@@ -698,6 +748,7 @@ export default function VisaoGeral({ data }) {
           'Código SKU': item.codigo,
           'Nome do Produto': item.nome,
           Atributos: tags.join(', '),
+          'Qtde Comprada': item.qtdeComprada,
           'Valor Comprado (R$)': item.comprado,
           'Valor Consumido (R$)': 0,
           Período: formatarPeriodoTexto(periodoEfetivo),
@@ -804,11 +855,7 @@ export default function VisaoGeral({ data }) {
         arrowcolor: 'rgba(0,0,0,0)',
         ax: 0, 
         ay: yOffset, 
-        font: { 
-          size: 10, 
-          color: isSelected ? '#080808' : '#ffffff', 
-          family: 'Inter' 
-        }, 
+        font: { size: 10, color: isSelected ? '#080808' : '#ffffff', family: 'Inter' }, 
         bgcolor: isSelected ? color : 'rgba(22, 22, 22, 0.85)', 
         bordercolor: color, 
         borderwidth: 1, 
@@ -929,26 +976,38 @@ export default function VisaoGeral({ data }) {
     )
   }, [dispatch])
 
+  // Colunas para Maiores Valores
   const colsMaioresValores = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'ge', label: 'GE', className: 'text-muted font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[280px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
-    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[220px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'itemCritico', label: 'Crítico', align: 'center', render: (i) => (
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${i.itemCritico === 'Sim' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : 'bg-dark-500/20 text-muted border-dark-500/30'}`}>
+          {i.itemCritico}
+        </span>
+      )
+    },
+    { key: 'quantidade', label: 'Qtd', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
     { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
+  // Colunas para Duplicados
   const colsDuplicados = useMemo(() => [
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white font-medium max-w-[250px] truncate', title: (i) => i.nome },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
     { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>) },
-    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[200px] truncate', title: (i) => i.skus_lista },
+    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[180px] truncate', title: (i) => i.skus_lista },
     { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
-    { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
+    { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
+    { key: 'valor', label: 'Valor Imobilizado', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
+  // Colunas para Compras sem Consumo
   const colsComprasSemConsumo = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[150px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[140px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
     { key: 'flags', label: 'Atributos (Lentes)', align: 'left', render: (i) => (
         <div className="flex flex-wrap gap-1">
           {i.flags.critico && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30">Crítico</span>}
@@ -959,6 +1018,7 @@ export default function VisaoGeral({ data }) {
         </div>
       )
     },
+    { key: 'qtdeComprada', label: 'Qtde Comprada', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.qtdeComprada).toLocaleString('pt-BR') },
     { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
     { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: () => 'R$ 0,00' },
   ], [])
@@ -973,7 +1033,7 @@ export default function VisaoGeral({ data }) {
   ], [])
 
   const isRankingSelected = activeCard === 'ranking_unidade'
-  const isExposicaoSelected = activeCard === 'composicao_estoque' // Mantida a mesma key de activeCard para a exposição
+  const isExposicaoSelected = activeCard === 'composicao_estoque'
   const isCriticoSelected = activeCard === 'rank_critico'
   const isObsoletoSelected = activeCard === 'rank_obsoleto'
   const isObraSelected = activeCard === 'rank_obra'
@@ -1242,7 +1302,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- LINHA FINANCEIRA (Lentes Independentes) --- */}
+      {/* --- LINHA FINANCEIRA --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-2">
           <div className="w-5 h-5 rounded-md bg-[#16221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
@@ -1294,7 +1354,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- RANKING + EXPOSIÇÃO (Substitui Pizza por Barras Absolutas) --- */}
+      {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
@@ -1333,70 +1393,40 @@ export default function VisaoGeral({ data }) {
           {isExposicaoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EXPOSIÇÃO POR ATRIBUTO (R$ ABSOLUTO)</span></div>
-            {selectedBarraExposicao && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
+            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EXPOSIÇÃO POR ATRIBUTO (R$ ABSOLUTO E % DO ESTOQUE TOTAL)</span></div>
           </div>
-          <p className="text-[10px] text-muted mb-2 px-1">Valores reais por atributo. Um mesmo item pode estar em mais de uma categoria. A escala considera o Estoque Total como teto.</p>
+          <p className="text-[10px] text-muted mb-2 px-1">Proporção de cada categoria em relação ao Estoque Total contábil. Devido a sobreposições de atributos, a soma pode exceder 100%.</p>
           <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             {exposicaoCategorias.length > 0 ? (
               <Plot
                 data={[
                   {
-                    type: 'bar', orientation: 'h',
-                    y: exposicaoCategorias.map((d) => d.name),
-                    x: exposicaoCategorias.map(() => Math.max(metrics.valEstoque, 1) * 1.1),
-                    marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
-                    hoverinfo: 'none',
-                    showlegend: false
-                  },
-                  {
-                    type: 'bar', orientation: 'h',
-                    y: exposicaoCategorias.map((d) => d.name),
-                    x: exposicaoCategorias.map((d) => d.value),
-                    cliponaxis: false,
-                    textposition: 'outside',
-                    text: exposicaoCategorias.map((d) => {
-                      const isSelected = !selectedBarraExposicao || d.name === selectedBarraExposicao
-                      const pctTotal = metrics.valEstoque > 0 ? ((d.value / metrics.valEstoque) * 100).toFixed(1) : 0
-                      const rawText = `${fmtValorCurto(d.value)} (${pctTotal.replace('.',',')}%)`
-                      const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
-                      return `<span style="color: ${textColor}; margin-left: 6px; font-family: Inter; font-weight: bold;">${rawText}</span>`
-                    }),
-                    textfont: { size: 11 },
-                    marker: {
-                      color: exposicaoCategorias.map((d) => (!selectedBarraExposicao || d.name === selectedBarraExposicao) ? d.color : 'rgba(255, 255, 255, 0.1)'),
-                      opacity: exposicaoCategorias.map((d) => (!selectedBarraExposicao || d.name === selectedBarraExposicao) ? 1 : 0.4),
-                      line: { color: '#080808', width: 2 }
-                    },
-                    hoverinfo: 'none'
+                    type: 'pie',
+                    labels: exposicaoCategorias.map(d => d.name),
+                    values: exposicaoCategorias.map(d => d.value),
+                    marker: { colors: exposicaoCategorias.map(d => d.color) },
+                    textinfo: 'percent+label',
+                    textfont: { color: '#ffffff', size: 10, family: 'Inter' },
+                    hoverinfo: 'label+value+percent',
+                    hole: 0.4,
+                    automargin: true
                   }
                 ]}
                 layout={{
                   ...PLOT_LAYOUT,
-                  barmode: 'overlay', 
-                  bargap: 0.3,
                   height: 280,
-                  margin: { l: 120, r: 80, t: 10, b: 10 },
-                  xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, Math.max(metrics.valEstoque, 1) * 1.15] },
-                  yaxis: {
-                    showgrid: true, gridcolor: '#2A2A2A', tickson: 'boundaries', tickmode: 'array', tickvals: exposicaoCategorias.map((d) => d.name),
-                    ticktext: exposicaoCategorias.map((d) => {
-                      const isSelected = !selectedBarraExposicao || d.name === selectedBarraExposicao
-                      const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
-                      return `<span style="color: ${textColor}; font-weight: bold;">${d.name}&nbsp;&nbsp;</span>`
-                    }),
-                    ticklen: 0, tickcolor: 'rgba(0,0,0,0)', tickpad: 8, automargin: true
-                  }
+                  margin: { l: 20, r: 20, t: 10, b: 10 },
+                  showlegend: true,
+                  legend: { orientation: 'h', font: { color: '#8c9ba5', size: 9 }, x: 0, y: -0.2 }
                 }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
-                onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraExposicao', payload: e.points[0].y.trim() }) }}
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280 }} useResizeHandler
               />
             ) : (<p className="text-muted text-center py-16">Sem dados</p>)}
           </div>
         </div>
       </div>
 
-      {/* --- RANKING POR LENTES (Tags Absolutas) --- */}
+      {/* --- RANKING POR LENTES --- */}
       <div className="mt-6">
         <div className="flex items-center gap-2 mb-3 ml-2"><div className="w-5 h-5 rounded-md bg-[#261616] flex items-center justify-center text-[#e74c3c] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">RANKING DE RISCO E LENTES POR UNIDADE (R$ ABSOLUTO)</span></div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
