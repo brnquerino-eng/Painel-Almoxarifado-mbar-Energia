@@ -30,7 +30,7 @@ const initialState = {
   periodoAtivo: null,
   activeCard: null,
   selectedBarraRanking: null,
-  selectedFatiaComposicao: null,
+  selectedBarraExposicao: null,
   selectedBarraCritico: null,
   selectedBarraObsoleto: null,
   selectedBarraObra: null,
@@ -89,7 +89,7 @@ function reducer(state, action) {
       return {
         ...state,
         selectedBarraRanking: null,
-        selectedFatiaComposicao: null,
+        selectedBarraExposicao: null,
         selectedBarraCritico: null,
         selectedBarraObsoleto: null,
         selectedBarraObra: null,
@@ -134,6 +134,8 @@ const MAPA_ABR_MESES = {
   '10': 'OUT', '11': 'NOV', '12': 'DEZ'
 }
 
+const CODIGOS_INSUMO = ['34854', '34769', '31774', '31776']
+
 function formatarPeriodoTexto(periodoStr) {
   if (!periodoStr) return ''
   const p = parsePeriodo(periodoStr)
@@ -159,15 +161,23 @@ function parseNumber(val) {
   return isNaN(n) ? 0 : n;
 }
 
-function classificarRegistro(r) {
+// LÓGICA DE LENTES INDEPENDENTES (Atributos Absolutos Multi-Tag)
+function aplicarLentesIndependentes(r) {
   const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
   const isWartsila = nomeLocal.includes('WARTSILA') || unidadeAlmox.includes('WARTSILA')
+  const s = String(r.codigo_local_estoque ?? '').trim()
+  const codigoLocal = s.replace(/^0+/, '') || s
 
-  if (isObsoleto(r.nome_local_estoque) || isWartsila) return 'Obsoleto'
-  if (isObra(r.nome_local_estoque)) return 'Obra'
-  if (isCritico(r.item_critico)) return 'Crítico'
-  return 'Operacional'
+  const _isObsoleto = isObsoleto(r.nome_local_estoque) || isWartsila
+  const _isObra = isObra(r.nome_local_estoque)
+  const _isCritico = isCritico(r.item_critico)
+  const _isInsumo = CODIGOS_INSUMO.includes(codigoLocal)
+  
+  // O Operacional puro é aquilo que não sofre incidência de nenhuma tag especial
+  const _isOperacional = !_isObsoleto && !_isObra && !_isCritico && !_isInsumo
+
+  return { ...r, _isObsoleto, _isObra, _isCritico, _isInsumo, _isOperacional }
 }
 
 // --- COMPONENTE PRINCIPAL ---
@@ -178,7 +188,7 @@ export default function VisaoGeral({ data }) {
   const {
     escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
     periodoAtivo, activeCard, selectedBarraRanking,
-    selectedFatiaComposicao, selectedBarraCritico,
+    selectedBarraExposicao, selectedBarraCritico,
     selectedBarraObsoleto, selectedBarraObra,
     selectedBarraCompraConsumo, selectedBarraVariacao,
     selectedBarraSkus, abaVariacao, abaSkus, abaSkusUnidade, filtroMesParado,
@@ -190,15 +200,13 @@ export default function VisaoGeral({ data }) {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        dispatch({ type: 'CLOSE_ALL_DRAWERS' })
-      }
+      if (e.key === 'Escape') dispatch({ type: 'CLOSE_ALL_DRAWERS' })
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false })
+  const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false, insumo: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
   const [visGiroCobertura, setVisGiroCobertura] = useState({ giro: true, cobertura: true })
   const [exportando, setExportando] = useState(false)
@@ -208,30 +216,20 @@ export default function VisaoGeral({ data }) {
   // 1. SANITIZAÇÃO DE TEXTOS E ACENTOS
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
-    
     return data.map(r => {
       let unidadeLimpa = r.unidade_almoxarifado;
       if (unidadeLimpa) {
-        unidadeLimpa = String(unidadeLimpa)
-          .normalize('NFC')
-          .replace(/[\u200B-\u200D\uFEFF]/g, '')
-          .trim()
-          .toUpperCase();
+        unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
       }
-      return {
-        ...r,
-        unidade_almoxarifado: unidadeLimpa
-      }
+      return { ...r, unidade_almoxarifado: unidadeLimpa }
     })
   }, [data])
 
   const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
     if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
     const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
-    
     const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
     const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
-    
     const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
     return { unidadesOpcoes: uniques, unidadesAtivas: ativas, unidadesGerenciais: gerenciais, anoOpcoes: anos }
   }, [dadosSanitizados])
@@ -253,6 +251,7 @@ export default function VisaoGeral({ data }) {
 
   const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
 
+  // Aplicação dos Filtros Mestre - Permitindo a sobreposição se o usuário selecionar múltiplas tags
   const dfFiltrado = useMemo(() => {
     let df = dadosSanitizados || []
     if (escoposSel.length > 0) {
@@ -263,9 +262,19 @@ export default function VisaoGeral({ data }) {
     if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length) {
       df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
     }
-    df = df.map(r => ({ ...r, _categoria: classificarRegistro(r) }))
+    
+    // Anexa as flags independentes a cada registro
+    df = df.map(r => aplicarLentesIndependentes(r))
+    
     if (tiposEstoqueSel.length > 0) {
-      df = df.filter(r => tiposEstoqueSel.includes(r._categoria))
+      df = df.filter(r => {
+        if (tiposEstoqueSel.includes('Crítico') && r._isCritico) return true;
+        if (tiposEstoqueSel.includes('Obsoleto') && r._isObsoleto) return true;
+        if (tiposEstoqueSel.includes('Obra') && r._isObra) return true;
+        if (tiposEstoqueSel.includes('Insumo') && r._isInsumo) return true;
+        if (tiposEstoqueSel.includes('Operacional') && r._isOperacional) return true;
+        return false;
+      })
     }
     return df
   }, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes])
@@ -279,10 +288,7 @@ export default function VisaoGeral({ data }) {
     if (!source.length) return '01/2026'
     let maxAno = 0, maxMes = 0
     for (const r of source) {
-      if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
-        maxAno = r.tmp_ano_num
-        maxMes = r.tmp_mes_num
-      }
+      if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) { maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num }
     }
     if (!maxAno) return '01/2026'
     return periodoLabel(maxMes, maxAno)
@@ -308,18 +314,18 @@ export default function VisaoGeral({ data }) {
 
   const {
     metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra,
-    compraConsumoUnidade, variacaoUnidade, skusUnidade, composicao,
+    compraConsumoUnidade, variacaoUnidade, skusUnidade, exposicaoCategorias,
     maioresValoresDataCompleta, comprasSemConsumoDataCompleta, duplicadosDataCompleta
   } = useMemo(() => {
     const empty = {
       metrics: {
         valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0, valInsumo: 0,
-        valCritico: 0, valObsoleto: 0, valObra: 0,
+        valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0,
         valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0,
         valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
       },
       rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [],
-      compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], composicao: [],
+      compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
     if (!snapshot.length && !snapshotPrev.length) return empty
@@ -327,52 +333,31 @@ export default function VisaoGeral({ data }) {
     const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map()
     const mapObs = new Map(), mapObra = new Map(), mapCC = new Map()
     const mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
-    
     const mapSkuAggComprasSemConsumo = new Map()
 
-    let valEstoque = 0, valCompras = 0, valConsumo = 0, valInsumo = 0
-    let valCritico = 0, valObsoleto = 0, valObra = 0
+    let valEstoque = 0, valCompras = 0, valConsumo = 0
+    let valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
     const skusSet = new Set(), maiores = [], comprasSem = []
 
-    const codigosInsumo = ['34854', '34769', '31774', '31776']
-
-    let firstLog = true; // Controle para logar apenas a primeira linha
-
     for (const r of snapshot) {
-      if (firstLog) {
-        console.log("🕵️ LOG DE DEBUG - 1ª Linha do Snapshot Atual:", r);
-        firstLog = false;
-      }
-
       const u = r.unidade_almoxarifado 
       const val = parseNumber(r.valor_saldo_atual)
-      const cat = r._categoria
       const valEntrada = parseNumber(r.valor_entrada_compras)
       const valSaida = parseNumber(r.valor_saida_cons_interno)
       
-      // NOVA LÓGICA DE INSUMO: Lendo estritamente a nova coluna "codigo_local_estoque"
-      const normalizarCodigo = (v) => {
-        const s = String(v ?? '').trim();
-        const semZeros = s.replace(/^0+/, '');
-        return semZeros || s;
-      };
-
-      const codigoLocal = normalizarCodigo(r.codigo_local_estoque);
-      const isInsumo = codigosInsumo.includes(codigoLocal);
-
+      // Total Global Único (Não Duplica)
       valEstoque += val
       valCompras += valEntrada
       valConsumo += Math.abs(valSaida)
 
-      if (isInsumo) {
-        valInsumo += val
-      }
-
       if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
 
-      if (cat === 'Crítico') { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val } 
-      else if (cat === 'Obsoleto') { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val } 
-      else if (cat === 'Obra') { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
+      // Lentes Independentes (Absolutas)
+      if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
+      if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
+      if (r._isObra) { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
+      if (r._isInsumo) valInsumo += val
+      if (r._isOperacional) valOp += val
 
       if (u) {
         if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
@@ -385,7 +370,6 @@ export default function VisaoGeral({ data }) {
         if (u) {
           if (!mapSkus.has(u)) mapSkus.set(u, new Set())
           mapSkus.get(u).add(r.codigo_produto)
-
           if (r.nome_produto) {
             if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
             const mapUnid = mapChavesPorUnidade.get(u)
@@ -401,7 +385,7 @@ export default function VisaoGeral({ data }) {
       if (valEntrada > 0 || Math.abs(valSaida) > 0) {
         const skuKey = `${u}-${r.codigo_produto}`
         if (!mapSkuAggComprasSemConsumo.has(skuKey)) {
-          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, cat, entrada: 0, saida: 0 })
+          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0 })
         }
         const item = mapSkuAggComprasSemConsumo.get(skuKey)
         item.entrada += valEntrada
@@ -421,43 +405,29 @@ export default function VisaoGeral({ data }) {
 
     for (const item of mapSkuAggComprasSemConsumo.values()) {
       if (item.entrada > 0.01 && item.saida < 0.01) {
-        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, categoria: item.cat, comprado: item.entrada })
+        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, comprado: item.entrada })
       }
     }
 
-    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0, valInsumoPrev = 0
-    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0
+    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
+    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
     const skusPrevSet = new Set()
     
     for (const r of snapshotPrev) {
       const u = r.unidade_almoxarifado
       const val = parseNumber(r.valor_saldo_atual)
-      const cat = r._categoria
       const valEntrada = parseNumber(r.valor_entrada_compras)
       const valSaida = parseNumber(r.valor_saida_cons_interno)
-      
-      // NOVA LÓGICA DE INSUMO PARA O MÊS ANTERIOR: Lendo estritamente a nova coluna
-      const normalizarCodigoPrev = (v) => {
-        const s = String(v ?? '').trim();
-        const semZeros = s.replace(/^0+/, '');
-        return semZeros || s;
-      };
-
-      const codigoLocalPrev = normalizarCodigoPrev(r.codigo_local_estoque);
-      const isInsumoPrev = codigosInsumo.includes(codigoLocalPrev);
       
       valEstoquePrev += val
       valComprasPrev += valEntrada
       valConsumoPrev += Math.abs(valSaida)
       if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
 
-      if (isInsumoPrev) {
-        valInsumoPrev += val
-      }
-
-      if (cat === 'Crítico') valCriticoPrev += val
-      else if (cat === 'Obsoleto') valObsoletoPrev += val
-      else if (cat === 'Obra') valObraPrev += val
+      if (r._isCritico) valCriticoPrev += val
+      if (r._isObsoleto) valObsoletoPrev += val
+      if (r._isObra) valObraPrev += val
+      if (r._isInsumo) valInsumoPrev += val
       
       if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
     }
@@ -475,13 +445,15 @@ export default function VisaoGeral({ data }) {
     }
 
     const mapToSort = (m) => [...m.entries()].filter(([unidade, v]) => unidade && v > 0.01).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
-    const valOp = Math.max(0, valEstoque - (valObsoleto + valObra + valCritico))
-    const comp = [
-      { name: 'Estoque Crítico', value: valCritico, color: '#e74c3c' },
-      { name: 'Estoque Obsoleto', value: valObsoleto, color: '#9b59b6' },
-      { name: 'Estoque Obra', value: valObra, color: '#1abc9c' },
+    
+    // Substituindo Pizza por Gráfico de Barras de Exposição Absoluta
+    const exposicao = [
       { name: 'Estoque Operacional', value: valOp, color: '#3498db' },
-    ].filter((d) => d.value > 0)
+      { name: 'Estoque Insumo', value: valInsumo, color: '#f1c40f' },
+      { name: 'Estoque Obra', value: valObra, color: '#1abc9c' },
+      { name: 'Estoque Obsoleto', value: valObsoleto, color: '#9b59b6' },
+      { name: 'Estoque Crítico', value: valCritico, color: '#e74c3c' },
+    ].filter(d => d.value > 0).sort((a, b) => a.value - b.value)
 
     const duplicados = []
     for (const dados of mapChaves.values()) {
@@ -506,7 +478,7 @@ export default function VisaoGeral({ data }) {
     return {
       metrics: {
         valEstoque, valCompras, valConsumo, valSkus: skusSet.size, valInsumo,
-        valCritico, valObsoleto, valObra,
+        valCritico, valObsoleto, valObra, valOp,
         valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size, valInsumoPrev,
         valCriticoPrev, valObsoletoPrev, valObraPrev
       },
@@ -517,7 +489,8 @@ export default function VisaoGeral({ data }) {
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
       variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
       skusUnidade: skusUnidadeArr,
-      composicao: comp, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
+      exposicaoCategorias: exposicao, 
+      maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
 
@@ -541,7 +514,7 @@ export default function VisaoGeral({ data }) {
     const map = new Map()
     for (const r of dfFiltrado) {
       const key = `${r.tmp_ano_num}-${String(r.tmp_mes_num).padStart(2, '0')}`
-      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, compras: 0, consumo: 0, skus: new Set(), chavesMap: new Map() })
+      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0, compras: 0, consumo: 0, skus: new Set(), chavesMap: new Map() })
       
       const item = map.get(key)
       const val = parseNumber(r.valor_saldo_atual)
@@ -549,9 +522,10 @@ export default function VisaoGeral({ data }) {
       const valSaida = parseNumber(r.valor_saida_cons_interno)
 
       item.total += val
-      if (r._categoria === 'Crítico') item.critico += val
-      if (r._categoria === 'Obsoleto') item.obsoleto += val
-      if (r._categoria === 'Obra') item.obra += val
+      if (r._isCritico) item.critico += val
+      if (r._isObsoleto) item.obsoleto += val
+      if (r._isObra) item.obra += val
+      if (r._isInsumo) item.insumo += val
       item.compras += valEntrada
       item.consumo += Math.abs(valSaida)
 
@@ -566,8 +540,11 @@ export default function VisaoGeral({ data }) {
     }
     const sorted = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
     return {
-      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })), critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
-      obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })), obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
+      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })), 
+      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
+      obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })), 
+      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
+      insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
       comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
       skus: sorted.map(d => {
         let skusDupCount = 0
@@ -588,7 +565,8 @@ export default function VisaoGeral({ data }) {
       const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
       if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
       const item = map.get(key)
-      if (r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto') {
+      // Para o Giro e Cobertura, ignoramos histórico de itens que hoje são considerados paralisados por risco
+      if (!r._isCritico && !r._isObsoleto) {
         item.estoque_op += parseNumber(r.valor_saldo_atual)
         item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
       }
@@ -626,7 +604,7 @@ export default function VisaoGeral({ data }) {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
     const snapshotIdx = p.ano * 12 + p.mes
-    const calc = dfFiltrado.filter((r) => r.unidade_almoxarifado && r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto').map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
+    const calc = dfFiltrado.filter((r) => r.unidade_almoxarifado && r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && !r._isCritico && !r._isObsoleto).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
 
     const ultimoMov = new Map(), primeiroHist = new Map()
     for (const r of calc) {
@@ -704,21 +682,27 @@ export default function VisaoGeral({ data }) {
   }, [duplicadosDataCompleta, periodoEfetivo])
 
   const exportarExcelComprasSemConsumo = useCallback(() => {
-    if (!comprasSemConsumoDataCompleta.length) {
-      console.warn('Nenhum item de compras sem consumo para exportar.')
-      return
-    }
+    if (!comprasSemConsumoDataCompleta.length) return
     setExportando(true)
     try {
-      const wsData = comprasSemConsumoDataCompleta.map((item) => ({
-        Unidade: item.unidade,
-        'Código SKU': item.codigo,
-        'Nome do Produto': item.nome,
-        Classificação: item.categoria,
-        'Valor Comprado (R$)': item.comprado,
-        'Valor Consumido (R$)': 0,
-        Período: formatarPeriodoTexto(periodoEfetivo),
-      }))
+      const wsData = comprasSemConsumoDataCompleta.map((item) => {
+        let tags = []
+        if (item.flags.critico) tags.push('Crítico')
+        if (item.flags.obsoleto) tags.push('Obsoleto')
+        if (item.flags.obra) tags.push('Obra')
+        if (item.flags.insumo) tags.push('Insumo')
+        if (item.flags.op) tags.push('Operacional')
+
+        return {
+          Unidade: item.unidade,
+          'Código SKU': item.codigo,
+          'Nome do Produto': item.nome,
+          Atributos: tags.join(', '),
+          'Valor Comprado (R$)': item.comprado,
+          'Valor Consumido (R$)': 0,
+          Período: formatarPeriodoTexto(periodoEfetivo),
+        }
+      })
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Compras sem Consumo')
       XLSX.writeFile(wb, `compras_sem_consumo_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
@@ -758,7 +742,7 @@ export default function VisaoGeral({ data }) {
       slideResumo.addText('RESUMO FINANCEIRO E OPERACIONAL', { x: 0.5, y: 0.1, w: '90%', h: 0.4, fontSize: 18, color: 'f58220', bold: true })
       slideResumo.addTable([
         [{ text: 'INDICADOR', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }, { text: 'VALOR ATUAL', options: { fill: '2A2A2A', color: 'f58220', bold: true, fontSize: 12 } }],
-        ['Total em Estoque', fmtBRL(metrics.valEstoque)], ['Estoque Crítico', fmtBRL(metrics.valCritico)], ['Estoque Obsoleto', fmtBRL(metrics.valObsoleto)],
+        ['Total em Estoque', fmtBRL(metrics.valEstoque)], ['Exposição Crítico', fmtBRL(metrics.valCritico)], ['Exposição Obsoleto', fmtBRL(metrics.valObsoleto)],
         ['Total de Compras no Período', fmtBRL(metrics.valCompras)], ['Total de Consumo no Período', fmtBRL(metrics.valConsumo)], ['Total de SKUs Únicos', fmtInt(metrics.valSkus)]
       ], { x: 1.0, y: 1.2, w: 8, fill: '161616', color: 'ffffff', border: { type: 'solid', color: '2A2A2A', pt: 1 }, fontSize: 14, rowH: 0.5, align: 'center', valign: 'middle' })
 
@@ -780,6 +764,7 @@ export default function VisaoGeral({ data }) {
     if (vis.critico) m = Math.max(m, ...timeSeriesAgg.critico.map(d => d.valor))
     if (vis.obsoleto) m = Math.max(m, ...timeSeriesAgg.obsoleto.map(d => d.valor))
     if (vis.obra) m = Math.max(m, ...timeSeriesAgg.obra.map(d => d.valor))
+    if (vis.insumo) m = Math.max(m, ...timeSeriesAgg.insumo.map(d => d.valor))
     return m > 0 ? m : 10
   }, [vis, timeSeriesAgg])
 
@@ -834,6 +819,7 @@ export default function VisaoGeral({ data }) {
     if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, '#e74c3c', 24))
     if (vis.obsoleto) anns.push(...createAnns(timeSeriesAgg.obsoleto, '#9b59b6', -22))
     if (vis.obra) anns.push(...createAnns(timeSeriesAgg.obra, '#1abc9c', 24))
+    if (vis.insumo) anns.push(...createAnns(timeSeriesAgg.insumo, '#f1c40f', 24))
     return anns
   }, [timeSeriesAgg, vis, periodoEfetivo])
 
@@ -962,8 +948,17 @@ export default function VisaoGeral({ data }) {
   const colsComprasSemConsumo = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[200px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
-    { key: 'categoria', label: 'Classificação', align: 'center', render: (i) => (<span className={`px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border ${i.categoria === 'Obsoleto' ? 'bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30' : i.categoria === 'Crítico' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : i.categoria === 'Obra' ? 'bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30' : 'bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30'}`}>{i.categoria}</span>) },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[150px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'flags', label: 'Atributos (Lentes)', align: 'left', render: (i) => (
+        <div className="flex flex-wrap gap-1">
+          {i.flags.critico && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30">Crítico</span>}
+          {i.flags.obsoleto && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30">Obsoleto</span>}
+          {i.flags.obra && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30">Obra</span>}
+          {i.flags.insumo && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">Insumo</span>}
+          {i.flags.op && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30">Operacional</span>}
+        </div>
+      )
+    },
     { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
     { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: () => 'R$ 0,00' },
   ], [])
@@ -978,7 +973,7 @@ export default function VisaoGeral({ data }) {
   ], [])
 
   const isRankingSelected = activeCard === 'ranking_unidade'
-  const isComposicaoSelected = activeCard === 'composicao_estoque'
+  const isExposicaoSelected = activeCard === 'composicao_estoque' // Mantida a mesma key de activeCard para a exposição
   const isCriticoSelected = activeCard === 'rank_critico'
   const isObsoletoSelected = activeCard === 'rank_obsoleto'
   const isObraSelected = activeCard === 'rank_obra'
@@ -996,7 +991,10 @@ export default function VisaoGeral({ data }) {
           <div className="w-10 h-10 rounded-xl bg-[#2a1610] border border-[#f58220]/30 flex items-center justify-center text-[#f58220] shadow-inner shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
-          <h1 className="text-lg lg:text-xl font-black text-white tracking-wider uppercase drop-shadow-sm">GESTÃO E FECHAMENTO EXECUTIVO DE ESTOQUE</h1>
+          <div>
+            <h1 className="text-lg lg:text-xl font-black text-white tracking-wider uppercase drop-shadow-sm">GESTÃO E FECHAMENTO EXECUTIVO DE ESTOQUE</h1>
+            <span className="text-[10px] text-accent tracking-widest uppercase font-bold">Arquitetura de Lentes Independentes (Volumes Absolutos)</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -1022,12 +1020,12 @@ export default function VisaoGeral({ data }) {
 
           <div className="flex flex-wrap items-end gap-3 z-30">
             <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Tipo</label>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Lentes (Tags)</label>
               <CyberMultiSelect 
-                options={['Operacional', 'Crítico', 'Obsoleto', 'Obra']} 
+                options={['Operacional', 'Crítico', 'Obsoleto', 'Obra', 'Insumo']} 
                 selected={tiposEstoqueSel} 
                 onChange={(val) => dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: val })} 
-                placeholder={tiposEstoqueSel.length === 0 || tiposEstoqueSel.length === 4 ? 'Todos os Tipos' : tiposEstoqueSel.join(', ')} 
+                placeholder={tiposEstoqueSel.length === 0 || tiposEstoqueSel.length === 5 ? 'Todas as Lentes' : tiposEstoqueSel.join(', ')} 
               />
             </div>
             
@@ -1063,8 +1061,8 @@ export default function VisaoGeral({ data }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" role="group" aria-label="Filtros de visualização do gráfico">
-          {[ { key: 'total', label: 'Estoque Total', color: '#f58220' }, { key: 'critico', label: 'Estoque Crítico', color: '#e74c3c' }, { key: 'obsoleto', label: 'Estoque Obsoleto', color: '#9b59b6' }, { key: 'obra', label: 'Estoque Obra', color: '#1abc9c' } ].map(({ key, label, color }) => {
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4" role="group" aria-label="Filtros de visualização do gráfico">
+          {[ { key: 'total', label: 'Estoque Total', color: '#f58220' }, { key: 'critico', label: 'Crítico Absoluto', color: '#e74c3c' }, { key: 'obsoleto', label: 'Obsoleto Absoluto', color: '#9b59b6' }, { key: 'obra', label: 'Obra Absoluto', color: '#1abc9c' }, { key: 'insumo', label: 'Insumo Absoluto', color: '#f1c40f' } ].map(({ key, label, color }) => {
             const isActive = vis[key], hasData = timeSeriesAgg[key] && timeSeriesAgg[key].some(d => d.valor > 0)
             return (
               <button key={key} onClick={() => hasData && toggleVis(key)} disabled={!hasData} aria-pressed={isActive} className={`relative flex items-center justify-center gap-2 px-4 py-2 text-xs transition-all duration-300 rounded-lg overflow-hidden border border-transparent ${!hasData ? 'opacity-30 grayscale cursor-not-allowed text-dark-400 bg-transparent' : !isActive ? 'text-[#8c9ba5] hover:text-white hover:bg-[#222222]/50 border-[#2A2A2A]/40' : 'text-white font-bold bg-[#2A2A2A]/30 border-[#2A2A2A]'}`}>
@@ -1101,7 +1099,7 @@ export default function VisaoGeral({ data }) {
               vis.critico && timeSeriesAgg.critico.length > 0 && { 
                 x: timeSeriesAgg.critico.map((d) => d.periodo), 
                 y: timeSeriesAgg.critico.map((d) => d.valor), 
-                name: 'Estoque Crítico', 
+                name: 'Crítico Absoluto', 
                 type: 'scatter', 
                 mode: 'lines+markers', 
                 hoverinfo: 'none', 
@@ -1116,7 +1114,7 @@ export default function VisaoGeral({ data }) {
               vis.obsoleto && timeSeriesAgg.obsoleto.length > 0 && { 
                 x: timeSeriesAgg.obsoleto.map((d) => d.periodo), 
                 y: timeSeriesAgg.obsoleto.map((d) => d.valor), 
-                name: 'Estoque Obsoleto', 
+                name: 'Obsoleto Absoluto', 
                 type: 'scatter', 
                 mode: 'lines+markers', 
                 hoverinfo: 'none', 
@@ -1131,7 +1129,7 @@ export default function VisaoGeral({ data }) {
               vis.obra && timeSeriesAgg.obra.length > 0 && { 
                 x: timeSeriesAgg.obra.map((d) => d.periodo), 
                 y: timeSeriesAgg.obra.map((d) => d.valor), 
-                name: 'Estoque Obra', 
+                name: 'Obra Absoluto', 
                 type: 'scatter', 
                 mode: 'lines+markers', 
                 hoverinfo: 'none', 
@@ -1140,6 +1138,21 @@ export default function VisaoGeral({ data }) {
                   size: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
                   color: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? '#1abc9c' : '#080808'), 
                   line: { color: '#1abc9c', width: 1.5 } 
+                }, 
+                cliponaxis: false 
+              },
+              vis.insumo && timeSeriesAgg.insumo.length > 0 && { 
+                x: timeSeriesAgg.insumo.map((d) => d.periodo), 
+                y: timeSeriesAgg.insumo.map((d) => d.valor), 
+                name: 'Insumo Absoluto', 
+                type: 'scatter', 
+                mode: 'lines+markers', 
+                hoverinfo: 'none', 
+                line: { color: '#f1c40f', width: 1.5, dash: 'dashdot', shape: 'spline', smoothing: 1.3 }, 
+                marker: { 
+                  size: timeSeriesAgg.insumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                  color: timeSeriesAgg.insumo.map(d => d.periodo === periodoEfetivo ? '#f1c40f' : '#080808'), 
+                  line: { color: '#f1c40f', width: 1.5 } 
                 }, 
                 cliponaxis: false 
               },
@@ -1180,10 +1193,6 @@ export default function VisaoGeral({ data }) {
                 Visualizando período: <strong className="text-white text-xs px-1.5 py-0.5 rounded bg-[#222] border border-[#333] ml-0.5">{formatarPeriodoTexto(periodoEfetivo)}</strong>
               </span>
             </div>
-            <span className="hidden sm:inline-block text-[#555] text-[10px]">|</span>
-            <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">
-              Dica: Clique em qualquer ponto/mês do gráfico acima para alterar.
-            </span>
           </div>
           
           <button
@@ -1208,7 +1217,7 @@ export default function VisaoGeral({ data }) {
               <div className="w-6 h-6 rounded-md bg-[#101820] flex items-center justify-center text-[#3498db] shadow-inner shrink-0 border border-[#3498db]/30"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg></div>
               <div>
                 <span className="text-xs font-bold text-white uppercase tracking-wider block">{listaMaioresValoresAberta ? 'Fechar Maiores Valores de Estoque' : 'Ver Maiores Valores de Estoque'}</span>
-                <span className="text-[10px] text-muted font-medium mt-0.5 block">Top SKUs por capital imobilizado (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
+                <span className="text-[10px] text-muted font-medium mt-0.5 block">Top SKUs por capital imobilizado na composição atual (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -1219,7 +1228,7 @@ export default function VisaoGeral({ data }) {
           {listaMaioresValoresAberta && (
             <div className="p-4 space-y-4 animate-fade-in bg-[#121212]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor em estoque para a seleção atual.</span>
+                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor financeiro conforme as lentes (filtros) ativas.</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaMaioresValoresExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
@@ -1233,30 +1242,30 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- LINHA FINANCEIRA --- */}
+      {/* --- LINHA FINANCEIRA (Lentes Independentes) --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-2">
           <div className="w-5 h-5 rounded-md bg-[#16221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
-          <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Linha Financeira</span>
+          <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Exposição Financeira Absoluta (Múltiplas Lentes Ativas)</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <ExecutiveCard cardKey="estoque" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) ESTOQUE" value={fmtBRL(metrics.valEstoque)} valueAtual={metrics.valEstoque} valueAnterior={metrics.valEstoquePrev} invertColor={true} variant="default" />
-          <ExecutiveCard cardKey="critico" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. CRÍTICO" value={fmtBRL(metrics.valCritico)} valueAtual={metrics.valCritico} valueAnterior={metrics.valCriticoPrev} variant="critico" />
-          <ExecutiveCard cardKey="obsoleto" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBSOLETO" value={fmtBRL(metrics.valObsoleto)} valueAtual={metrics.valObsoleto} valueAnterior={metrics.valObsoletoPrev} variant="obsoleto" />
-          <ExecutiveCard cardKey="obra" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBRA" value={fmtBRL(metrics.valObra)} valueAtual={metrics.valObra} valueAnterior={metrics.valObraPrev} invertColor={true} variant="obra" />
-          <ExecutiveCard cardKey="insumo" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) INSUMO" value={fmtBRL(metrics.valInsumo)} valueAtual={metrics.valInsumo} valueAnterior={metrics.valInsumoPrev} invertColor={true} variant="default" />
+          <ExecutiveCard cardKey="estoque" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) ESTOQUE TOTAL" value={fmtBRL(metrics.valEstoque)} valueAtual={metrics.valEstoque} valueAnterior={metrics.valEstoquePrev} invertColor={true} variant="default" />
+          <ExecutiveCard cardKey="critico" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. CRÍTICO (ABS)" value={fmtBRL(metrics.valCritico)} valueAtual={metrics.valCritico} valueAnterior={metrics.valCriticoPrev} variant="critico" />
+          <ExecutiveCard cardKey="obsoleto" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBSOLETO (ABS)" value={fmtBRL(metrics.valObsoleto)} valueAtual={metrics.valObsoleto} valueAnterior={metrics.valObsoletoPrev} variant="obsoleto" />
+          <ExecutiveCard cardKey="obra" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBRA (ABS)" value={fmtBRL(metrics.valObra)} valueAtual={metrics.valObra} valueAnterior={metrics.valObraPrev} invertColor={true} variant="obra" />
+          <ExecutiveCard cardKey="insumo" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) INSUMO (ABS)" value={fmtBRL(metrics.valInsumo)} valueAtual={metrics.valInsumo} valueAnterior={metrics.valInsumoPrev} invertColor={true} variant="default" />
         </div>
       </div>
 
-      {/* --- LINHA OPERACIONAL --- */}
+      {/* --- LINHA OPERACIONAL GLOBAL --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-6">
           <div className="w-5 h-5 rounded-md bg-[#262014] flex items-center justify-center text-accent shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
-          <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Linha Operacional</span>
+          <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Movimentação Operacional (Sem Duplicidade)</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#1c1c1c]" title="COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
-          <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#1c1c1c]" title="CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} variant="default" />
+          <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#1c1c1c]" title="COMPRAS TOTAIS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
+          <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#1c1c1c]" title="CONSUMO TOTAL" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} variant="default" />
           <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="giro" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} iconBg="bg-[#1c1c1c]" title="GIRO" value={""} valueAtual={giroMensal} valueAnterior={giroMensalPrev} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1">
@@ -1285,7 +1294,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- RANKING + COMPOSIÇÃO --- */}
+      {/* --- RANKING + EXPOSIÇÃO (Substitui Pizza por Barras Absolutas) --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
@@ -1305,65 +1314,108 @@ export default function VisaoGeral({ data }) {
                 margin: { l: 115, r: 90, t: 10, b: 10 },
                 xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValRanking * 1.25] },
                 yaxis: {
-                  showgrid: true,
-                  gridcolor: '#4A4A4A',
-                  tickson: 'boundaries',
-                  tickmode: 'array',
-                  tickvals: rankingUnidade.map((d) => d.unidade),
+                  showgrid: true, gridcolor: '#4A4A4A', tickson: 'boundaries', tickmode: 'array', tickvals: rankingUnidade.map((d) => d.unidade),
                   ticktext: rankingUnidade.map((d) => {
                     const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
                     const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
                     return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
                   }),
-                  ticklen: 0,
-                  tickcolor: 'rgba(0,0,0,0)',
-                  tickpad: 8,
-                  automargin: true
+                  ticklen: 0, tickcolor: 'rgba(0,0,0,0)', tickpad: 8, automargin: true
                 }
               }}
-              config={{ displayModeBar: false, responsive: true }}
-              style={{ width: '100%', minHeight: 280, cursor: 'pointer' }}
-              useResizeHandler
+              config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
               onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraRanking', payload: e.points[0].y.trim() }) }}
             />
           </div>
         </div>
 
-        <div onClick={() => handleCardClick('composicao_estoque')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isComposicaoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
-          {isComposicaoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
+        <div onClick={() => handleCardClick('composicao_estoque')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isExposicaoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
+          {isExposicaoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">COMPOSIÇÃO DO ESTOQUE (%)</span></div>
-            {selectedFatiaComposicao && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedFatiaComposicao', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
+            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EXPOSIÇÃO POR ATRIBUTO (R$ ABSOLUTO)</span></div>
+            {selectedBarraExposicao && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
           </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            {composicao.length > 0 ? (
-              <Plot data={[{ type: 'pie', labels: composicao.map((d) => d.name), values: composicao.map((d) => d.value), customdata: composicao.map((d) => fmtBRL(d.value)), hole: 0.7, pull: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 0.05 : 0), marker: { colors: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? d.color : '#222222'), opacity: composicao.map((d) => (!selectedFatiaComposicao || d.name === selectedFatiaComposicao) ? 1 : 0.35), line: { color: '#161616', width: 3 } }, textinfo: 'percent', textposition: 'inside', textfont: { size: 11, color: '#ffffff', family: 'Inter', weight: 'bold' }, hovertemplate: '<b>%{label}</b><br>Valor: %{customdata}<br>Participação: %{percent}<extra></extra>' }]} layout={{ ...PLOT_LAYOUT, height: 380, margin: { l: 20, r: 20, t: 10, b: 10 }, showlegend: true, legend: { orientation: 'h', y: -0.1, x: 0.5, xanchor: 'center', font: { color: '#c5d0db', size: 10, family: 'Inter' } }, annotations: [{ text: `<b>TOTAL</b><br><span style="font-size:16px; font-weight:900; font-family:monospace; color:#ffffff;">${fmtValorCurto(metrics.valEstoque)}</span>`, x: 0.5, y: 0.5, font: { size: 12, color: '#8c9ba5' }, showarrow: false }] }} config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.label) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedFatiaComposicao', payload: e.points[0].label }) }} />
+          <p className="text-[10px] text-muted mb-2 px-1">Valores reais por atributo. Um mesmo item pode estar em mais de uma categoria. A escala considera o Estoque Total como teto.</p>
+          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
+            {exposicaoCategorias.length > 0 ? (
+              <Plot
+                data={[
+                  {
+                    type: 'bar', orientation: 'h',
+                    y: exposicaoCategorias.map((d) => d.name),
+                    x: exposicaoCategorias.map(() => Math.max(metrics.valEstoque, 1) * 1.1),
+                    marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
+                    hoverinfo: 'none',
+                    showlegend: false
+                  },
+                  {
+                    type: 'bar', orientation: 'h',
+                    y: exposicaoCategorias.map((d) => d.name),
+                    x: exposicaoCategorias.map((d) => d.value),
+                    cliponaxis: false,
+                    textposition: 'outside',
+                    text: exposicaoCategorias.map((d) => {
+                      const isSelected = !selectedBarraExposicao || d.name === selectedBarraExposicao
+                      const pctTotal = metrics.valEstoque > 0 ? ((d.value / metrics.valEstoque) * 100).toFixed(1) : 0
+                      const rawText = `${fmtValorCurto(d.value)} (${pctTotal.replace('.',',')}%)`
+                      const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+                      return `<span style="color: ${textColor}; margin-left: 6px; font-family: Inter; font-weight: bold;">${rawText}</span>`
+                    }),
+                    textfont: { size: 11 },
+                    marker: {
+                      color: exposicaoCategorias.map((d) => (!selectedBarraExposicao || d.name === selectedBarraExposicao) ? d.color : 'rgba(255, 255, 255, 0.1)'),
+                      opacity: exposicaoCategorias.map((d) => (!selectedBarraExposicao || d.name === selectedBarraExposicao) ? 1 : 0.4),
+                      line: { color: '#080808', width: 2 }
+                    },
+                    hoverinfo: 'none'
+                  }
+                ]}
+                layout={{
+                  ...PLOT_LAYOUT,
+                  barmode: 'overlay', 
+                  bargap: 0.3,
+                  height: 280,
+                  margin: { l: 120, r: 80, t: 10, b: 10 },
+                  xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, Math.max(metrics.valEstoque, 1) * 1.15] },
+                  yaxis: {
+                    showgrid: true, gridcolor: '#2A2A2A', tickson: 'boundaries', tickmode: 'array', tickvals: exposicaoCategorias.map((d) => d.name),
+                    ticktext: exposicaoCategorias.map((d) => {
+                      const isSelected = !selectedBarraExposicao || d.name === selectedBarraExposicao
+                      const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
+                      return `<span style="color: ${textColor}; font-weight: bold;">${d.name}&nbsp;&nbsp;</span>`
+                    }),
+                    ticklen: 0, tickcolor: 'rgba(0,0,0,0)', tickpad: 8, automargin: true
+                  }
+                }}
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler
+                onClick={(e) => { e?.event?.stopPropagation?.(); e?.event?.preventDefault?.(); if (e?.points?.[0]?.y) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraExposicao', payload: e.points[0].y.trim() }) }}
+              />
             ) : (<p className="text-muted text-center py-16">Sem dados</p>)}
           </div>
         </div>
       </div>
 
-      {/* --- RANKING POR CATEGORIA --- */}
+      {/* --- RANKING POR LENTES (Tags Absolutas) --- */}
       <div className="mt-6">
-        <div className="flex items-center gap-2 mb-3 ml-2"><div className="w-5 h-5 rounded-md bg-[#261616] flex items-center justify-center text-[#e74c3c] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">RANKING POR CATEGORIA E UNIDADE (R$)</span></div>
+        <div className="flex items-center gap-2 mb-3 ml-2"><div className="w-5 h-5 rounded-md bg-[#261616] flex items-center justify-center text-[#e74c3c] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">RANKING DE RISCO E LENTES POR UNIDADE (R$ ABSOLUTO)</span></div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div onClick={() => handleCardClick('rank_critico')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isCriticoSelected ? 'border-[#e74c3c] shadow-[0_0_25px_rgba(231,76,60,0.4)] bg-[#1c1212] -translate-y-1.5 ring-1 ring-[#e74c3c]/50' : 'border-[#2A2A2A] hover:border-[#e74c3c]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(231,76,60,0.25)]'}`}>
             {isCriticoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e74c3c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#e74c3c] shadow-[0_0_10px_rgba(231,76,60,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#e74c3c]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#261816] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#e74c3c] uppercase">EST. CRÍTICO POR UNID</span></div>{selectedBarraCritico && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null }); }} className="text-[10px] bg-[#e74c3c]/20 text-[#e74c3c] border border-[#e74c3c]/40 px-2 py-0.5 rounded hover:bg-[#e74c3c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
+            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#261816] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#e74c3c] uppercase">CRÍTICO ABSOLUTO POR UNID</span></div>{selectedBarraCritico && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null }); }} className="text-[10px] bg-[#e74c3c]/20 text-[#e74c3c] border border-[#e74c3c]/40 px-2 py-0.5 rounded hover:bg-[#e74c3c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
             <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankCritico, '#e74c3c', selectedBarraCritico, 'selectedBarraCritico')}</div>
           </div>
           <div onClick={() => handleCardClick('rank_obsoleto')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObsoletoSelected ? 'border-[#9b59b6] shadow-[0_0_25px_rgba(155,89,182,0.4)] bg-[#17121c] -translate-y-1.5 ring-1 ring-[#9b59b6]/50' : 'border-[#2A2A2A] hover:border-[#9b59b6]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(155,89,182,0.25)]'}`}>
             {isObsoletoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#9b59b6] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#9b59b6] shadow-[0_0_10px_rgba(155,89,182,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#9b59b6]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#201826] flex items-center justify-center text-[#9b59b6] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#9b59b6] uppercase">EST. OBSOLETO POR UNID</span></div>{selectedBarraObsoleto && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null }); }} className="text-[10px] bg-[#9b59b6]/20 text-[#9b59b6] border border-[#9b59b6]/40 px-2 py-0.5 rounded hover:bg-[#9b59b6]/30 transition-all font-mono">Limpar ✕</button>)}</div>
+            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#201826] flex items-center justify-center text-[#9b59b6] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#9b59b6] uppercase">OBSOLETO ABSOLUTO POR UNID</span></div>{selectedBarraObsoleto && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null }); }} className="text-[10px] bg-[#9b59b6]/20 text-[#9b59b6] border border-[#9b59b6]/40 px-2 py-0.5 rounded hover:bg-[#9b59b6]/30 transition-all font-mono">Limpar ✕</button>)}</div>
             <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObsoleto, '#9b59b6', selectedBarraObsoleto, 'selectedBarraObsoleto')}</div>
           </div>
           <div onClick={() => handleCardClick('rank_obra')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObraSelected ? 'border-[#1abc9c] shadow-[0_0_25px_rgba(26,188,156,0.4)] bg-[#111c19] -translate-y-1.5 ring-1 ring-[#1abc9c]/50' : 'border-[#2A2A2A] hover:border-[#1abc9c]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(26,188,156,0.25)]'}`}>
             {isObraSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1abc9c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#1abc9c] shadow-[0_0_10px_rgba(26,188,156,0.8)]"></span></span></div>)}
             <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#1abc9c]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#162222] flex items-center justify-center text-[#1abc9c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#1abc9c] uppercase">EST. OBRA POR UNID</span></div>{selectedBarraObra && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null }); }} className="text-[10px] bg-[#1abc9c]/20 text-[#1abc9c] border border-[#1abc9c]/40 px-2 py-0.5 rounded hover:bg-[#1abc9c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
+            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#162222] flex items-center justify-center text-[#1abc9c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#1abc9c] uppercase">OBRA ABSOLUTO POR UNID</span></div>{selectedBarraObra && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null }); }} className="text-[10px] bg-[#1abc9c]/20 text-[#1abc9c] border border-[#1abc9c]/40 px-2 py-0.5 rounded hover:bg-[#1abc9c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
             <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObra, '#1abc9c', selectedBarraObra, 'selectedBarraObra')}</div>
           </div>
         </div>
@@ -1884,7 +1936,7 @@ export default function VisaoGeral({ data }) {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
             <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1 flex items-center gap-2"><svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>MATERIAIS PARADOS HÁ MAIS DE 3 MESES (SEM MOVIMENTAÇÃO)</div>
-            <p className="text-muted text-xs tracking-wide">Exclui itens Críticos e Obsoletos. Contabiliza o ciclo de inatividade considerando também o mês de origem (Efeito Coorte).</p>
+            <p className="text-muted text-xs tracking-wide">Exclui itens marcados com a flag Crítico ou Obsoleto. Contabiliza o ciclo de inatividade considerando também o mês de origem (Efeito Coorte).</p>
           </div>
           {filtroMesParado && (<button onClick={() => dispatch({ type: 'SET_FIELD', field: 'filtroMesParado', payload: null })} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-3 py-1.5 rounded-lg hover:bg-accent/30 transition-all font-mono font-bold flex items-center gap-1.5 self-start sm:self-auto"><span>Filtrando: {filtroMesParado} Meses</span><span>✕ Limpar</span></button>)}
         </div>
