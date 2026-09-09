@@ -142,6 +142,23 @@ function formatarPeriodoTexto(periodoStr) {
   return `${nomeMes}/${String(p.ano).slice(-2)}`
 }
 
+function parseNumber(val) {
+  if (val == null) return 0;
+  if (typeof val === 'number') return val;
+  let s = String(val).trim().replace(/R\$\s?/gi, '');
+  if (s.includes(',') && s.includes('.')) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+  } else if (s.includes(',')) {
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
 function classificarRegistro(r) {
   const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
@@ -194,7 +211,6 @@ export default function VisaoGeral({ data }) {
     
     return data.map(r => {
       let unidadeLimpa = r.unidade_almoxarifado;
-
       if (unidadeLimpa) {
         unidadeLimpa = String(unidadeLimpa)
           .normalize('NFC')
@@ -202,7 +218,6 @@ export default function VisaoGeral({ data }) {
           .trim()
           .toUpperCase();
       }
-
       return {
         ...r,
         unidade_almoxarifado: unidadeLimpa
@@ -298,9 +313,9 @@ export default function VisaoGeral({ data }) {
   } = useMemo(() => {
     const empty = {
       metrics: {
-        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0,
+        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0, valInsumo: 0,
         valCritico: 0, valObsoleto: 0, valObra: 0,
-        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0,
+        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0,
         valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
       },
       rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [],
@@ -312,17 +327,46 @@ export default function VisaoGeral({ data }) {
     const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map()
     const mapObs = new Map(), mapObra = new Map(), mapCC = new Map()
     const mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
+    
+    const mapSkuAggComprasSemConsumo = new Map()
 
-    let valEstoque = 0, valCompras = 0, valConsumo = 0
+    let valEstoque = 0, valCompras = 0, valConsumo = 0, valInsumo = 0
     let valCritico = 0, valObsoleto = 0, valObra = 0
     const skusSet = new Set(), maiores = [], comprasSem = []
 
+    const codigosInsumo = ['34854', '34769', '31774', '31776']
+
+    let firstLog = true; // Controle para logar apenas a primeira linha
+
     for (const r of snapshot) {
-      const u = r.unidade_almoxarifado, val = r.valor_saldo_atual || 0, cat = r._categoria
+      if (firstLog) {
+        console.log("🕵️ LOG DE DEBUG - 1ª Linha do Snapshot Atual:", r);
+        firstLog = false;
+      }
+
+      const u = r.unidade_almoxarifado 
+      const val = parseNumber(r.valor_saldo_atual)
+      const cat = r._categoria
+      const valEntrada = parseNumber(r.valor_entrada_compras)
+      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      
+      // NOVA LÓGICA DE INSUMO: Lendo estritamente a nova coluna "codigo_local_estoque"
+      const normalizarCodigo = (v) => {
+        const s = String(v ?? '').trim();
+        const semZeros = s.replace(/^0+/, '');
+        return semZeros || s;
+      };
+
+      const codigoLocal = normalizarCodigo(r.codigo_local_estoque);
+      const isInsumo = codigosInsumo.includes(codigoLocal);
 
       valEstoque += val
-      valCompras += r.valor_entrada_compras || 0
-      valConsumo += Math.abs(r.valor_saida_cons_interno || 0)
+      valCompras += valEntrada
+      valConsumo += Math.abs(valSaida)
+
+      if (isInsumo) {
+        valInsumo += val
+      }
 
       if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
 
@@ -332,11 +376,11 @@ export default function VisaoGeral({ data }) {
 
       if (u) {
         if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
-        mapCC.get(u).compras += r.valor_entrada_compras || 0
-        mapCC.get(u).consumo += Math.abs(r.valor_saida_cons_interno || 0)
+        mapCC.get(u).compras += valEntrada
+        mapCC.get(u).consumo += Math.abs(valSaida)
       }
 
-      if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
+      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
         if (u) {
           if (!mapSkus.has(u)) mapSkus.set(u, new Set())
@@ -352,10 +396,16 @@ export default function VisaoGeral({ data }) {
         }
       }
 
-      if (val > 0) maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual || 0, valor: val })
+      if (val > 0) maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: val })
       
-      if ((r.valor_entrada_compras || 0) > 0 && Math.abs(r.valor_saida_cons_interno || 0) === 0) {
-        comprasSem.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, codigo: r.codigo_produto, nome: r.nome_produto, categoria: cat, comprado: r.valor_entrada_compras || 0 })
+      if (valEntrada > 0 || Math.abs(valSaida) > 0) {
+        const skuKey = `${u}-${r.codigo_produto}`
+        if (!mapSkuAggComprasSemConsumo.has(skuKey)) {
+          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, cat, entrada: 0, saida: 0 })
+        }
+        const item = mapSkuAggComprasSemConsumo.get(skuKey)
+        item.entrada += valEntrada
+        item.saida += Math.abs(valSaida)
       }
 
       if (r.nome_produto && u) {
@@ -364,27 +414,52 @@ export default function VisaoGeral({ data }) {
         const item = mapChaves.get(chaveGerada)
         if (r.codigo_produto) item.skus.add(r.codigo_produto)
         item.unidades.add(u)
-        item.quantidade += (r.qtde_saldo_atual || 0)
+        item.quantidade += parseNumber(r.qtde_saldo_atual)
         item.valor += val
       }
     }
 
-    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
+    for (const item of mapSkuAggComprasSemConsumo.values()) {
+      if (item.entrada > 0.01 && item.saida < 0.01) {
+        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, categoria: item.cat, comprado: item.entrada })
+      }
+    }
+
+    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0, valInsumoPrev = 0
     let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0
     const skusPrevSet = new Set()
     
     for (const r of snapshotPrev) {
-      const u = r.unidade_almoxarifado, val = r.valor_saldo_atual || 0, cat = r._categoria
+      const u = r.unidade_almoxarifado
+      const val = parseNumber(r.valor_saldo_atual)
+      const cat = r._categoria
+      const valEntrada = parseNumber(r.valor_entrada_compras)
+      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      
+      // NOVA LÓGICA DE INSUMO PARA O MÊS ANTERIOR: Lendo estritamente a nova coluna
+      const normalizarCodigoPrev = (v) => {
+        const s = String(v ?? '').trim();
+        const semZeros = s.replace(/^0+/, '');
+        return semZeros || s;
+      };
+
+      const codigoLocalPrev = normalizarCodigoPrev(r.codigo_local_estoque);
+      const isInsumoPrev = codigosInsumo.includes(codigoLocalPrev);
       
       valEstoquePrev += val
-      valComprasPrev += r.valor_entrada_compras || 0
-      valConsumoPrev += Math.abs(r.valor_saida_cons_interno || 0)
+      valComprasPrev += valEntrada
+      valConsumoPrev += Math.abs(valSaida)
       if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
+
+      if (isInsumoPrev) {
+        valInsumoPrev += val
+      }
 
       if (cat === 'Crítico') valCriticoPrev += val
       else if (cat === 'Obsoleto') valObsoletoPrev += val
       else if (cat === 'Obra') valObraPrev += val
-      if (r.qtde_saldo_atual > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
+      
+      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
     }
 
     const arrVariacao = []
@@ -430,9 +505,9 @@ export default function VisaoGeral({ data }) {
 
     return {
       metrics: {
-        valEstoque, valCompras, valConsumo, valSkus: skusSet.size,
+        valEstoque, valCompras, valConsumo, valSkus: skusSet.size, valInsumo,
         valCritico, valObsoleto, valObra,
-        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size,
+        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size, valInsumoPrev,
         valCriticoPrev, valObsoletoPrev, valObraPrev
       },
       rankingUnidade: mapToSort(mapRank),
@@ -468,15 +543,19 @@ export default function VisaoGeral({ data }) {
       const key = `${r.tmp_ano_num}-${String(r.tmp_mes_num).padStart(2, '0')}`
       if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, critico: 0, obsoleto: 0, obra: 0, compras: 0, consumo: 0, skus: new Set(), chavesMap: new Map() })
       
-      const item = map.get(key), val = r.valor_saldo_atual || 0
+      const item = map.get(key)
+      const val = parseNumber(r.valor_saldo_atual)
+      const valEntrada = parseNumber(r.valor_entrada_compras)
+      const valSaida = parseNumber(r.valor_saida_cons_interno)
+
       item.total += val
       if (r._categoria === 'Crítico') item.critico += val
       if (r._categoria === 'Obsoleto') item.obsoleto += val
       if (r._categoria === 'Obra') item.obra += val
-      item.compras += r.valor_entrada_compras || 0
-      item.consumo += Math.abs(r.valor_saida_cons_interno || 0)
+      item.compras += valEntrada
+      item.consumo += Math.abs(valSaida)
 
-      if (r.qtde_saldo_atual > 0 && r.codigo_produto) {
+      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
           const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
@@ -510,8 +589,8 @@ export default function VisaoGeral({ data }) {
       if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
       const item = map.get(key)
       if (r._categoria !== 'Crítico' && r._categoria !== 'Obsoleto') {
-        item.estoque_op += r.valor_saldo_atual || 0
-        item.consumo_op += Math.abs(r.valor_saida_cons_interno || 0)
+        item.estoque_op += parseNumber(r.valor_saldo_atual)
+        item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
       }
     }
     const monthly = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
@@ -552,11 +631,11 @@ export default function VisaoGeral({ data }) {
     const ultimoMov = new Map(), primeiroHist = new Map()
     for (const r of calc) {
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-      if (Math.abs(r.valor_saida_cons_interno || 0) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
+      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
       if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
     }
 
-    const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && r.qtde_saldo_atual > 0 && r.codigo_produto)
+    const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto)
     const result = []
 
     for (const r of snapAtual) {
@@ -568,7 +647,7 @@ export default function VisaoGeral({ data }) {
         ultimo = prim != null ? prim - 1 : snapshotIdx
       }
       const mesesParado = Math.max(0, snapshotIdx - ultimo)
-      if (mesesParado >= 3) result.push({ _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: r.qtde_saldo_atual, valor: r.valor_saldo_atual, mesesParado })
+      if (mesesParado >= 3) result.push({ _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: parseNumber(r.valor_saldo_atual), mesesParado })
     }
     return result
   }, [dfFiltrado, periodoEfetivo])
@@ -625,13 +704,29 @@ export default function VisaoGeral({ data }) {
   }, [duplicadosDataCompleta, periodoEfetivo])
 
   const exportarExcelComprasSemConsumo = useCallback(() => {
-    if (!comprasSemConsumoDataCompleta.length) return
+    if (!comprasSemConsumoDataCompleta.length) {
+      console.warn('Nenhum item de compras sem consumo para exportar.')
+      return
+    }
     setExportando(true)
     try {
-      const wsData = comprasSemConsumoDataCompleta.map(item => ({ 'Unidade': item.unidade, 'Código SKU': item.codigo, 'Nome do Produto': item.nome, 'Classificação': item.categoria, 'Valor Comprado (R$)': item.comprado, 'Valor Consumido (R$)': 0, 'Período': formatarPeriodoTexto(periodoEfetivo) }))
-      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Compras s/ Consumo')
+      const wsData = comprasSemConsumoDataCompleta.map((item) => ({
+        Unidade: item.unidade,
+        'Código SKU': item.codigo,
+        'Nome do Produto': item.nome,
+        Classificação: item.categoria,
+        'Valor Comprado (R$)': item.comprado,
+        'Valor Consumido (R$)': 0,
+        Período: formatarPeriodoTexto(periodoEfetivo),
+      }))
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Compras sem Consumo')
       XLSX.writeFile(wb, `compras_sem_consumo_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
-    } finally { setExportando(false) }
+    } catch (err) {
+      console.error('Erro ao exportar Compras sem Consumo:', err)
+    } finally {
+      setExportando(false)
+    }
   }, [comprasSemConsumoDataCompleta, periodoEfetivo])
 
   const exportarExcelParados = useCallback(() => {
@@ -1144,11 +1239,12 @@ export default function VisaoGeral({ data }) {
           <div className="w-5 h-5 rounded-md bg-[#16221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
           <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Linha Financeira</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <ExecutiveCard cardKey="estoque" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) ESTOQUE" value={fmtBRL(metrics.valEstoque)} valueAtual={metrics.valEstoque} valueAnterior={metrics.valEstoquePrev} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="critico" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. CRÍTICO" value={fmtBRL(metrics.valCritico)} valueAtual={metrics.valCritico} valueAnterior={metrics.valCriticoPrev} variant="critico" />
           <ExecutiveCard cardKey="obsoleto" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBSOLETO" value={fmtBRL(metrics.valObsoleto)} valueAtual={metrics.valObsoleto} valueAnterior={metrics.valObsoletoPrev} variant="obsoleto" />
           <ExecutiveCard cardKey="obra" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) EST. OBRA" value={fmtBRL(metrics.valObra)} valueAtual={metrics.valObra} valueAnterior={metrics.valObraPrev} invertColor={true} variant="obra" />
+          <ExecutiveCard cardKey="insumo" activeCard={activeCard} onCardClick={handleCardClick} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) INSUMO" value={fmtBRL(metrics.valInsumo)} valueAtual={metrics.valInsumo} valueAnterior={metrics.valInsumoPrev} invertColor={true} variant="default" />
         </div>
       </div>
 

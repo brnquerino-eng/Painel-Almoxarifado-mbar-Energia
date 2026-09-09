@@ -58,6 +58,7 @@ const COLS = [
   'qtde_saldo_atual',
   'item_critico',
   'nome_local_estoque',
+  'codigo_local_estoque', // <-- NOVA COLUNA ADICIONADA AQUI
 ].join(',')
 
 function cleanStr(val) {
@@ -82,6 +83,7 @@ function normalizeRow(row) {
     nome_produto: cleanStr(row.nome_produto),
     item_critico: cleanStr(row.item_critico),
     nome_local_estoque: cleanStr(row.nome_local_estoque),
+    codigo_local_estoque: cleanStr(row.codigo_local_estoque), // <-- NOVA COLUNA ADICIONADA AQUI
     valor_saldo_atual: toNum(row.valor_saldo_atual),
     valor_entrada_compras: toNum(row.valor_entrada_compras),
     valor_saida_cons_interno: toNum(row.valor_saida_cons_interno),
