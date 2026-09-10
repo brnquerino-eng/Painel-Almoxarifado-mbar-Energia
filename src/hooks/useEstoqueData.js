@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLE_ESTOQUE } from '../lib/supabase'
 
-// --- Mágica do IndexedDB (Cache sem limite de tamanho!) ---
+// --- Mágica do IndexedDB (Cache com chave única e validação estrutural) ---
 const DB_NAME = 'AmbarCacheDB'
 const STORE_NAME = 'cache_store'
-const CACHE_KEY = 'estoqueData_v2' // <-- MUDAMOS A CHAVE AQUI PARA FORÇAR LIMPEZA DO CACHE ANTIGO
+const CACHE_KEY = 'estoqueData'
 
 function getDB() {
   return new Promise((resolve, reject) => {
@@ -61,7 +61,8 @@ const COLS = [
   'nome_local_estoque',
   'codigo_local_estoque',
   'ge',
-  'preco_medio'
+  'preco_medio',
+  'qtde_entrada_compras'
 ].join(',')
 
 function cleanStr(val) {
@@ -89,6 +90,7 @@ function normalizeRow(row) {
     codigo_local_estoque: cleanStr(row.codigo_local_estoque),
     ge: cleanStr(row.ge),
     preco_medio: toNum(row.preco_medio),
+    qtde_entrada_compras: toNum(row.qtde_entrada_compras),
     valor_saldo_atual: toNum(row.valor_saldo_atual),
     valor_entrada_compras: toNum(row.valor_entrada_compras),
     valor_saida_cons_interno: toNum(row.valor_saida_cons_interno),
@@ -109,16 +111,26 @@ export function useEstoqueData() {
     setError(null)
     setProgress(0)
 
+    // 1. Verifica o cache se não for forceReload
     if (!forceReload) {
       const cachedData = await getCache(CACHE_KEY)
-      if (cachedData) {
+      
+      // Valida se o cache existe e se contém todas as colunas estruturais necessárias
+      const isValidCache = cachedData && 
+                           cachedData.length > 0 && 
+                           'ge' in cachedData[0] && 
+                           'preco_medio' in cachedData[0] &&
+                           'qtde_entrada_compras' in cachedData[0]
+
+      if (isValidCache) {
         setData(cachedData)
         setProgress(100)
+        setLoading(false)
+        return 
       }
-      setLoading(false)
-      return 
     }
 
+    // 2. Busca do Supabase caso seja forceReload ou o cache esteja desatualizado/vazio
     try {
       const { count, error: countErr } = await supabase
         .from(TABLE_ESTOQUE)
