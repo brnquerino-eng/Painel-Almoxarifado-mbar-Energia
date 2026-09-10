@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect, useReducer } from 'react'
+import React, { useMemo, useState, useCallback, useEffect } from 'react'
 import Plot from 'react-plotly.js'
 import pptxgen from 'pptxgenjs'
 import {
@@ -15,105 +15,12 @@ import {
 } from '../utils/format'
 import * as XLSX from 'xlsx'
 
-// COMPONENTES FILHOS
+// COMPONENTES FILHOS E HOOK EXTERNO
+import { useInventoryState } from './useInventoryState'
 import { FullScreenPortal } from './FullScreenPortal.jsx'
 import { CyberMultiSelect } from './CyberMultiSelect.jsx'
 import { ExecutiveCard } from './ExecutiveCard.jsx'
 import { TabelaGenerica } from './TabelaGenerica.jsx'
-
-// --- ESTADO INICIAL E REDUCER ---
-const initialState = {
-  escoposSel: ['Ativa'],
-  unidadesSel: [],
-  anosSel: [],
-  tiposEstoqueSel: [],
-  periodoAtivo: null,
-  activeCard: null,
-  selectedBarraRanking: null,
-  selectedBarraExposicao: null,
-  selectedBarraCritico: null,
-  selectedBarraObsoleto: null,
-  selectedBarraObra: null,
-  selectedBarraCompraConsumo: null,
-  selectedBarraVariacao: null,
-  selectedBarraSkus: null,
-  abaVariacao: 'aumento',
-  abaSkus: 'unicos',
-  abaSkusUnidade: 'unicos',
-  filtroMesParado: null,
-  listaAberta: false,
-  tabelaUnidadesSel: [],
-  tabelaMesesSel: [],
-  tabelaExpandida: false,
-  listaMaioresValoresAberta: false,
-  tabelaMaioresValoresExpandida: false,
-  listaComprasSemConsumoAberta: false,
-  tabelaComprasSemConsumoExpandida: false,
-  listaDuplicadosAberta: false,
-  tabelaDuplicadosExpandida: false,
-}
-
-function reducer(state, action) {
-  switch (action.type) {
-    case 'SET_ESCOPOS':
-      return { ...state, escoposSel: action.payload, unidadesSel: [] }
-    case 'SET_UNIDADES':
-      return { ...state, unidadesSel: action.payload }
-    case 'SET_ANOS':
-      return { ...state, anosSel: action.payload }
-    case 'SET_TIPOS_ESTOQUE':
-      return { ...state, tiposEstoqueSel: action.payload }
-    case 'SET_PERIODO_ATIVO':
-      return { ...state, periodoAtivo: action.payload }
-    case 'TOGGLE_ACTIVE_CARD':
-      return { ...state, activeCard: state.activeCard === action.payload ? null : action.payload }
-    case 'TOGGLE_FIELD':
-      return { ...state, [action.field]: state[action.field] === action.payload ? null : action.payload }
-    case 'TOGGLE_BOOLEAN':
-      return { ...state, [action.field]: !state[action.field] }
-    case 'SET_FIELD':
-      return { ...state, [action.field]: action.payload }
-    case 'CLOSE_ALL_DRAWERS':
-      return {
-        ...state,
-        listaMaioresValoresAberta: false,
-        listaComprasSemConsumoAberta: false,
-        listaDuplicadosAberta: false,
-        listaAberta: false,
-        tabelaExpandida: false,
-        tabelaMaioresValoresExpandida: false,
-        tabelaComprasSemConsumoExpandida: false,
-        tabelaDuplicadosExpandida: false,
-      }
-    case 'RESET_SELECOES_FILTRO':
-      return {
-        ...state,
-        selectedBarraRanking: null,
-        selectedBarraExposicao: null,
-        selectedBarraCritico: null,
-        selectedBarraObsoleto: null,
-        selectedBarraObra: null,
-        selectedBarraCompraConsumo: null,
-        selectedBarraVariacao: null,
-        selectedBarraSkus: null,
-        activeCard: null,
-        filtroMesParado: null,
-        tabelaUnidadesSel: [],
-        tabelaMesesSel: [],
-      }
-    case 'RESET_FILTROS_GERAIS':
-      return {
-        ...state,
-        escoposSel: ['Ativa'],
-        unidadesSel: [],
-        tiposEstoqueSel: [],
-        anosSel: action.payload ? [String(action.payload)] : [],
-        periodoAtivo: null,
-      }
-    default:
-      return state
-  }
-}
 
 // --- CONSTANTES DE FORMATAÇÃO E REGRAS ---
 const PLOT_LAYOUT = {
@@ -161,7 +68,6 @@ function parseNumber(val) {
   return isNaN(n) ? 0 : n;
 }
 
-// LÓGICA DE LENTES INDEPENDENTES
 function aplicarLentesIndependentes(r) {
   const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
@@ -180,7 +86,7 @@ function aplicarLentesIndependentes(r) {
 
 // --- COMPONENTE PRINCIPAL ---
 export default function VisaoGeral({ data }) {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const { state, dispatch } = useInventoryState()
   const [initialLoad, setInitialLoad] = useState(true)
 
   const {
@@ -196,20 +102,12 @@ export default function VisaoGeral({ data }) {
     listaDuplicadosAberta, tabelaDuplicadosExpandida
   } = state
 
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') dispatch({ type: 'CLOSE_ALL_DRAWERS' })
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
   const [vis, setVis] = useState({ total: true, critico: false, obsoleto: false, obra: false, insumo: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
   const [visGiroCobertura, setVisGiroCobertura] = useState({ giro: true, cobertura: true })
   const [exportando, setExportando] = useState(false)
 
-  const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [])
+  const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [dispatch])
 
   // 1. SANITIZAÇÃO
   const dadosSanitizados = useMemo(() => {
@@ -237,7 +135,7 @@ export default function VisaoGeral({ data }) {
       dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
       setInitialLoad(false)
     }
-  }, [anoOpcoes, initialLoad])
+  }, [anoOpcoes, initialLoad, dispatch])
 
   const getUnidadesPermitidas = useCallback((escopos) => {
     if (!escopos || escopos.length === 0) return unidadesOpcoes
@@ -277,7 +175,7 @@ export default function VisaoGeral({ data }) {
 
   useEffect(() => {
     dispatch({ type: 'RESET_SELECOES_FILTRO' })
-  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel])
+  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
@@ -819,7 +717,7 @@ export default function VisaoGeral({ data }) {
 
   const handleChartClick = useCallback((event) => {
     if (event?.points?.[0]?.x) dispatch({ type: 'SET_PERIODO_ATIVO', payload: event.points[0].x })
-  }, [])
+  }, [dispatch])
 
   const maxValorGlobal = useMemo(() => {
     let m = 10
@@ -988,8 +886,6 @@ export default function VisaoGeral({ data }) {
     )
   }, [dispatch])
 
-  // Colunas para Maiores Valores
-  // Ordem Ajustada: Unidade, Código, Nome, GE, Crítico, Qtd, Preço Médio, Valor
   const colsMaioresValores = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
@@ -1006,8 +902,6 @@ export default function VisaoGeral({ data }) {
     { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
-  // Colunas para Duplicados (Tabela visual)
-  // Removido o Preço Médio. O Excel trará os valores detalhados de cada SKU
   const colsDuplicados = useMemo(() => [
     { key: 'nome', label: 'Nome do Produto', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
     { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>) },
@@ -1016,7 +910,6 @@ export default function VisaoGeral({ data }) {
     { key: 'valor', label: 'Valor Imobilizado', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
-  // Colunas para Compras sem Consumo
   const colsComprasSemConsumo = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
@@ -2118,13 +2011,30 @@ export default function VisaoGeral({ data }) {
         <FullScreenPortal onClose={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: false })}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
-              <div className="flex items-center gap-3"><span className="text-[#f1c40f] text-2xl drop-shadow-[0_0_10px_rgba(241,196,15,0.8)]">⚠️</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Cadastros Duplicados (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#f1c40f]/15 text-[#f1c40f] px-2.5 py-1 rounded-md font-mono border border-[#f1c40f]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período: {Number(duplicadosDataCompleta.length).toLocaleString('pt-BR')})</span></div>
+              <div className="flex items-center gap-3">
+                <span className="text-[#f1c40f] text-2xl drop-shadow-[0_0_10px_rgba(241,196,15,0.8)]">⚠️</span>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Cadastros Duplicados (Tela Cheia)</h2>
+                <span className="ml-3 text-xs bg-[#f1c40f]/15 text-[#f1c40f] px-2.5 py-1 rounded-md font-mono border border-[#f1c40f]/30 font-bold shadow-inner">
+                  Exibindo até 1.000 registros (Total no período: {Number(duplicadosDataCompleta.length).toLocaleString('pt-BR')})
+                </span>
+              </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
-                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50">
+                  <span>📥</span><span>Baixar Excel Completo</span>
+                </button>
+                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5">
+                  <span>✕</span><span>Fechar Janela</span>
+                </button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" /></div></div></div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
+              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" />
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
+                <div className="overflow-y-auto custom-scrollbar flex-grow">
+                  <TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" />
+                </div>
+              </div>
+            </div>
           </div>
         </FullScreenPortal>
       )}
