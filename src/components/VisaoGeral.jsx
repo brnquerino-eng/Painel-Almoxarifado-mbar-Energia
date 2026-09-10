@@ -341,7 +341,7 @@ export default function VisaoGeral({ data }) {
       const valEntrada = parseNumber(r.valor_entrada_compras)
       const valSaida = parseNumber(r.valor_saida_cons_interno)
       const qtdAtual = parseNumber(r.qtde_saldo_atual)
-      const qtdEntrada = parseNumber(r.qtde_entrada_compras || r.qtde_entrada || 0)
+      const qtdEntrada = parseNumber(r.qtde_entrada_compras) 
       
       valEstoque += val
       valCompras += valEntrada
@@ -361,6 +361,9 @@ export default function VisaoGeral({ data }) {
         mapCC.get(u).consumo += Math.abs(valSaida)
       }
 
+      const precoMedioBase = parseNumber(r.preco_medio)
+      const geBase = r.ge || '—'
+
       if (qtdAtual > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
         if (u) {
@@ -377,9 +380,6 @@ export default function VisaoGeral({ data }) {
       }
 
       if (val > 0) {
-        // Usa o preço médio que vem do BD, com fallback matemático se zerado.
-        const precoMedioBase = r.preco_medio > 0 ? r.preco_medio : (qtdAtual > 0 ? val / qtdAtual : 0)
-        const geBase = r.ge || '—'
         const itemCriticoStr = r._isCritico ? 'Sim' : 'Não'
         
         maiores.push({ 
@@ -408,9 +408,16 @@ export default function VisaoGeral({ data }) {
 
       if (r.nome_produto && u) {
         const chaveGerada = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
-        if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), unidades: new Set(), quantidade: 0, valor: 0 })
+        if (!mapChaves.has(chaveGerada)) {
+          mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
+        }
         const item = mapChaves.get(chaveGerada)
-        if (r.codigo_produto) item.skus.add(r.codigo_produto)
+        if (r.codigo_produto) {
+          item.skus.add(r.codigo_produto)
+          if (!item.skusMap.has(r.codigo_produto)) {
+            item.skusMap.set(r.codigo_produto, precoMedioBase)
+          }
+        }
         item.unidades.add(u)
         item.quantidade += qtdAtual
         item.valor += val
@@ -479,16 +486,16 @@ export default function VisaoGeral({ data }) {
     const duplicados = []
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
-        // Preço Médio desse grupo (vários SKUs). Divisão Total é o mais acurado para agrupamentos.
-        const precoMedioDup = dados.quantidade > 0 ? dados.valor / dados.quantidade : 0
+        const precosArr = Array.from(dados.skusMap.entries()).map(([sku, preco]) => `SKU ${sku}: ${fmtBRL(preco)}`)
+        
         duplicados.push({ 
           _rowKey: dados.nomeExemplo, 
           nome: dados.nomeExemplo, 
           qtd_skus: dados.skus.size, 
           skus_lista: Array.from(dados.skus).join(', '), 
+          precos_detalhados: precosArr.join(' | '),
           unidades_lista: Array.from(dados.unidades).join(', '), 
           quantidade: dados.quantidade, 
-          precoMedio: precoMedioDup,
           valor: dados.valor 
         })
       }
@@ -698,9 +705,9 @@ export default function VisaoGeral({ data }) {
     try {
       const wsData = maioresValoresDataCompleta.map(item => ({ 
         'Unidade': item.unidade, 
-        'GE': item.ge,
         'Código SKU': item.codigo, 
         'Nome do Produto': item.nome, 
+        'GE': item.ge,
         'Item Crítico': item.itemCritico,
         'Quantidade': item.quantidade, 
         'Preço Médio (R$)': item.precoMedio,
@@ -717,18 +724,23 @@ export default function VisaoGeral({ data }) {
     setExportando(true)
     try {
       const wsData = duplicadosDataCompleta.map(item => ({ 
-        'Nome do Produto': item.nome, 
-        'Qtd SKUs Diferentes': item.qtd_skus, 
-        'Códigos SKUs': item.skus_lista, 
-        'Unidades Afetadas': item.unidades_lista, 
-        'Quantidade Total': item.quantidade, 
-        'Preço Médio (R$)': item.precoMedio,
-        'Valor Imobilizado (R$)': item.valor, 
+        'Nome do Produto': String(item.nome || '—'), 
+        'Qtd SKUs Diferentes': item.qtd_skus || 0, 
+        'Códigos SKUs': String(item.skus_lista || '—'),
+        'Preços Médios por SKU': String(item.precos_detalhados || '—'), 
+        'Unidades Afetadas': String(item.unidades_lista || '—'), 
+        'Quantidade Total': item.quantidade || 0, 
+        'Valor Imobilizado (R$)': item.valor || 0, 
         'Período': formatarPeriodoTexto(periodoEfetivo) 
       }))
-      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Cadastros Duplicados')
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Cadastros Duplicados')
       XLSX.writeFile(wb, `cadastros_duplicados_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
-    } finally { setExportando(false) }
+    } catch (err) {
+      console.error('Erro ao exportar Cadastros Duplicados:', err)
+    } finally { 
+      setExportando(false) 
+    }
   }, [duplicadosDataCompleta, periodoEfetivo])
 
   const exportarExcelComprasSemConsumo = useCallback(() => {
@@ -977,29 +989,30 @@ export default function VisaoGeral({ data }) {
   }, [dispatch])
 
   // Colunas para Maiores Valores
+  // Ordem Ajustada: Unidade, Código, Nome, GE, Crítico, Qtd, Preço Médio, Valor
   const colsMaioresValores = useMemo(() => [
     { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
-    { key: 'ge', label: 'GE', className: 'text-muted font-medium' },
     { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
     { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[220px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'ge', label: 'GE', className: 'text-muted font-medium text-center' },
     { key: 'itemCritico', label: 'Crítico', align: 'center', render: (i) => (
         <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${i.itemCritico === 'Sim' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : 'bg-dark-500/20 text-muted border-dark-500/30'}`}>
           {i.itemCritico}
         </span>
       )
     },
-    { key: 'quantidade', label: 'Qtd', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
     { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
     { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
-  // Colunas para Duplicados
+  // Colunas para Duplicados (Tabela visual)
+  // Removido o Preço Médio. O Excel trará os valores detalhados de cada SKU
   const colsDuplicados = useMemo(() => [
     { key: 'nome', label: 'Nome do Produto', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
     { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>) },
-    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[180px] truncate', title: (i) => i.skus_lista },
+    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[240px] truncate', title: (i) => i.skus_lista },
     { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
-    { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
     { key: 'valor', label: 'Valor Imobilizado', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
   ], [])
 
@@ -1404,11 +1417,11 @@ export default function VisaoGeral({ data }) {
                     type: 'pie',
                     labels: exposicaoCategorias.map(d => d.name),
                     values: exposicaoCategorias.map(d => d.value),
+                    customdata: exposicaoCategorias.map(d => fmtBRL(d.value)),
                     marker: { colors: exposicaoCategorias.map(d => d.color) },
-                    textinfo: 'percent+label',
+                    textinfo: 'label+percent',
                     textfont: { color: '#ffffff', size: 10, family: 'Inter' },
-                    hoverinfo: 'label+value+percent',
-                    hole: 0.4,
+                    hovertemplate: '<b>%{label}</b><br>Valor: %{customdata}<br>Proporção: %{percent}<extra></extra>',
                     automargin: true
                   }
                 ]}
