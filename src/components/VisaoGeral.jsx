@@ -68,6 +68,20 @@ function parseNumber(val) {
   return isNaN(n) ? 0 : n;
 }
 
+// Helper para blindar falsos positivos de duplicidade e reconhecer inversões de medida (Ex: 3/8 x 2 e 2 x 3/8)
+function gerarChaveDuplicidade(nome) {
+  if (!nome) return '';
+  const clean = String(nome).toUpperCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ') // Substitui pontuações por espaço
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .sort() // Ordena as palavras e números alfabeticamente para pegar inversões
+    .join(' ');
+  return clean || String(nome).trim().toUpperCase();
+}
+
 function aplicarLentesIndependentes(r) {
   const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
@@ -270,7 +284,7 @@ export default function VisaoGeral({ data }) {
           if (r.nome_produto) {
             if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
             const mapUnid = mapChavesPorUnidade.get(u)
-            const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+            const chave = gerarChaveDuplicidade(r.nome_produto)
             if (!mapUnid.has(chave)) mapUnid.set(chave, new Set())
             mapUnid.get(chave).add(r.codigo_produto)
           }
@@ -305,7 +319,7 @@ export default function VisaoGeral({ data }) {
       }
 
       if (r.nome_produto && u) {
-        const chaveGerada = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+        const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
         if (!mapChaves.has(chaveGerada)) {
           mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
         }
@@ -322,8 +336,9 @@ export default function VisaoGeral({ data }) {
       }
     }
 
+    // Regra Otimizada: Compras Relevantes com Consumo Zero ou Mínimo (<5%)
     for (const item of mapSkuAggComprasSemConsumo.values()) {
-      if (item.entrada > 0.01 && item.saida < 0.01) {
+      if (item.entrada > 0.01 && item.saida <= (item.entrada * 0.05)) {
         comprasSem.push({ 
           _rowKey: `${item.u}-${item.cod}`, 
           unidade: item.u, 
@@ -331,7 +346,8 @@ export default function VisaoGeral({ data }) {
           nome: item.nome, 
           flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, 
           qtdeComprada: item.qtdeComprada,
-          comprado: item.entrada 
+          comprado: item.entrada,
+          consumido: item.saida
         })
       }
     }
@@ -469,7 +485,7 @@ export default function VisaoGeral({ data }) {
       if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
-          const chave = String(r.nome_produto).trim().replace(/\s+/g, ' ').toUpperCase().split(' ').filter(Boolean).sort().join(' ')
+          const chave = gerarChaveDuplicidade(r.nome_produto)
           if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
           item.chavesMap.get(chave).add(r.codigo_produto)
         }
@@ -491,6 +507,7 @@ export default function VisaoGeral({ data }) {
     }
   }, [dfFiltrado])
 
+  // Otimização: Filtramos os subconjuntos onde estoque_op > 0 para não distorcer médias
   const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
     const empty = { giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0, giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: [] }
     if (!dfFiltrado.length) return empty
@@ -515,7 +532,7 @@ export default function VisaoGeral({ data }) {
       return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 }
     })
 
-    const subAtual = monthly.filter((m) => m.ano === p.ano && m.mes <= p.mes)
+    const subAtual = monthly.filter((m) => m.ano === p.ano && m.mes <= p.mes && m.estoque_op > 0)
     let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
     if (subAtual.length) {
       const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
@@ -525,7 +542,7 @@ export default function VisaoGeral({ data }) {
     }
 
     const mTetoPrev = p.mes > 1 ? p.mes - 1 : 12, anoPrev = p.mes > 1 ? p.ano : p.ano - 1
-    const subPrev = monthly.filter((m) => m.ano === anoPrev && m.mes <= mTetoPrev)
+    const subPrev = monthly.filter((m) => m.ano === anoPrev && m.mes <= mTetoPrev && m.estoque_op > 0)
     let giroMensalPrev = 0, coberturaMesesPrev = 0
     if (subPrev.length) {
       const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length
@@ -536,17 +553,29 @@ export default function VisaoGeral({ data }) {
     return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
   }, [dfFiltrado, periodoEfetivo])
 
+  // Otimização: Uso de Coorte Contínuo para Itens Parados (Resistente à virada de anos)
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
+    
+    // Índice linear contínuo (ex: 2026 * 12 + 9 = 24321)
     const snapshotIdx = p.ano * 12 + p.mes
-    const calc = dfFiltrado.filter((r) => r.unidade_almoxarifado && r.tmp_ano_num * 12 + r.tmp_mes_num <= snapshotIdx && !r._isCritico && !r._isObsoleto).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
+    
+    const calc = dfFiltrado.filter((r) => {
+      if (!r.unidade_almoxarifado || !r.tmp_ano_num || !r.tmp_mes_num) return false
+      const rowIdx = r.tmp_ano_num * 12 + r.tmp_mes_num
+      return rowIdx <= snapshotIdx && !r._isCritico && !r._isObsoleto
+    }).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
 
     const ultimoMov = new Map(), primeiroHist = new Map()
     for (const r of calc) {
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
-      if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
+      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) {
+        ultimoMov.set(key, r.tempo_idx)
+      }
+      if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) {
+        primeiroHist.set(key, r.tempo_idx)
+      }
     }
 
     const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto)
@@ -561,7 +590,18 @@ export default function VisaoGeral({ data }) {
         ultimo = prim != null ? prim - 1 : snapshotIdx
       }
       const mesesParado = Math.max(0, snapshotIdx - ultimo)
-      if (mesesParado >= 3) result.push({ _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: parseNumber(r.valor_saldo_atual), mesesParado })
+      
+      if (mesesParado >= 3) {
+        result.push({ 
+          _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, 
+          unidade: r.unidade_almoxarifado, 
+          codigo: r.codigo_produto, 
+          nome: r.nome_produto, 
+          quantidade: parseNumber(r.qtde_saldo_atual), 
+          valor: parseNumber(r.valor_saldo_atual), 
+          mesesParado 
+        })
+      }
     }
     return result
   }, [dfFiltrado, periodoEfetivo])
@@ -660,7 +700,7 @@ export default function VisaoGeral({ data }) {
           Atributos: tags.join(', '),
           'Qtde Comprada': item.qtdeComprada,
           'Valor Comprado (R$)': item.comprado,
-          'Valor Consumido (R$)': 0,
+          'Valor Consumido (R$)': item.consumido,
           Período: formatarPeriodoTexto(periodoEfetivo),
         }
       })
@@ -903,7 +943,7 @@ export default function VisaoGeral({ data }) {
   ], [])
 
   const colsDuplicados = useMemo(() => [
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
+    { key: 'nome', label: 'Nome do Produto (Agrupado)', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
     { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>) },
     { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[240px] truncate', title: (i) => i.skus_lista },
     { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
@@ -926,7 +966,7 @@ export default function VisaoGeral({ data }) {
     },
     { key: 'qtdeComprada', label: 'Qtde Comprada', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.qtdeComprada).toLocaleString('pt-BR') },
     { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
-    { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: () => 'R$ 0,00' },
+    { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: (i) => fmtBRL(i.consumido) },
   ], [])
 
   const colsParados = useMemo(() => [
@@ -1441,7 +1481,7 @@ export default function VisaoGeral({ data }) {
           >
             <div className="flex items-center gap-2.5">
               <div className="w-6 h-6 rounded-md bg-[#261010] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0 border border-[#e74c3c]/30"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
-              <div><span className="text-xs font-bold text-[#e74c3c] uppercase tracking-wider block">{listaComprasSemConsumoAberta ? 'Fechar Lista de Compras sem Consumo' : 'Alerta: Compras realizadas com Consumo Zero'}</span><span className="text-[10px] text-muted font-medium mt-0.5 block">Itens comprados no mês, mas que não tiveram nenhuma saída registrada (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span></div>
+              <div><span className="text-xs font-bold text-[#e74c3c] uppercase tracking-wider block">{listaComprasSemConsumoAberta ? 'Fechar Lista de Compras sem Consumo' : 'Alerta: Compras realizadas com Baixo Consumo'}</span><span className="text-[10px] text-muted font-medium mt-0.5 block">Itens comprados no mês que tiveram pouca ou nenhuma saída registrada na unidade (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span></div>
             </div>
             <div className="flex items-center gap-3">
               <span className="hidden sm:inline-block text-[10px] bg-[#e74c3c]/15 text-[#e74c3c] px-2 py-0.5 rounded font-mono border border-[#e74c3c]/30 font-bold">Total: {Number(comprasSemConsumoDataCompleta.length).toLocaleString('pt-BR')}</span>
@@ -1451,14 +1491,14 @@ export default function VisaoGeral({ data }) {
           {listaComprasSemConsumoAberta && (
             <div className="p-4 space-y-4 animate-fade-in bg-[#120a0a]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <span className="text-[11px] text-[#e74c3c]/80">Listando materiais com imobilização de caixa injustificada no período (R$ Comprado &gt; 0 e R$ Consumido = 0).</span>
+                <span className="text-[11px] text-[#e74c3c]/80">Listando materiais com imobilização de caixa no período (Consumo inferior a 5% da compra).</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaComprasSemConsumoExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
                 </div>
               </div>
               <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" emptyMessage="🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo." />
+                <TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" emptyMessage="🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo saudável." />
               </div>
             </div>
           )}
@@ -1769,8 +1809,8 @@ export default function VisaoGeral({ data }) {
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
               </div>
               <div>
-                <span className="text-xs font-bold text-[#f1c40f] uppercase tracking-wider block">{listaDuplicadosAberta ? 'Fechar Lista de Duplicados' : 'Alerta: Cadastros Duplicados (Mesmo Nome por Chave de Palavras, SKUs Diferentes)'}</span>
-                <span className="text-[10px] text-muted font-medium mt-0.5 block">Identifica produtos com o mesmo padrão descritivo sob múltiplos códigos (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
+                <span className="text-xs font-bold text-[#f1c40f] uppercase tracking-wider block">{listaDuplicadosAberta ? 'Fechar Lista de Duplicados' : 'Alerta: Cadastros Duplicados (Mesmo Nome, SKUs Diferentes)'}</span>
+                <span className="text-[10px] text-muted font-medium mt-0.5 block">Identifica produtos com o mesmo padrão descritivo (ignora pontuação) sob múltiplos códigos (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -1781,7 +1821,7 @@ export default function VisaoGeral({ data }) {
           {listaDuplicadosAberta && (
             <div className="p-4 space-y-4 animate-fade-in bg-[#12110a]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <span className="text-[11px] text-[#f1c40f]/80">Listando materiais com padrão descritivo equivalente (palavras ordenadas), mas SKUs diferentes. Ordenado pelo impacto financeiro.</span>
+                <span className="text-[11px] text-[#f1c40f]/80">Listando materiais com padrão descritivo equivalente, mas SKUs diferentes.</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a2616] hover:bg-[#3a341c] text-[#f1c40f] border border-[#f1c40f]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
                   <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
