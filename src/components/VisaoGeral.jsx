@@ -68,7 +68,6 @@ function parseNumber(val) {
   return isNaN(n) ? 0 : n;
 }
 
-// Helper para blindar falsos positivos de duplicidade
 function gerarChaveDuplicidade(nome) {
   if (!nome) return '';
   const clean = String(nome).toUpperCase()
@@ -117,6 +116,7 @@ export default function VisaoGeral({ data }) {
   } = state
 
   const abaCompraConsumo = state.abaCompraConsumo || 'comparativo'
+  const [abaRankingUnidade, setAbaRankingUnidade] = useState('total')
 
   const [vis, setVis] = useState({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
@@ -125,7 +125,6 @@ export default function VisaoGeral({ data }) {
 
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [dispatch])
 
-  // 1. SANITIZAÇÃO
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
     return data.map(r => {
@@ -220,10 +219,10 @@ export default function VisaoGeral({ data }) {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
     const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
     return () => { cancelAnimationFrame(id); clearTimeout(t) }
-  }, [snapshot.length, periodoEfetivo, dfFiltrado.length, abaCompraConsumo])
+  }, [snapshot.length, periodoEfetivo, dfFiltrado.length, abaCompraConsumo, abaRankingUnidade])
 
   const {
-    metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra,
+    metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra, rankOperacional, rankInsumo,
     compraConsumoUnidade, variacaoUnidade, skusUnidade, exposicaoCategorias,
     maioresValoresDataCompleta, comprasSemConsumoDataCompleta, duplicadosDataCompleta
   } = useMemo(() => {
@@ -234,15 +233,15 @@ export default function VisaoGeral({ data }) {
         valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0,
         valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
       },
-      rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [],
+      rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [], rankOperacional: [], rankInsumo: [],
       compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
     if (!snapshot.length && !snapshotPrev.length) return empty
 
     const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map()
-    const mapObs = new Map(), mapObra = new Map(), mapCC = new Map()
-    const mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
+    const mapObs = new Map(), mapObra = new Map(), mapOp = new Map(), mapInsumo = new Map()
+    const mapCC = new Map(), mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
     const mapSkuAggComprasSemConsumo = new Map()
 
     let valEstoque = 0, valCompras = 0, valConsumo = 0
@@ -266,8 +265,8 @@ export default function VisaoGeral({ data }) {
       if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
       if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
       if (r._isObra) { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
-      if (r._isInsumo) valInsumo += val
-      if (r._isOperacional) valOp += val
+      if (r._isInsumo) { if (u) mapInsumo.set(u, (mapInsumo.get(u) || 0) + val); valInsumo += val }
+      if (r._isOperacional) { if (u) mapOp.set(u, (mapOp.get(u) || 0) + val); valOp += val }
 
       if (u) {
         if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
@@ -295,7 +294,6 @@ export default function VisaoGeral({ data }) {
 
       if (val > 0) {
         const itemCriticoStr = r._isCritico ? 'Sim' : 'Não'
-        
         maiores.push({ 
           _rowKey: `${u}-${r.codigo_produto}`, 
           unidade: u, 
@@ -402,7 +400,6 @@ export default function VisaoGeral({ data }) {
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
         const precosArr = Array.from(dados.skusMap.entries()).map(([sku, preco]) => `SKU ${sku}: ${fmtBRL(preco)}`)
-        
         duplicados.push({ 
           _rowKey: dados.nomeExemplo, 
           nome: dados.nomeExemplo, 
@@ -440,6 +437,8 @@ export default function VisaoGeral({ data }) {
       rankCritico: mapToSort(mapCrit),
       rankObsoleto: mapToSort(mapObs),
       rankObra: mapToSort(mapObra),
+      rankOperacional: mapToSort(mapOp),
+      rankInsumo: mapToSort(mapInsumo),
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
       variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
       skusUnidade: skusUnidadeArr,
@@ -447,6 +446,17 @@ export default function VisaoGeral({ data }) {
       maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
+
+  const rankingUnidadeAtivo = useMemo(() => {
+    switch(abaRankingUnidade) {
+      case 'operacional': return rankOperacional || [];
+      case 'critico': return rankCritico || [];
+      case 'obsoleto': return rankObsoleto || [];
+      case 'obra': return rankObra || [];
+      case 'insumo': return rankInsumo || [];
+      default: return rankingUnidade || [];
+    }
+  }, [abaRankingUnidade, rankingUnidade, rankOperacional, rankCritico, rankObsoleto, rankObra, rankInsumo])
 
   const variacaoFiltrada = useMemo(() => {
     if (abaVariacao === 'aumento') return variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
@@ -826,24 +836,27 @@ export default function VisaoGeral({ data }) {
     return anns
   }, [timeSeriesAgg, vis, periodoEfetivo])
 
-  const maxValRanking = useMemo(() => Math.max(...rankingUnidade.map((d) => d.valor), 1), [rankingUnidade])
+  const maxValRanking = useMemo(() => Math.max(...rankingUnidadeAtivo.map((d) => d.valor), 1), [rankingUnidadeAtivo])
+  
+  const colorMapRanking = { total: '#f58220', operacional: '#3498db', critico: '#e74c3c', obsoleto: '#9b59b6', obra: '#1abc9c', insumo: '#f1c40f' };
+  const activeRankColor = colorMapRanking[abaRankingUnidade] || '#f58220';
 
   const plotDataRanking = useMemo(() => [
     {
       type: 'bar', orientation: 'h',
-      y: rankingUnidade.map((d) => d.unidade),
-      x: rankingUnidade.map(() => maxValRanking * 1.25),
+      y: rankingUnidadeAtivo.map((d) => d.unidade),
+      x: rankingUnidadeAtivo.map(() => maxValRanking * 1.25),
       marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
       hoverinfo: 'none',
       showlegend: false
     },
     {
       type: 'bar', orientation: 'h',
-      y: rankingUnidade.map((d) => d.unidade),
-      x: rankingUnidade.map((d) => d.valor),
+      y: rankingUnidadeAtivo.map((d) => d.unidade),
+      x: rankingUnidadeAtivo.map((d) => d.valor),
       cliponaxis: false,
       textposition: 'outside',
-      text: rankingUnidade.map((d) => {
+      text: rankingUnidadeAtivo.map((d) => {
         const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
         const rawText = fmtValorCurto(d.valor)
         const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
@@ -851,13 +864,13 @@ export default function VisaoGeral({ data }) {
       }),
       textfont: { size: 10, family: 'Inter', weight: 600 },
       marker: {
-        color: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? '#f58220' : 'rgba(245, 130, 32, 0.2)'),
-        opacity: rankingUnidade.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.3),
+        color: activeRankColor,
+        opacity: rankingUnidadeAtivo.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.2),
         line: { color: '#080808', width: 1 }
       },
       hoverinfo: 'none'
     }
-  ], [rankingUnidade, selectedBarraRanking, maxValRanking])
+  ], [rankingUnidadeAtivo, selectedBarraRanking, maxValRanking, activeRankColor])
 
   const makeInteractiveHBar = useCallback((items, color, selectedBar, fieldName) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
@@ -986,12 +999,18 @@ export default function VisaoGeral({ data }) {
 
   const isRankingSelected = activeCard === 'ranking_unidade'
   const isExposicaoSelected = activeCard === 'composicao_estoque'
-  const isCriticoSelected = activeCard === 'rank_critico'
-  const isObsoletoSelected = activeCard === 'rank_obsoleto'
-  const isObraSelected = activeCard === 'rank_obra'
   const isCompraConsumoSelected = activeCard === 'compra_consumo_unidade'
   const isVariacaoSelected = activeCard === 'variacao_estoque'
   const isSkusUnidadeSelected = activeCard === 'skus_unidade'
+
+  const tabStyles = {
+    total: 'bg-[#f58220]/20 text-[#f58220] border-[#f58220]/50 shadow-[0_0_10px_rgba(245,130,32,0.15)]',
+    operacional: 'bg-[#3498db]/20 text-[#3498db] border-[#3498db]/50 shadow-[0_0_10px_rgba(52,152,219,0.15)]',
+    critico: 'bg-[#e74c3c]/20 text-[#e74c3c] border-[#e74c3c]/50 shadow-[0_0_10px_rgba(231,76,60,0.15)]',
+    obsoleto: 'bg-[#9b59b6]/20 text-[#9b59b6] border-[#9b59b6]/50 shadow-[0_0_10px_rgba(155,89,182,0.15)]',
+    obra: 'bg-[#1abc9c]/20 text-[#1abc9c] border-[#1abc9c]/50 shadow-[0_0_10px_rgba(26,188,156,0.15)]',
+    insumo: 'bg-[#f1c40f]/20 text-[#f1c40f] border-[#f1c40f]/50 shadow-[0_0_10px_rgba(241,196,15,0.15)]'
+  };
 
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
@@ -1330,13 +1349,53 @@ export default function VisaoGeral({ data }) {
 
       {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+        
+        {/* GRÁFICO PRINCIPAL DE ESTOQUE (AGORA CONCENTRA TODAS AS LENTES) */}
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">ESTOQUE POR UNIDADE (R$)</span></div>
-            {selectedBarraRanking && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null }); }} className="text-[10px] bg-accent/20 text-accent border border-accent/40 px-2 py-0.5 rounded hover:bg-accent/30 transition-all font-mono">Limpar Foco ✕</button>)}
+          
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-4 gap-4">
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+              </div>
+              <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">ESTOQUE POR UNIDADE (R$)</span>
+            </div>
+            
+            {/* CONTAINER DE ABAS COM FLEX-WRAP PARA EVITAR BARRA DE ROLAGEM */}
+            <div className="flex flex-wrap items-center gap-2 z-10 w-full xl:w-auto xl:justify-end">
+              {[ 
+                { key: 'total', label: 'Total' }, 
+                { key: 'operacional', label: 'Operacional' },
+                { key: 'critico', label: 'Crítico' }, 
+                { key: 'obsoleto', label: 'Obsoleto' }, 
+                { key: 'obra', label: 'Obra' }, 
+                { key: 'insumo', label: 'Insumo' } 
+              ].map(({ key, label }) => (
+                <button 
+                  key={key} 
+                  onClick={(e) => { e.stopPropagation(); setAbaRankingUnidade(key); }}
+                  className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-md transition-all ${
+                    abaRankingUnidade === key 
+                      ? tabStyles[key] 
+                      : 'bg-[#1a1a1a] text-muted border border-[#2a2a2a] hover:bg-[#222] hover:text-[#d1d8df] shadow-sm'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              {selectedBarraRanking && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null }); }} 
+                  className="text-[9px] sm:text-[10px] bg-accent/20 text-accent border border-accent/40 px-2.5 py-1.5 rounded-md hover:bg-accent/30 transition-all font-mono font-bold ml-1"
+                >
+                  Limpar ✕
+                </button>
+              )}
+            </div>
           </div>
+          
           <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
             <Plot
               data={plotDataRanking}
@@ -1344,12 +1403,12 @@ export default function VisaoGeral({ data }) {
                 ...PLOT_LAYOUT,
                 barmode: 'overlay', 
                 bargap: 0.4,
-                height: Math.max(300, rankingUnidade.length * 32),
+                height: Math.max(300, rankingUnidadeAtivo.length * 32),
                 margin: { l: 115, r: 90, t: 10, b: 10 },
                 xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValRanking * 1.25] },
                 yaxis: {
-                  showgrid: true, gridcolor: '#4A4A4A', tickson: 'boundaries', tickmode: 'array', tickvals: rankingUnidade.map((d) => d.unidade),
-                  ticktext: rankingUnidade.map((d) => {
+                  showgrid: true, gridcolor: '#4A4A4A', tickson: 'boundaries', tickmode: 'array', tickvals: rankingUnidadeAtivo.map((d) => d.unidade),
+                  ticktext: rankingUnidadeAtivo.map((d) => {
                     const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
                     const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
                     return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
@@ -1366,11 +1425,15 @@ export default function VisaoGeral({ data }) {
         <div onClick={() => handleCardClick('composicao_estoque')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isExposicaoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isExposicaoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Composição do Estoque por Categoria (%)</span></div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center text-[#3498db] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path strokeLinecap="round" strokeLinejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg></div>
+              <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Composição do Estoque por Categoria (%)</span>
+            </div>
+            {selectedBarraExposicao && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null }); }} className="text-[10px] bg-[#3498db]/20 text-[#3498db] border border-[#3498db]/40 px-2 py-0.5 rounded hover:bg-[#3498db]/30 transition-all font-mono z-10 relative">Limpar Foco ✕</button>)}
           </div>
-          <p className="text-[10px] text-muted mb-2 px-1">Proporção de cada categoria em relação ao Estoque Total contábil. Devido a sobreposições de atributos, a soma pode exceder 100%.</p>
-          <div className="max-h-[380px] overflow-y-auto custom-scrollbar overscroll-contain" onClick={(e) => e.stopPropagation()}>
+          <p className="text-[10px] text-muted mb-1 px-1">Proporção de cada categoria em relação ao Estoque Total contábil. Devido a sobreposições, a soma pode exceder 100%.</p>
+          <div className="flex-grow flex items-center justify-center mt-2" onClick={(e) => e.stopPropagation()}>
             {exposicaoCategorias.length > 0 ? (
               <Plot
                 data={[
@@ -1379,48 +1442,27 @@ export default function VisaoGeral({ data }) {
                     labels: exposicaoCategorias.map(d => d.name),
                     values: exposicaoCategorias.map(d => d.value),
                     customdata: exposicaoCategorias.map(d => fmtBRL(d.value)),
-                    marker: { colors: exposicaoCategorias.map(d => d.color) },
+                    marker: { 
+                      colors: exposicaoCategorias.map(d => (!selectedBarraExposicao || d.name === selectedBarraExposicao) ? d.color : `${d.color}4D`),
+                      line: { color: '#161616', width: 2 }
+                    },
                     textinfo: 'percent',
-                    textfont: { color: '#ffffff', size: 13, family: 'Inter', weight: 600 },
+                    textfont: { color: '#ffffff', size: 14, family: 'Inter', weight: 800 },
                     hovertemplate: '<b>%{label}</b><br>Valor: %{customdata}<br>Proporção: %{percent}<extra></extra>',
                     automargin: true
                   }
                 ]}
                 layout={{
                   ...PLOT_LAYOUT,
-                  height: 320,
-                  margin: { l: 10, r: 10, t: 10, b: 40 },
+                  height: 400,
+                  margin: { l: 0, r: 0, t: 10, b: 20 },
                   showlegend: true,
-                  legend: { orientation: 'h', font: { color: '#8c9ba5', size: 10 }, x: 0.5, y: -0.15, xanchor: 'center' }
+                  legend: { orientation: 'h', font: { color: '#8c9ba5', size: 11 }, x: 0.5, y: -0.1, xanchor: 'center' }
                 }}
-                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 320 }} useResizeHandler
+                config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 400, cursor: 'pointer' }} useResizeHandler
+                onClick={(e) => { e?.event?.stopPropagation?.(); if (e?.points?.[0]?.label) dispatch({ type: 'TOGGLE_FIELD', field: 'selectedBarraExposicao', payload: e.points[0].label }) }}
               />
             ) : (<p className="text-muted text-center py-16">Sem dados</p>)}
-          </div>
-        </div>
-      </div>
-
-      {/* --- RANKING POR LENTES --- */}
-      <div className="mt-6">
-        <div className="flex items-center gap-2 mb-3 ml-2"><div className="w-5 h-5 rounded-md bg-[#261616] flex items-center justify-center text-[#e74c3c] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">RANKING DE RISCO E LENTES POR UNIDADE (R$)</span></div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div onClick={() => handleCardClick('rank_critico')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isCriticoSelected ? 'border-[#e74c3c] shadow-[0_0_25px_rgba(231,76,60,0.4)] bg-[#1c1212] -translate-y-1.5 ring-1 ring-[#e74c3c]/50' : 'border-[#2A2A2A] hover:border-[#e74c3c]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(231,76,60,0.25)]'}`}>
-            {isCriticoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e74c3c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#e74c3c] shadow-[0_0_10px_rgba(231,76,60,0.8)]"></span></span></div>)}
-            <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#e74c3c]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#261816] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#e74c3c] uppercase">CRÍTICO POR UNID</span></div>{selectedBarraCritico && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null }); }} className="text-[10px] bg-[#e74c3c]/20 text-[#e74c3c] border border-[#e74c3c]/40 px-2 py-0.5 rounded hover:bg-[#e74c3c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankCritico, '#e74c3c', selectedBarraCritico, 'selectedBarraCritico')}</div>
-          </div>
-          <div onClick={() => handleCardClick('rank_obsoleto')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObsoletoSelected ? 'border-[#9b59b6] shadow-[0_0_25px_rgba(155,89,182,0.4)] bg-[#17121c] -translate-y-1.5 ring-1 ring-[#9b59b6]/50' : 'border-[#2A2A2A] hover:border-[#9b59b6]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(155,89,182,0.25)]'}`}>
-            {isObsoletoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#9b59b6] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#9b59b6] shadow-[0_0_10px_rgba(155,89,182,0.8)]"></span></span></div>)}
-            <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#9b59b6]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#201826] flex items-center justify-center text-[#9b59b6] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#9b59b6] uppercase">OBSOLETO POR UNID</span></div>{selectedBarraObsoleto && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null }); }} className="text-[10px] bg-[#9b59b6]/20 text-[#9b59b6] border border-[#9b59b6]/40 px-2 py-0.5 rounded hover:bg-[#9b59b6]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObsoleto, '#9b59b6', selectedBarraObsoleto, 'selectedBarraObsoleto')}</div>
-          </div>
-          <div onClick={() => handleCardClick('rank_obra')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isObraSelected ? 'border-[#1abc9c] shadow-[0_0_25px_rgba(26,188,156,0.4)] bg-[#111c19] -translate-y-1.5 ring-1 ring-[#1abc9c]/50' : 'border-[#2A2A2A] hover:border-[#1abc9c]/80 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(26,188,156,0.25)]'}`}>
-            {isObraSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1abc9c] opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#1abc9c] shadow-[0_0_10px_rgba(26,188,156,0.8)]"></span></span></div>)}
-            <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#1abc9c]/60 to-transparent pointer-events-none" />
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2.5"><div className="w-7 h-7 rounded-lg bg-[#162222] flex items-center justify-center text-[#1abc9c] shadow-inner shrink-0"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg></div><span className="text-[10px] font-bold tracking-[0.2em] text-[#1abc9c] uppercase">OBRA POR UNID</span></div>{selectedBarraObra && (<button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null }); }} className="text-[10px] bg-[#1abc9c]/20 text-[#1abc9c] border border-[#1abc9c]/40 px-2 py-0.5 rounded hover:bg-[#1abc9c]/30 transition-all font-mono">Limpar ✕</button>)}</div>
-            <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain">{makeInteractiveHBar(rankObra, '#1abc9c', selectedBarraObra, 'selectedBarraObra')}</div>
           </div>
         </div>
       </div>
@@ -1436,7 +1478,16 @@ export default function VisaoGeral({ data }) {
             <h2 className="text-sm font-bold text-white tracking-wide uppercase">EVOLUÇÃO TEMPORAL COMPRA x CONSUMO (R$)</h2>
           </div>
           
-          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
+          <div className="flex flex-col-reverse sm:flex-row items-end sm:items-center gap-4 ml-auto">
+            <div className={`flex items-center gap-3 text-[11px] font-medium tracking-wider border-r border-[#2A2A2A] pr-4 mr-2 transition-all duration-300 ${abaCompraConsumo === 'sem_consumo' ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
+              <button onClick={() => toggleVisComprasConsumo('compras')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.compras ? 'text-white' : 'text-[#666] opacity-60'}`}>
+                <span className={`w-2 h-2 rounded-full ${visComprasConsumo.compras ? 'bg-[#e74c3c]' : 'bg-[#555]'}`}></span><span>Compras</span>
+              </button>
+              <button onClick={() => toggleVisComprasConsumo('consumo')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.consumo ? 'text-white' : 'text-[#666] opacity-60'}`}>
+                <span className={`w-2 h-2 rounded-full ${visComprasConsumo.consumo ? 'bg-[#2ecc71]' : 'bg-[#555]'}`}></span><span>Consumo</span>
+              </button>
+            </div>
+            
             <div role="tablist" className="flex items-center gap-3 text-[11px] font-medium tracking-wider">
               <button role="tab" aria-selected={abaCompraConsumo === 'comparativo'} onClick={() => dispatch({ type: 'SET_FIELD', field: 'abaCompraConsumo', payload: 'comparativo' })} className={`flex items-center gap-2 px-3 py-1 rounded-lg border transition-all cursor-pointer focus:outline-none ${abaCompraConsumo === 'comparativo' ? 'bg-[#2ecc71]/15 border-[#2ecc71]/40 text-white shadow-[0_0_10px_rgba(46,204,113,0.2)]' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#666666] opacity-60'}`}>
                 <span className="relative flex items-center justify-center w-4 h-[2px] bg-[#2ecc71]"><span className={`absolute w-2 h-2 rounded-full border-2 border-[#161616] ${abaCompraConsumo === 'comparativo' ? 'bg-[#2ecc71]' : 'bg-[#555]'}`}></span></span>
@@ -1447,17 +1498,6 @@ export default function VisaoGeral({ data }) {
                 <span>Compras s/ Consumo</span>
               </button>
             </div>
-
-            {abaCompraConsumo === 'comparativo' && (
-              <div className="flex items-center gap-3 text-[11px] font-medium tracking-wider border-l border-[#2A2A2A] pl-4 ml-2">
-                <button onClick={() => toggleVisComprasConsumo('compras')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.compras ? 'text-white' : 'text-[#666] opacity-60'}`}>
-                  <span className={`w-2 h-2 rounded-full ${visComprasConsumo.compras ? 'bg-[#e74c3c]' : 'bg-[#555]'}`}></span><span>Compras</span>
-                </button>
-                <button onClick={() => toggleVisComprasConsumo('consumo')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.consumo ? 'text-white' : 'text-[#666] opacity-60'}`}>
-                  <span className={`w-2 h-2 rounded-full ${visComprasConsumo.consumo ? 'bg-[#2ecc71]' : 'bg-[#555]'}`}></span><span>Consumo</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1509,8 +1549,17 @@ export default function VisaoGeral({ data }) {
               fill: 'tozeroy', 
               fillgradient: { type: 'vertical', colorscale: [['0', 'rgba(231,76,60,0.35)'], ['1', 'rgba(231,76,60,0.0)']] }, 
               fillcolor: 'rgba(231,76,60,0.15)',
-              customdata: timeSeriesAgg.comprasSemConsumoEvolucao.map((d) => fmtBRL(d.valor)), 
-              hovertemplate: '<b>%{x}</b><br>Imobilizado s/ Giro: <span style="color:#e74c3c; font-weight:bold;">%{customdata}</span><extra></extra>' 
+              customdata: timeSeriesAgg.comprasSemConsumoEvolucao.map((d, index, arr) => {
+                const prev = index > 0 ? arr[index - 1].valor : d.valor;
+                let arrowHtml = '';
+                if (index > 0) {
+                  if (d.valor > prev) arrowHtml = '<span style="color:#e74c3c; margin-left:6px;">▲</span>';
+                  else if (d.valor < prev) arrowHtml = '<span style="color:#2ecc71; margin-left:6px;">▼</span>';
+                  else arrowHtml = '<span style="color:#a0a0a0; margin-left:6px;">▬</span>';
+                }
+                return { val: fmtBRL(d.valor), arrowHtml };
+              }), 
+              hovertemplate: '<b>%{x}</b><br>Material Sem Consumo: <span style="color:#e74c3c; font-weight:bold;">%{customdata.val}</span>%{customdata.arrowHtml}<extra></extra>' 
             }
           ]}
           layout={{ 
@@ -2140,6 +2189,7 @@ export default function VisaoGeral({ data }) {
                 </button>
               </div>
             </div>
+            
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
