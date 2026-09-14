@@ -97,6 +97,115 @@ function aplicarLentesIndependentes(r) {
   return { ...r, _isObsoleto, _isObra, _isCritico, _isInsumo, _isOperacional }
 }
 
+/** Normaliza valor de unidade para comparação estável (trim + upper). */
+function normUnidade(v) {
+  if (v == null) return ''
+  return String(v).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
+}
+
+/**
+ * Aceita selected do CyberMultiSelect em qualquer formato:
+ * string[] | string | {value|label}[]  →  sempre retorna string[] normalizado
+ */
+function normalizeSelectedUnidades(raw) {
+  if (raw == null || raw === '') return []
+  const arr = Array.isArray(raw) ? raw : [raw]
+  const out = []
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i]
+    if (item == null || item === '') continue
+    if (typeof item === 'string' || typeof item === 'number') {
+      const n = normUnidade(item)
+      if (n) out.push(n)
+    } else if (typeof item === 'object') {
+      const n = normUnidade(item.value ?? item.label ?? item.id ?? item.nome ?? '')
+      if (n) out.push(n)
+    }
+  }
+  return out
+}
+
+/**
+ * Helper de filtro fullscreen:
+ * 1) aplica texto + unidade no dataset COMPLETO
+ * 2) só depois limita a maxItems (1000)
+ */
+function filtrarListaFS(lista, { texto, unidades, camposTexto = ['nome', 'codigo'], maxItems = 1000, matchUnidade }) {
+  if (!lista || lista.length === 0) {
+    return { dados: [], total: 0, unidadesOpcoes: [] }
+  }
+
+  const txt = texto ? String(texto).toLowerCase().trim() : ''
+  // Sempre normaliza — evita string solta, objetos e diferença de caixa/acento
+  const unidadesNorm = normalizeSelectedUnidades(unidades)
+  const temUnidade = unidadesNorm.length > 0
+  const setUnidades = temUnidade ? new Set(unidadesNorm) : null
+
+  const matchUnid = matchUnidade || ((item, setU) => setU.has(normUnidade(item.unidade)))
+
+  let filtrada = lista
+  if (txt || temUnidade) {
+    filtrada = []
+    for (let i = 0; i < lista.length; i++) {
+      const item = lista[i]
+      if (temUnidade && !matchUnid(item, setUnidades)) continue
+      if (txt) {
+        let hit = false
+        for (let c = 0; c < camposTexto.length; c++) {
+          const v = item[camposTexto[c]]
+          if (v != null && String(v).toLowerCase().includes(txt)) { hit = true; break }
+        }
+        if (!hit) continue
+      }
+      filtrada.push(item)
+    }
+  }
+
+  // Opções de unidade: só pelo filtro de TEXTO (unidade selecionada não esconde outras opções)
+  const setOpts = new Set()
+  for (let i = 0; i < lista.length; i++) {
+    const item = lista[i]
+    if (txt) {
+      let hit = false
+      for (let c = 0; c < camposTexto.length; c++) {
+        const v = item[camposTexto[c]]
+        if (v != null && String(v).toLowerCase().includes(txt)) { hit = true; break }
+      }
+      if (!hit) continue
+    }
+    if (item.unidade) {
+      const n = normUnidade(item.unidade)
+      if (n) setOpts.add(n)
+    } else if (item.unidades_lista) {
+      String(item.unidades_lista).split(',').forEach((u) => {
+        const n = normUnidade(u)
+        if (n) setOpts.add(n)
+      })
+    }
+  }
+  // Mantém a grafia original preferindo a 1ª ocorrência no dataset
+  const labelByNorm = new Map()
+  for (let i = 0; i < lista.length; i++) {
+    const item = lista[i]
+    if (item.unidade) {
+      const n = normUnidade(item.unidade)
+      if (n && setOpts.has(n) && !labelByNorm.has(n)) labelByNorm.set(n, String(item.unidade).trim())
+    } else if (item.unidades_lista) {
+      String(item.unidades_lista).split(',').forEach((u) => {
+        const n = normUnidade(u)
+        if (n && setOpts.has(n) && !labelByNorm.has(n)) labelByNorm.set(n, u.trim())
+      })
+    }
+  }
+  const unidadesOpcoes = [...setOpts].sort().map((n) => labelByNorm.get(n) || n)
+
+  return {
+    dados: filtrada.length > maxItems ? filtrada.slice(0, maxItems) : filtrada,
+    total: filtrada.length,
+    unidadesOpcoes
+  }
+}
+
 // --- COMPONENTE PRINCIPAL ---
 export default function VisaoGeral({ data }) {
   const { state, dispatch } = useInventoryState()
@@ -123,16 +232,59 @@ export default function VisaoGeral({ data }) {
   const [visGiroCobertura, setVisGiroCobertura] = useState({ giro: true, cobertura: true })
   const [exportando, setExportando] = useState(false)
 
+  // ESTADOS PARA OS FILTROS DE TELA CHEIA (FULLSCREEN)
+  // Separados por modal para não "vazar" seleção de uma lista para outra
+  const [filtroTextoFS, setFiltroTextoFS] = useState('')
+  const [filtroUnidadeFS, setFiltroUnidadeFS] = useState([])
+
+  // onChange seguro: sempre nova referência de array (evita CyberMultiSelect mutar in-place
+  // e o React/useMemo ignorar a mudança por same-reference)
+  const onChangeUnidadeFS = useCallback((val) => {
+    setFiltroUnidadeFS(normalizeSelectedUnidades(val))
+  }, [])
+
+  const onChangeTextoFS = useCallback((e) => {
+    setFiltroTextoFS(e.target.value)
+  }, [])
+
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [dispatch])
 
+  const fecharModalFS = useCallback((field) => {
+    dispatch({ type: 'SET_FIELD', field, payload: false })
+    setFiltroTextoFS('')
+    setFiltroUnidadeFS([])
+  }, [dispatch])
+
+  // --- MELHORIA: Controle Global da tecla ESC para fechar modais ---
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (tabelaExpandida) fecharModalFS('tabelaExpandida')
+        if (tabelaMaioresValoresExpandida) fecharModalFS('tabelaMaioresValoresExpandida')
+        if (tabelaComprasSemConsumoExpandida) fecharModalFS('tabelaComprasSemConsumoExpandida')
+        if (tabelaDuplicadosExpandida) fecharModalFS('tabelaDuplicadosExpandida')
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    tabelaExpandida, 
+    tabelaMaioresValoresExpandida, 
+    tabelaComprasSemConsumoExpandida, 
+    tabelaDuplicadosExpandida, 
+    fecharModalFS
+  ])
+
+  // Sanitiza + aplica lentes UMA vez (evita re-map em todo filtro de escopo/unidade/ano)
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
     return data.map(r => {
-      let unidadeLimpa = r.unidade_almoxarifado;
+      let unidadeLimpa = r.unidade_almoxarifado
       if (unidadeLimpa) {
-        unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase();
+        unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
       }
-      return { ...r, unidade_almoxarifado: unidadeLimpa }
+      return aplicarLentesIndependentes({ ...r, unidade_almoxarifado: unidadeLimpa })
     })
   }, [data])
 
@@ -164,26 +316,33 @@ export default function VisaoGeral({ data }) {
 
   const dfFiltrado = useMemo(() => {
     let df = dadosSanitizados || []
+    // Sets para includes O(1) quando há muitas unidades/anos
     if (escoposSel.length > 0) {
-      const allowed = getUnidadesPermitidas(escoposSel)
-      df = df.filter(r => allowed.includes(r.unidade_almoxarifado))
+      const allowed = new Set(getUnidadesPermitidas(escoposSel))
+      df = df.filter(r => allowed.has(r.unidade_almoxarifado))
     }
-    if (unidadesSel.length > 0) df = df.filter((r) => unidadesSel.includes(r.unidade_almoxarifado))
+    if (unidadesSel.length > 0) {
+      const setU = new Set(unidadesSel)
+      df = df.filter(r => setU.has(r.unidade_almoxarifado))
+    }
     if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length) {
-      df = df.filter((r) => anosSel.includes(String(r.ano_referencia)))
+      const setA = new Set(anosSel)
+      df = df.filter(r => setA.has(String(r.ano_referencia)))
     }
-    
-    df = df.map(r => aplicarLentesIndependentes(r))
-    
+    // Lentes já vêm de dadosSanitizados — só filtra por tipo
     if (tiposEstoqueSel.length > 0) {
-      df = df.filter(r => {
-        if (tiposEstoqueSel.includes('Crítico') && r._isCritico) return true;
-        if (tiposEstoqueSel.includes('Obsoleto') && r._isObsoleto) return true;
-        if (tiposEstoqueSel.includes('Obra') && r._isObra) return true;
-        if (tiposEstoqueSel.includes('Insumo') && r._isInsumo) return true;
-        if (tiposEstoqueSel.includes('Operacional') && r._isOperacional) return true;
-        return false;
-      })
+      const querCritico = tiposEstoqueSel.includes('Crítico')
+      const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
+      const querObra = tiposEstoqueSel.includes('Obra')
+      const querInsumo = tiposEstoqueSel.includes('Insumo')
+      const querOp = tiposEstoqueSel.includes('Operacional')
+      df = df.filter(r =>
+        (querCritico && r._isCritico) ||
+        (querObsoleto && r._isObsoleto) ||
+        (querObra && r._isObra) ||
+        (querInsumo && r._isInsumo) ||
+        (querOp && r._isOperacional)
+      )
     }
     return df
   }, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes])
@@ -470,9 +629,88 @@ export default function VisaoGeral({ data }) {
     })).filter(d => d.total > 0).sort((a, b) => a.total - b.total);
   }, [skusUnidade, abaSkusUnidade])
 
-  const maioresValoresTabela = useMemo(() => tabelaMaioresValoresExpandida ? maioresValoresDataCompleta.slice(0, 1000) : maioresValoresDataCompleta.slice(0, 12), [maioresValoresDataCompleta, tabelaMaioresValoresExpandida])
-  const comprasSemConsumoTabela = useMemo(() => tabelaComprasSemConsumoExpandida ? comprasSemConsumoDataCompleta.slice(0, 1000) : comprasSemConsumoDataCompleta.slice(0, 12), [comprasSemConsumoDataCompleta, tabelaComprasSemConsumoExpandida])
-  const duplicadosTabela = useMemo(() => tabelaDuplicadosExpandida ? duplicadosDataCompleta.slice(0, 1000) : duplicadosDataCompleta.slice(0, 12), [duplicadosDataCompleta, tabelaDuplicadosExpandida])
+
+  // =========================================================================
+  // LOGICA PADRONIZADA DE TABELAS (GAVETA 50 | FULLSCREEN 1000)
+  // Filtros (texto + unidade) no dataset COMPLETO → depois slice(0, 1000)
+  // =========================================================================
+
+  // 1. MAIORES VALORES DE ESTOQUE
+  const maioresValoresGaveta = useMemo(
+    () => maioresValoresDataCompleta.slice(0, 50),
+    [maioresValoresDataCompleta]
+  )
+
+  // chave primitiva → useMemo SEMPRE reage, mesmo se o array for mutado in-place
+  const filtroUnidadeFSKey = filtroUnidadeFS.join('\0')
+
+  const {
+    dados: maioresValoresFS,
+    total: maioresValoresFSTotal,
+    unidadesOpcoes: unidadesFSMaioresValores
+  } = useMemo(
+    () => filtrarListaFS(maioresValoresDataCompleta, {
+      texto: filtroTextoFS,
+      unidades: filtroUnidadeFS,
+      camposTexto: ['nome', 'codigo'],
+      maxItems: 1000
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
+  )
+
+  // 2. COMPRAS SEM CONSUMO
+  const comprasSemConsumoGaveta = useMemo(
+    () => comprasSemConsumoDataCompleta.slice(0, 50),
+    [comprasSemConsumoDataCompleta]
+  )
+
+  const {
+    dados: comprasSemConsumoFS,
+    total: comprasSemConsumoFSTotal,
+    unidadesOpcoes: unidadesFSComprasSemConsumo
+  } = useMemo(
+    () => filtrarListaFS(comprasSemConsumoDataCompleta, {
+      texto: filtroTextoFS,
+      unidades: filtroUnidadeFS,
+      camposTexto: ['nome', 'codigo'],
+      maxItems: 1000
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [comprasSemConsumoDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
+  )
+
+  // 3. CADASTROS DUPLICADOS (unidade vem em unidades_lista CSV)
+  const duplicadosGaveta = useMemo(
+    () => duplicadosDataCompleta.slice(0, 50),
+    [duplicadosDataCompleta]
+  )
+
+  const {
+    dados: duplicadosFS,
+    total: duplicadosFSTotal,
+    unidadesOpcoes: unidadesFSDuplicados
+  } = useMemo(
+    () => filtrarListaFS(duplicadosDataCompleta, {
+      texto: filtroTextoFS,
+      unidades: filtroUnidadeFS,
+      camposTexto: ['nome', 'skus_lista'],
+      maxItems: 1000,
+      matchUnidade: (item, setU) => {
+        const raw = item.unidades_lista
+        if (!raw) return false
+        const parts = String(raw).split(',')
+        for (let i = 0; i < parts.length; i++) {
+          if (setU.has(normUnidade(parts[i]))) return true
+        }
+        return false
+      }
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
+  )
+
+  // =========================================================================
 
   const timeSeriesAgg = useMemo(() => {
     const map = new Map()
@@ -634,23 +872,49 @@ export default function VisaoGeral({ data }) {
     return [...map.values()].sort((a, b) => a.meses - b.meses)
   }, [itensParados])
 
-  const itensParadosFiltradosTabela = useMemo(() => {
-    let lista = [...itensParados]
-    if (filtroMesParado) lista = lista.filter(item => item.mesesParado === filtroMesParado)
-    if (tabelaMesesSel.length > 0 && !tabelaMesesSel.includes('Todos')) lista = lista.filter(item => tabelaMesesSel.includes(String(item.mesesParado)))
-    if (tabelaUnidadesSel.length > 0 && !tabelaUnidadesSel.includes('Todas')) lista = lista.filter(item => tabelaUnidadesSel.includes(item.unidade))
-    lista.sort((a, b) => b.valor - a.valor)
-    return tabelaExpandida ? lista.slice(0, 1000) : lista.slice(0, 50)
-  }, [itensParados, filtroMesParado, tabelaMesesSel, tabelaUnidadesSel, tabelaExpandida])
-
+  // Lógica Base para Parados (filtros da gaveta; ordena 1x)
   const itensParadosParaExportar = useMemo(() => {
-    let lista = [...itensParados]
-    if (filtroMesParado) lista = lista.filter(item => item.mesesParado === filtroMesParado)
-    if (tabelaMesesSel.length > 0 && !tabelaMesesSel.includes('Todos')) lista = lista.filter(item => tabelaMesesSel.includes(String(item.mesesParado)))
-    if (tabelaUnidadesSel.length > 0 && !tabelaUnidadesSel.includes('Todas')) lista = lista.filter(item => tabelaUnidadesSel.includes(item.unidade))
-    return lista.sort((a, b) => b.valor - a.valor)
+    const temMesSel = tabelaMesesSel.length > 0 && !tabelaMesesSel.includes('Todos')
+    const temUnidSel = tabelaUnidadesSel.length > 0 && !tabelaUnidadesSel.includes('Todas')
+    const setMeses = temMesSel ? new Set(tabelaMesesSel) : null
+    const setUnids = temUnidSel ? new Set(tabelaUnidadesSel) : null
+
+    let lista = itensParados
+    if (filtroMesParado || temMesSel || temUnidSel) {
+      lista = itensParados.filter(item => {
+        if (filtroMesParado && item.mesesParado !== filtroMesParado) return false
+        if (setMeses && !setMeses.has(String(item.mesesParado))) return false
+        if (setUnids && !setUnids.has(item.unidade)) return false
+        return true
+      })
+    }
+    // sort em cópia só se necessário (não muta o array memoizado de itensParados)
+    return [...lista].sort((a, b) => b.valor - a.valor)
   }, [itensParados, filtroMesParado, tabelaMesesSel, tabelaUnidadesSel])
 
+  // 4. ITENS PARADOS (Gaveta 50 | Fullscreen 1000)
+  const itensParadosGaveta = useMemo(
+    () => itensParadosParaExportar.slice(0, 50),
+    [itensParadosParaExportar]
+  )
+
+  const {
+    dados: itensParadosFS,
+    total: itensParadosFSTotal,
+    unidadesOpcoes: unidadesFSParados
+  } = useMemo(
+    () => filtrarListaFS(itensParadosParaExportar, {
+      texto: filtroTextoFS,
+      unidades: filtroUnidadeFS,
+      camposTexto: ['nome', 'codigo'],
+      maxItems: 1000
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [itensParadosParaExportar, filtroTextoFS, filtroUnidadeFSKey]
+  )
+
+
+  // ==================== EXPORTAÇÕES COMPLETAS ====================
   const exportarExcelMaioresValores = useCallback(() => {
     if (!maioresValoresDataCompleta.length) return
     setExportando(true)
@@ -734,9 +998,9 @@ export default function VisaoGeral({ data }) {
     try {
       const wsData = itensParadosParaExportar.map(item => ({ Unidade: item.unidade, 'Código SKU': item.codigo, 'Nome do Produto': item.nome, Quantidade: item.quantidade, 'Valor Parado (R$)': item.valor, 'Meses Inativo': item.mesesParado }))
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(wsData), 'Materiais Parados')
-      XLSX.writeFile(wb, 'materiais_parados_completo.xlsx')
+      XLSX.writeFile(wb, `materiais_parados_${formatarPeriodoTexto(periodoEfetivo).replace('/', '-')}.xlsx`)
     } finally { setExportando(false) }
-  }, [itensParadosParaExportar])
+  }, [itensParadosParaExportar, periodoEfetivo])
 
   const exportarPowerPoint = useCallback(() => {
     setExportando(true)
@@ -1257,6 +1521,7 @@ export default function VisaoGeral({ data }) {
           </button>
         </div>
 
+        {/* TABELA GAVETA 1: MAIORES VALORES */}
         <div className="mt-5 border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
           <div 
             role="button" 
@@ -1281,14 +1546,14 @@ export default function VisaoGeral({ data }) {
           {listaMaioresValoresAberta && (
             <div className="p-4 space-y-4 animate-fade-in bg-[#121212]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor financeiro conforme as categorias ativas.</span>
+                <span className="text-[11px] text-[#8c9ba5]">Exibindo os itens de maior valor financeiro (Top 50 carregados na visualização rápida).</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
-                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaMaioresValoresExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
+                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaMaioresValoresExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162432] hover:bg-[#1c2e40] text-[#3498db] border border-[#3498db]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Tabela</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaGenerica dados={maioresValoresTabela} columns={colsMaioresValores} highlightColor="#3498db" emptyMessage="Nenhum item encontrado no período selecionado." />
+              <div className="max-h-[600px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] scroll-pt-14">
+                <TabelaGenerica dados={maioresValoresGaveta} columns={colsMaioresValores} highlightColor="#3498db" emptyMessage="Nenhum item encontrado no período selecionado." />
               </div>
             </div>
           )}
@@ -1350,7 +1615,7 @@ export default function VisaoGeral({ data }) {
       {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         
-        {/* GRÁFICO PRINCIPAL DE ESTOQUE (AGORA CONCENTRA TODAS AS LENTES) */}
+        {/* GRÁFICO PRINCIPAL DE ESTOQUE */}
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1363,7 +1628,6 @@ export default function VisaoGeral({ data }) {
               <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">ESTOQUE POR UNIDADE (R$)</span>
             </div>
             
-            {/* CONTAINER DE ABAS COM FLEX-WRAP PARA EVITAR BARRA DE ROLAGEM */}
             <div className="flex flex-wrap items-center gap-2 z-10 w-full xl:w-auto xl:justify-end">
               {[ 
                 { key: 'total', label: 'Total' }, 
@@ -1480,7 +1744,7 @@ export default function VisaoGeral({ data }) {
           
           <div className="flex flex-col-reverse sm:flex-row items-end sm:items-center gap-4 ml-auto">
             <div className={`flex items-center gap-3 text-[11px] font-medium tracking-wider border-r border-[#2A2A2A] pr-4 mr-2 transition-all duration-300 ${abaCompraConsumo === 'sem_consumo' ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
-              <button onClick={() => toggleVisComprasConsumo('compras')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.compras ? 'text-white' : 'text-[#666] opacity-60'}`}>
+              <button onClick={() => toggleVisComprasConsumo('compras')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.compras ? 'textwhite' : 'text-[#666] opacity-60'}`}>
                 <span className={`w-2 h-2 rounded-full ${visComprasConsumo.compras ? 'bg-[#e74c3c]' : 'bg-[#555]'}`}></span><span>Compras</span>
               </button>
               <button onClick={() => toggleVisComprasConsumo('consumo')} className={`flex items-center gap-2 transition-all cursor-pointer ${visComprasConsumo.consumo ? 'text-white' : 'text-[#666] opacity-60'}`}>
@@ -1592,6 +1856,7 @@ export default function VisaoGeral({ data }) {
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
+        {/* TABELA GAVETA 2: COMPRAS SEM CONSUMO */}
         <div className="mt-5 border border-[#e74c3c]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
           <div 
             role="button" 
@@ -1616,11 +1881,11 @@ export default function VisaoGeral({ data }) {
                 <span className="text-[11px] text-[#e74c3c]/80">Listando materiais com imobilização de caixa no período (Consumo inferior a 5% da compra).</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
-                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaComprasSemConsumoExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
+                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaComprasSemConsumoExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Tabela</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" emptyMessage="🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo saudável." />
+              <div className="max-h-[600px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] scroll-pt-14">
+                <TabelaGenerica dados={comprasSemConsumoGaveta} columns={colsComprasSemConsumo} highlightColor="#e74c3c" emptyMessage="🎉 Nenhum item! Toda compra registrada neste mês teve movimentação de consumo saudável." />
               </div>
             </div>
           )}
@@ -1917,6 +2182,7 @@ export default function VisaoGeral({ data }) {
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
 
+        {/* TABELA GAVETA 3: CADASTROS DUPLICADOS */}
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
           <div 
             role="button" 
@@ -1946,11 +2212,11 @@ export default function VisaoGeral({ data }) {
                 <span className="text-[11px] text-[#f1c40f]/80">Listando materiais com padrão descritivo equivalente, mas SKUs diferentes.</span>
                 <div className="flex items-center gap-2">
                   <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a2616] hover:bg-[#3a341c] text-[#f1c40f] border border-[#f1c40f]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
-                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir (1.000)</span></button>
+                  <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Tabela</span></button>
                 </div>
               </div>
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c]">
-                <TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" emptyMessage="🎉 Base limpa! Nenhum cadastro duplicado encontrado no período." />
+              <div className="max-h-[600px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] scroll-pt-14">
+                <TabelaGenerica dados={duplicadosGaveta} columns={colsDuplicados} highlightColor="#f1c40f" emptyMessage="🎉 Base limpa! Nenhum cadastro duplicado encontrado no período." />
               </div>
             </div>
           )}
@@ -2088,6 +2354,8 @@ export default function VisaoGeral({ data }) {
                 onClick={(e) => { if (e?.points?.[0]?.x) { const num = parseInt(e.points[0].x.replace(/\D/g, '')); dispatch({ type: 'TOGGLE_FIELD', field: 'filtroMesParado', payload: num }) } }}
               />
             </div>
+            
+            {/* TABELA GAVETA 4: ITENS PARADOS */}
             <div className="mt-4 border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden">
               <div 
                 role="button" 
@@ -2097,24 +2365,24 @@ export default function VisaoGeral({ data }) {
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dispatch({ type: 'TOGGLE_BOOLEAN', field: 'listaAberta' }) } }}
                 className="flex items-center justify-between p-4 bg-[#181818] hover:bg-[#202020] cursor-pointer transition-colors border-b border-[#2A2A2A] focus:outline-none focus:bg-[#202020]"
               >
-                <div className="flex items-center gap-2.5"><span className="text-accent text-sm">📂</span><span className="text-xs font-bold text-white uppercase tracking-wider">{listaAberta ? 'Fechar Lista Completa de Itens Parados' : 'Abrir Lista Completa de Itens Parados'}</span><span className="ml-2 text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded font-mono border border-accent/30">Total: {Number(itensParados.length).toLocaleString('pt-BR')} registros</span></div>
+                <div className="flex items-center gap-2.5"><span className="text-accent text-sm">📂</span><span className="text-xs font-bold text-white uppercase tracking-wider">{listaAberta ? 'Fechar Lista Completa de Itens Parados' : 'Abrir Lista Completa de Itens Parados'}</span><span className="ml-2 text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded font-mono border border-accent/30">Total filtrado: {Number(itensParadosParaExportar.length).toLocaleString('pt-BR')} registros</span></div>
                 <span className="text-xs text-accent font-bold">{listaAberta ? '▲' : '▼'}</span>
               </div>
               {listaAberta && (
                 <div className="p-4 space-y-4 animate-fade-in">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-[#161616] p-3.5 rounded-xl border border-[#2A2A2A]">
-                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Usina:</label><CyberMultiSelect options={unidadesParadasOpcoes} selected={tabelaUnidadesSel} onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'tabelaUnidadesSel', payload: val })} placeholder={tabelaUnidadesSel.length === 0 ? "Todas as Usinas" : "Filtrado"} /></div>
-                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtrar por Tempo Parado:</label><CyberMultiSelect options={mesesParadosOpcoes} selected={tabelaMesesSel} onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'tabelaMesesSel', payload: val })} placeholder={tabelaMesesSel.length === 0 ? "Todos os Meses" : "Filtrado"} /></div>
+                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtro Rápido (Unidade):</label><CyberMultiSelect options={unidadesParadasOpcoes} selected={tabelaUnidadesSel} onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'tabelaUnidadesSel', payload: val })} placeholder={tabelaUnidadesSel.length === 0 ? "Todas as Usinas" : "Filtrado"} /></div>
+                    <div><label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">Filtro Rápido (Meses Parado):</label><CyberMultiSelect options={mesesParadosOpcoes} selected={tabelaMesesSel} onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'tabelaMesesSel', payload: val })} placeholder={tabelaMesesSel.length === 0 ? "Todos os Meses" : "Filtrado"} /></div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-muted">Exibindo os itens mais relevantes ordenados por valor financeiro.</span>
+                    <span className="text-[11px] text-muted">Exibindo os itens mais relevantes ordenados por valor financeiro (Top 50 carregados na gaveta).</span>
                     <div className="flex items-center gap-2">
                       <button onClick={exportarExcelParados} disabled={exportando} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm disabled:opacity-50"><span>📥</span><span>{exportando ? 'Exportando...' : 'Exportar Excel'}</span></button>
-                      <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-[#333] text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Janela</span></button>
+                      <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaExpandida', payload: true })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-[#333] text-xs font-bold transition-all shadow-sm group"><span className="group-hover:scale-110 transition-transform">📈</span><span>Expandir Janela Completa</span></button>
                     </div>
                   </div>
-                  <div className="max-h-[520px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212]">
-                    <TabelaGenerica dados={itensParadosFiltradosTabela} columns={colsParados} highlightColor="#f58220" emptyMessage="Nenhum item encontrado." />
+                  <div className="max-h-[600px] overflow-y-auto custom-scrollbar overscroll-contain border border-[#2A2A2A] rounded-xl bg-[#121212] scroll-pt-14">
+                    <TabelaGenerica dados={itensParadosGaveta} columns={colsParados} highlightColor="#f58220" emptyMessage="Nenhum item encontrado." />
                   </div>
                 </div>
               )}
@@ -2123,78 +2391,224 @@ export default function VisaoGeral({ data }) {
         ) : (<p className="text-muted text-center py-8 tracking-wide">Nenhum material operacional parado há mais de 3 meses para o período selecionado.</p>)}
       </div>
 
-      {/* --- MODAIS FULLSCREEN --- */}
+
+      {/* ====================================================================================== */}
+      {/* =============================== MODAIS FULLSCREEN ==================================== */}
+      {/* ====================================================================================== */}
+
+      {/* MODAL: ITENS PARADOS */}
       {tabelaExpandida && (
-        <FullScreenPortal onClose={() => dispatch({ type: 'SET_FIELD', field: 'tabelaExpandida', payload: false })}>
+        <FullScreenPortal onClose={() => fecharModalFS('tabelaExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
+            
+            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
-              <div className="flex items-center gap-3"><span className="text-accent text-2xl drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]">📂</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa de Itens Parados (Tela Cheia)</h2><span className="ml-3 text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">Exibindo até 1.000 registros mais relevantes (Total filtrado: {Number(itensParadosParaExportar.length).toLocaleString('pt-BR')})</span></div>
+              <div className="flex items-center gap-3">
+                <span className="text-accent text-2xl drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]">📂</span>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa de Itens Parados (Tela Cheia)</h2>
+                <span className="ml-3 text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
+                  Exibindo até 1.000 registros | Total Filtrado: {Number(itensParadosFSTotal).toLocaleString('pt-BR')}
+                </span>
+              </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelParados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
-                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelParados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Base Excel</span></button>
+                <button onClick={() => fecharModalFS('tabelaExpandida')} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={itensParadosFiltradosTabela} columns={colsParados} highlightColor="#f58220" /></div></div></div>
+
+            {/* Barra de Filtros Fullscreen (Controlado globalmente pelo useEffect do ESC) */}
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="flex-1 relative">
+                <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input 
+                  type="text" 
+                  placeholder="Buscar produto por nome ou código..." 
+                  value={filtroTextoFS}
+                  onChange={onChangeTextoFS}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-accent text-xs transition-colors"
+                />
+              </div>
+              <div className="w-full sm:w-80">
+                <CyberMultiSelect 
+                  options={unidadesFSParados} 
+                  selected={filtroUnidadeFS} 
+                  onChange={onChangeUnidadeFS} 
+                  placeholder="Filtrar por Unidades (Apenas Visíveis)" 
+                />
+              </div>
+            </div>
+
+            {/* Corpo da Tabela */}
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
+              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" />
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
+                <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
+                  <TabelaGenerica key={`parados-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={itensParadosFS} columns={colsParados} highlightColor="#f58220" />
+                </div>
+              </div>
+            </div>
           </div>
         </FullScreenPortal>
       )}
 
+      {/* MODAL: MAIORES VALORES */}
       {tabelaMaioresValoresExpandida && (
-        <FullScreenPortal onClose={() => dispatch({ type: 'SET_FIELD', field: 'tabelaMaioresValoresExpandida', payload: false })}>
+        <FullScreenPortal onClose={() => fecharModalFS('tabelaMaioresValoresExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
+            
+            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
-              <div className="flex items-center gap-3"><span className="text-[#3498db] text-2xl drop-shadow-[0_0_10px_rgba(52,152,219,0.8)]">📈</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Maiores Valores de Estoque (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#3498db]/15 text-[#3498db] px-2.5 py-1 rounded-md font-mono border border-[#3498db]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período selecionado: {Number(maioresValoresDataCompleta.length).toLocaleString('pt-BR')})</span></div>
+              <div className="flex items-center gap-3">
+                <span className="text-[#3498db] text-2xl drop-shadow-[0_0_10px_rgba(52,152,219,0.8)]">📈</span>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Maiores Valores de Estoque (Tela Cheia)</h2>
+                <span className="ml-3 text-xs bg-[#3498db]/15 text-[#3498db] px-2.5 py-1 rounded-md font-mono border border-[#3498db]/30 font-bold shadow-inner">
+                  Exibindo até 1.000 registros | Total Filtrado: {Number(maioresValoresFSTotal).toLocaleString('pt-BR')}
+                </span>
+              </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
-                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaMaioresValoresExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelMaioresValores} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Base Excel</span></button>
+                <button onClick={() => fecharModalFS('tabelaMaioresValoresExpandida')} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={maioresValoresTabela} columns={colsMaioresValores} highlightColor="#3498db" /></div></div></div>
+
+            {/* Barra de Filtros Fullscreen (Controlado globalmente pelo useEffect do ESC) */}
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="flex-1 relative">
+                <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input 
+                  type="text" 
+                  placeholder="Buscar produto por nome ou código..." 
+                  value={filtroTextoFS}
+                  onChange={onChangeTextoFS}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#3498db] text-xs transition-colors"
+                />
+              </div>
+              <div className="w-full sm:w-80">
+                <CyberMultiSelect 
+                  options={unidadesFSMaioresValores} 
+                  selected={filtroUnidadeFS} 
+                  onChange={onChangeUnidadeFS} 
+                  placeholder="Filtrar por Unidades (Apenas Visíveis)" 
+                />
+              </div>
+            </div>
+
+            {/* Corpo da Tabela */}
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
+              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" />
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
+                <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
+                  <TabelaGenerica key={`maiores-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={maioresValoresFS} columns={colsMaioresValores} highlightColor="#3498db" />
+                </div>
+              </div>
+            </div>
           </div>
         </FullScreenPortal>
       )}
 
+      {/* MODAL: COMPRAS SEM CONSUMO */}
       {tabelaComprasSemConsumoExpandida && (
-        <FullScreenPortal onClose={() => dispatch({ type: 'SET_FIELD', field: 'tabelaComprasSemConsumoExpandida', payload: false })}>
+        <FullScreenPortal onClose={() => fecharModalFS('tabelaComprasSemConsumoExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
+            
+            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
-              <div className="flex items-center gap-3"><span className="text-[#e74c3c] text-2xl drop-shadow-[0_0_10px_rgba(231,76,60,0.8)]">⚠️</span><h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Compras com Consumo Zero (Tela Cheia)</h2><span className="ml-3 text-xs bg-[#e74c3c]/15 text-[#e74c3c] px-2.5 py-1 rounded-md font-mono border border-[#e74c3c]/30 font-bold shadow-inner">Exibindo até 1.000 registros (Total no período: {Number(comprasSemConsumoDataCompleta.length).toLocaleString('pt-BR')})</span></div>
+              <div className="flex items-center gap-3">
+                <span className="text-[#e74c3c] text-2xl drop-shadow-[0_0_10px_rgba(231,76,60,0.8)]">⚠️</span>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Compras com Consumo Zero (Tela Cheia)</h2>
+                <span className="ml-3 text-xs bg-[#e74c3c]/15 text-[#e74c3c] px-2.5 py-1 rounded-md font-mono border border-[#e74c3c]/30 font-bold shadow-inner">
+                  Exibindo até 1.000 registros | Total Filtrado: {Number(comprasSemConsumoFSTotal).toLocaleString('pt-BR')}
+                </span>
+              </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Excel Completo</span></button>
-                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaComprasSemConsumoExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelComprasSemConsumo} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Base Excel</span></button>
+                <button onClick={() => fecharModalFS('tabelaComprasSemConsumoExpandida')} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative"><div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" /><div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col"><div className="overflow-y-auto custom-scrollbar flex-grow"><TabelaGenerica dados={comprasSemConsumoTabela} columns={colsComprasSemConsumo} highlightColor="#e74c3c" /></div></div></div>
+
+            {/* Barra de Filtros Fullscreen (Controlado globalmente pelo useEffect do ESC) */}
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="flex-1 relative">
+                <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input 
+                  type="text" 
+                  placeholder="Buscar produto por nome ou código..." 
+                  value={filtroTextoFS}
+                  onChange={onChangeTextoFS}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#e74c3c] text-xs transition-colors"
+                />
+              </div>
+              <div className="w-full sm:w-80">
+                <CyberMultiSelect 
+                  options={unidadesFSComprasSemConsumo} 
+                  selected={filtroUnidadeFS} 
+                  onChange={onChangeUnidadeFS} 
+                  placeholder="Filtrar por Unidades (Apenas Visíveis)" 
+                />
+              </div>
+            </div>
+
+            {/* Corpo da Tabela */}
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
+              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" />
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
+                <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
+                  <TabelaGenerica key={`compras-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={comprasSemConsumoFS} columns={colsComprasSemConsumo} highlightColor="#e74c3c" />
+                </div>
+              </div>
+            </div>
           </div>
         </FullScreenPortal>
       )}
 
+      {/* MODAL: CADASTROS DUPLICADOS */}
       {tabelaDuplicadosExpandida && (
-        <FullScreenPortal onClose={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: false })}>
+        <FullScreenPortal onClose={() => fecharModalFS('tabelaDuplicadosExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
+            
+            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
                 <span className="text-[#f1c40f] text-2xl drop-shadow-[0_0_10px_rgba(241,196,15,0.8)]">⚠️</span>
                 <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa: Cadastros Duplicados (Tela Cheia)</h2>
                 <span className="ml-3 text-xs bg-[#f1c40f]/15 text-[#f1c40f] px-2.5 py-1 rounded-md font-mono border border-[#f1c40f]/30 font-bold shadow-inner">
-                  Exibindo até 1.000 registros (Total no período: {Number(duplicadosDataCompleta.length).toLocaleString('pt-BR')})
+                  Exibindo até 1.000 registros | Total Filtrado: {Number(duplicadosFSTotal).toLocaleString('pt-BR')}
                 </span>
               </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50">
-                  <span>📥</span><span>Baixar Excel Completo</span>
-                </button>
-                <button onClick={() => dispatch({ type: 'SET_FIELD', field: 'tabelaDuplicadosExpandida', payload: false })} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5">
-                  <span>✕</span><span>Fechar Janela</span>
-                </button>
+                <button onClick={exportarExcelDuplicados} disabled={exportando} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5 disabled:opacity-50"><span>📥</span><span>Baixar Base Excel</span></button>
+                <button onClick={() => fecharModalFS('tabelaDuplicadosExpandida')} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"><span>✕</span><span>Fechar Janela</span></button>
               </div>
             </div>
             
+            {/* Barra de Filtros Fullscreen (Controlado globalmente pelo useEffect do ESC) */}
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="flex-1 relative">
+                <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input 
+                  type="text" 
+                  placeholder="Buscar produto por nome ou código..." 
+                  value={filtroTextoFS}
+                  onChange={onChangeTextoFS}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#f1c40f] text-xs transition-colors"
+                />
+              </div>
+              <div className="w-full sm:w-80">
+                <CyberMultiSelect 
+                  options={unidadesFSDuplicados} 
+                  selected={filtroUnidadeFS} 
+                  onChange={onChangeUnidadeFS} 
+                  placeholder="Filtrar por Unidades (Apenas Visíveis)" 
+                />
+              </div>
+            </div>
+
+            {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
-                <div className="overflow-y-auto custom-scrollbar flex-grow">
-                  <TabelaGenerica dados={duplicadosTabela} columns={colsDuplicados} highlightColor="#f1c40f" />
+                <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
+                  <TabelaGenerica key={`duplicados-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={duplicadosFS} columns={colsDuplicados} highlightColor="#f1c40f" />
                 </div>
               </div>
             </div>
