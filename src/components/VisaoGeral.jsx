@@ -242,80 +242,14 @@ export default function VisaoGeral({ data }) {
   }, [dispatch])
 
   /**
-   * Detecta se o painel suspenso do CyberMultiSelect está aberto.
-   * (Assinatura visual: botões TODAS + LIMPAR, ou aria-expanded / data-cyber-open)
+   * ESC em camadas (com CyberMultiSelect atualizado):
+   * 1) data-cyber-open → o próprio CyberMultiSelect fecha o painel e para o evento
+   * 2) input de busca focado → só blur
+   * 3) senão → fecha a tela cheia
+   *
+   * Importante: NÃO usar stopImmediatePropagation quando o filtro está aberto,
+   * senão o CyberMultiSelect não recebe o ESC.
    */
-  const isPainelFiltroAberto = useCallback(() => {
-    if (document.querySelector('[aria-expanded="true"]')) return true
-    if (document.querySelector('[data-cyber-open="true"]')) return true
-    if (document.querySelector('[role="listbox"], [role="menu"]')) return true
-    if (document.querySelector('.cyber-multiselect-dropdown, .cyber-select__menu, .multiselect-open')) return true
-
-    // Fallback pelo conteúdo típico do CyberMultiSelect deste projeto
-    let temTodas = false
-    let temLimpar = false
-    const buttons = document.querySelectorAll('button')
-    for (let i = 0; i < buttons.length; i++) {
-      const t = (buttons[i].textContent || '').trim().toUpperCase()
-      if (t === 'TODAS') temTodas = true
-      if (t === 'LIMPAR') temLimpar = true
-      if (temTodas && temLimpar) return true
-    }
-    return false
-  }, [])
-
-  /**
-   * Fecha de verdade a telinha do multi-select (não só blur no input).
-   * Estratégia: toggle no trigger → click fora (mousedown), que é o que o componente costuma escutar.
-   */
-  const fecharPainelFiltro = useCallback(() => {
-    // 1) Trigger com aria-expanded
-    const expanded = document.querySelector('[aria-expanded="true"]')
-    if (expanded && typeof expanded.click === 'function') {
-      expanded.click()
-      if (!isPainelFiltroAberto()) return true
-    }
-
-    // 2) Click fora: simula mousedown/pointerdown num ponto seguro (fora do dropdown)
-    //    A maioria dos multi-selects fecha com listener de "outside click".
-    const opts = { bubbles: true, cancelable: true, view: window, clientX: 8, clientY: 8, button: 0 }
-    const alvo = document.elementFromPoint(8, 8) || document.body
-    try {
-      alvo.dispatchEvent(new MouseEvent('pointerdown', opts))
-      alvo.dispatchEvent(new MouseEvent('mousedown', opts))
-      document.dispatchEvent(new MouseEvent('pointerdown', opts))
-      document.dispatchEvent(new MouseEvent('mousedown', opts))
-    } catch (_) {
-      /* ignore */
-    }
-
-    // 3) Se ainda aberto, clica no trigger do filtro (texto do placeholder)
-    if (isPainelFiltroAberto()) {
-      const candidates = document.querySelectorAll('button, [role="button"]')
-      for (let i = 0; i < candidates.length; i++) {
-        const el = candidates[i]
-        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim()
-        // trigger costuma ser curto: "Filtrar por Unidades", "Unidades", "Meses Parado"
-        if (txt.length < 40 && /filtrar por unidades|^unidades$|meses parado/i.test(txt)) {
-          el.click()
-          break
-        }
-      }
-    }
-
-    // 4) Blur por último (não é o principal — só limpa foco do input interno)
-    const active = document.activeElement
-    if (active && active !== document.body && typeof active.blur === 'function') {
-      active.blur()
-    }
-
-    return true
-  }, [isPainelFiltroAberto])
-
-  // ESC em camadas:
-  //  1) painel do filtro aberto → fecha só a telinha
-  //  2) input de busca do modal focado → só tira o foco
-  //  3) senão → fecha a janela fullscreen
   useEffect(() => {
     const algumModalAberto =
       tabelaExpandida ||
@@ -328,21 +262,17 @@ export default function VisaoGeral({ data }) {
     const handleKeyDown = (e) => {
       if (e.key !== 'Escape') return
 
-      // 1ª camada: telinha do CyberMultiSelect aberta
-      if (isPainelFiltroAberto()) {
-        e.preventDefault()
-        e.stopPropagation()
-        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation()
-        fecharPainelFiltro()
+      // 1ª camada: painel do CyberMultiSelect aberto → não fecha o modal
+      // (CyberMultiSelect escuta em capture, fecha o painel e faz stopImmediatePropagation)
+      if (document.querySelector('[data-cyber-open="true"]')) {
         return
       }
 
-      // 2ª camada: foco no input de busca de produto (não fecha a janela ainda)
+      // 2ª camada: foco no input de busca de produto
       const active = document.activeElement
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
         e.preventDefault()
         e.stopPropagation()
-        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation()
         active.blur()
         return
       }
@@ -364,8 +294,6 @@ export default function VisaoGeral({ data }) {
     tabelaComprasSemConsumoExpandida,
     tabelaDuplicadosExpandida,
     fecharModalFS,
-    isPainelFiltroAberto,
-    fecharPainelFiltro,
   ])
 
   const dadosSanitizados = useMemo(() => {
