@@ -241,15 +241,7 @@ export default function VisaoGeral({ data }) {
     setFiltroMesParadoFS([])
   }, [dispatch])
 
-  /**
-   * ESC em camadas (com CyberMultiSelect atualizado):
-   * 1) data-cyber-open → o próprio CyberMultiSelect fecha o painel e para o evento
-   * 2) input de busca focado → só blur
-   * 3) senão → fecha a tela cheia
-   *
-   * Importante: NÃO usar stopImmediatePropagation quando o filtro está aberto,
-   * senão o CyberMultiSelect não recebe o ESC.
-   */
+  // --- Controle Global da tecla ESC (Modais FullScreen + Gavetas Normais) ---
   useEffect(() => {
     const algumModalAberto =
       tabelaExpandida ||
@@ -257,18 +249,23 @@ export default function VisaoGeral({ data }) {
       tabelaComprasSemConsumoExpandida ||
       tabelaDuplicadosExpandida
 
-    if (!algumModalAberto) return
+    const algumaGavetaAberta =
+      listaAberta ||
+      listaMaioresValoresAberta ||
+      listaComprasSemConsumoAberta ||
+      listaDuplicadosAberta
+
+    if (!algumModalAberto && !algumaGavetaAberta) return
 
     const handleKeyDown = (e) => {
       if (e.key !== 'Escape') return
 
-      // 1ª camada: painel do CyberMultiSelect aberto → não fecha o modal
-      // (CyberMultiSelect escuta em capture, fecha o painel e faz stopImmediatePropagation)
+      // 1ª camada: Painel do CyberMultiSelect aberto → ignora para o select tratar
       if (document.querySelector('[data-cyber-open="true"]')) {
         return
       }
 
-      // 2ª camada: foco no input de busca de produto
+      // 2ª camada: Foco em input de texto → apenas faz blur
       const active = document.activeElement
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
         e.preventDefault()
@@ -277,13 +274,26 @@ export default function VisaoGeral({ data }) {
         return
       }
 
-      // 3ª camada: fecha a tela cheia
-      e.preventDefault()
-      e.stopPropagation()
-      if (tabelaExpandida) fecharModalFS('tabelaExpandida')
-      else if (tabelaMaioresValoresExpandida) fecharModalFS('tabelaMaioresValoresExpandida')
-      else if (tabelaComprasSemConsumoExpandida) fecharModalFS('tabelaComprasSemConsumoExpandida')
-      else if (tabelaDuplicadosExpandida) fecharModalFS('tabelaDuplicadosExpandida')
+      // 3ª camada: Fecha modais de tela cheia se houver algum aberto
+      if (algumModalAberto) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (tabelaExpandida) fecharModalFS('tabelaExpandida')
+        else if (tabelaMaioresValoresExpandida) fecharModalFS('tabelaMaioresValoresExpandida')
+        else if (tabelaComprasSemConsumoExpandida) fecharModalFS('tabelaComprasSemConsumoExpandida')
+        else if (tabelaDuplicadosExpandida) fecharModalFS('tabelaDuplicadosExpandida')
+        return
+      }
+
+      // 4ª camada: Fecha as gavetas normais da dashboard se houver alguma aberta
+      if (algumaGavetaAberta) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (listaAberta) dispatch({ type: 'SET_FIELD', field: 'listaAberta', payload: false })
+        if (listaMaioresValoresAberta) dispatch({ type: 'SET_FIELD', field: 'listaMaioresValoresAberta', payload: false })
+        if (listaComprasSemConsumoAberta) dispatch({ type: 'SET_FIELD', field: 'listaComprasSemConsumoAberta', payload: false })
+        if (listaDuplicadosAberta) dispatch({ type: 'SET_FIELD', field: 'listaDuplicadosAberta', payload: false })
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown, true)
@@ -293,7 +303,12 @@ export default function VisaoGeral({ data }) {
     tabelaMaioresValoresExpandida,
     tabelaComprasSemConsumoExpandida,
     tabelaDuplicadosExpandida,
+    listaAberta,
+    listaMaioresValoresAberta,
+    listaComprasSemConsumoAberta,
+    listaDuplicadosAberta,
     fecharModalFS,
+    dispatch,
   ])
 
   const dadosSanitizados = useMemo(() => {
@@ -781,7 +796,7 @@ export default function VisaoGeral({ data }) {
     return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
   }, [dfFiltrado, periodoEfetivo])
 
-  // --- LÓGICA DE ITENS PARADOS (CORRIGIDA) ---
+  // --- LÓGICA DE ITENS PARADOS ---
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
@@ -1144,7 +1159,7 @@ export default function VisaoGeral({ data }) {
     obra: 'bg-[#1abc9c]/20 text-[#1abc9c] border-[#1abc9c]/50 shadow-[0_0_10px_rgba(26,188,156,0.15)]',
     insumo: 'bg-[#f1c40f]/20 text-[#f1c40f] border-[#f1c40f]/50 shadow-[0_0_10px_rgba(241,196,15,0.15)]'
   };
-  
+  // --- INÍCIO DA PARTE 2 (Retorno JSX) ---
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       <style>{`.js-plotly-plot .plotly .cursor-crosshair { cursor: pointer !important; }`}</style>
@@ -2334,7 +2349,6 @@ export default function VisaoGeral({ data }) {
 
             {/* Tabela de Dados */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
-              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-accent to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
                   <TabelaGenerica key={`parados-${filtroUnidadeFSKey}-${filtroMesParadoFS.join()}-${filtroTextoFS}`} dados={itensParadosFS} columns={colsParados} highlightColor="#f58220" />
@@ -2391,7 +2405,6 @@ export default function VisaoGeral({ data }) {
 
             {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
-              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#3498db] to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
                   <TabelaGenerica key={`maiores-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={maioresValoresFS} columns={colsMaioresValores} highlightColor="#3498db" />
@@ -2448,7 +2461,6 @@ export default function VisaoGeral({ data }) {
 
             {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
-              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#e74c3c] to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
                   <TabelaGenerica key={`compras-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={comprasSemConsumoFS} columns={colsComprasSemConsumo} highlightColor="#e74c3c" />
@@ -2505,7 +2517,6 @@ export default function VisaoGeral({ data }) {
 
             {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
-              <div className="absolute top-0 left-1/4 right-1/4 h-[1px] opacity-20 bg-gradient-to-r from-transparent via-[#f1c40f] to-transparent pointer-events-none" />
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
                   <TabelaGenerica key={`duplicados-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={duplicadosFS} columns={colsDuplicados} highlightColor="#f1c40f" />
