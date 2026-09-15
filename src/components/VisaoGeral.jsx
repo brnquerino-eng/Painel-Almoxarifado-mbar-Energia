@@ -186,11 +186,7 @@ function filtrarListaFS(lista, { texto, unidades, camposTexto = ['nome', 'codigo
   }
   const unidadesOpcoes = [...setOpts].sort().map((n) => labelByNorm.get(n) || n)
 
-  return {
-    dados: filtrada.length > maxItems ? filtrada.slice(0, maxItems) : filtrada,
-    total: filtrada.length,
-    unidadesOpcoes
-  }
+  return { dados: filtrada.length > maxItems ? filtrada.slice(0, maxItems) : filtrada, total: filtrada.length, unidadesOpcoes }
 }
 
 // --- COMPONENTE PRINCIPAL ---
@@ -219,105 +215,57 @@ export default function VisaoGeral({ data }) {
   const [visGiroCobertura, setVisGiroCobertura] = useState({ giro: true, cobertura: true })
   const [exportando, setExportando] = useState(false)
 
-  // ESTADOS PARA OS FILTROS DE TELA CHEIA (FULLSCREEN)
   const [filtroTextoFS, setFiltroTextoFS] = useState('')
   const [filtroUnidadeFS, setFiltroUnidadeFS] = useState([])
   const [filtroMesParadoFS, setFiltroMesParadoFS] = useState([])
 
-  const onChangeUnidadeFS = useCallback((val) => {
-    setFiltroUnidadeFS(normalizeSelectedUnidades(val))
-  }, [])
-
-  const onChangeTextoFS = useCallback((e) => {
-    setFiltroTextoFS(e.target.value)
-  }, [])
-
+  const onChangeUnidadeFS = useCallback((val) => setFiltroUnidadeFS(normalizeSelectedUnidades(val)), [])
+  const onChangeTextoFS = useCallback((e) => setFiltroTextoFS(e.target.value), [])
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [dispatch])
 
   const fecharModalFS = useCallback((field) => {
     dispatch({ type: 'SET_FIELD', field, payload: false })
-    setFiltroTextoFS('')
-    setFiltroUnidadeFS([])
-    setFiltroMesParadoFS([])
+    setFiltroTextoFS(''); setFiltroUnidadeFS([]); setFiltroMesParadoFS([]);
   }, [dispatch])
 
-  // --- Controle Global da tecla ESC (Modais FullScreen + Gavetas Normais) ---
   useEffect(() => {
-    const algumModalAberto =
-      tabelaExpandida ||
-      tabelaMaioresValoresExpandida ||
-      tabelaComprasSemConsumoExpandida ||
-      tabelaDuplicadosExpandida
-
-    const algumaGavetaAberta =
-      listaAberta ||
-      listaMaioresValoresAberta ||
-      listaComprasSemConsumoAberta ||
-      listaDuplicadosAberta
+    const algumModalAberto = tabelaExpandida || tabelaMaioresValoresExpandida || tabelaComprasSemConsumoExpandida || tabelaDuplicadosExpandida
+    const algumaGavetaAberta = listaAberta || listaMaioresValoresAberta || listaComprasSemConsumoAberta || listaDuplicadosAberta
 
     if (!algumModalAberto && !algumaGavetaAberta) return
 
     const handleKeyDown = (e) => {
       if (e.key !== 'Escape') return
-
-      // 1ª camada: Painel do CyberMultiSelect aberto → ignora para o select tratar
-      if (document.querySelector('[data-cyber-open="true"]')) {
-        return
-      }
-
-      // 2ª camada: Foco em input de texto → apenas faz blur
+      if (document.querySelector('[data-cyber-open="true"]')) return
       const active = document.activeElement
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-        e.preventDefault()
-        e.stopPropagation()
-        active.blur()
-        return
+        e.preventDefault(); e.stopPropagation(); active.blur(); return
       }
-
-      // 3ª camada: Fecha modais de tela cheia se houver algum aberto
       if (algumModalAberto) {
-        e.preventDefault()
-        e.stopPropagation()
+        e.preventDefault(); e.stopPropagation()
         if (tabelaExpandida) fecharModalFS('tabelaExpandida')
         else if (tabelaMaioresValoresExpandida) fecharModalFS('tabelaMaioresValoresExpandida')
         else if (tabelaComprasSemConsumoExpandida) fecharModalFS('tabelaComprasSemConsumoExpandida')
         else if (tabelaDuplicadosExpandida) fecharModalFS('tabelaDuplicadosExpandida')
         return
       }
-
-      // 4ª camada: Fecha as gavetas normais da dashboard se houver alguma aberta
       if (algumaGavetaAberta) {
-        e.preventDefault()
-        e.stopPropagation()
+        e.preventDefault(); e.stopPropagation()
         if (listaAberta) dispatch({ type: 'SET_FIELD', field: 'listaAberta', payload: false })
         if (listaMaioresValoresAberta) dispatch({ type: 'SET_FIELD', field: 'listaMaioresValoresAberta', payload: false })
         if (listaComprasSemConsumoAberta) dispatch({ type: 'SET_FIELD', field: 'listaComprasSemConsumoAberta', payload: false })
         if (listaDuplicadosAberta) dispatch({ type: 'SET_FIELD', field: 'listaDuplicadosAberta', payload: false })
       }
     }
-
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [
-    tabelaExpandida,
-    tabelaMaioresValoresExpandida,
-    tabelaComprasSemConsumoExpandida,
-    tabelaDuplicadosExpandida,
-    listaAberta,
-    listaMaioresValoresAberta,
-    listaComprasSemConsumoAberta,
-    listaDuplicadosAberta,
-    fecharModalFS,
-    dispatch,
-  ])
+  }, [tabelaExpandida, tabelaMaioresValoresExpandida, tabelaComprasSemConsumoExpandida, tabelaDuplicadosExpandida, listaAberta, listaMaioresValoresAberta, listaComprasSemConsumoAberta, listaDuplicadosAberta, fecharModalFS, dispatch])
 
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
     return data.map(r => {
       let unidadeLimpa = r.unidade_almoxarifado
-      if (unidadeLimpa) {
-        unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
-      }
+      if (unidadeLimpa) unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
       return aplicarLentesIndependentes({ ...r, unidade_almoxarifado: unidadeLimpa })
     })
   }, [data])
@@ -368,28 +316,18 @@ export default function VisaoGeral({ data }) {
       const querObra = tiposEstoqueSel.includes('Obra')
       const querInsumo = tiposEstoqueSel.includes('Insumo')
       const querOp = tiposEstoqueSel.includes('Operacional')
-      df = df.filter(r =>
-        (querCritico && r._isCritico) ||
-        (querObsoleto && r._isObsoleto) ||
-        (querObra && r._isObra) ||
-        (querInsumo && r._isInsumo) ||
-        (querOp && r._isOperacional)
-      )
+      df = df.filter(r => (querCritico && r._isCritico) || (querObsoleto && r._isObsoleto) || (querObra && r._isObra) || (querInsumo && r._isInsumo) || (querOp && r._isOperacional))
     }
     return df
   }, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes])
 
-  useEffect(() => {
-    dispatch({ type: 'RESET_SELECOES_FILTRO' })
-  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
+  useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
     if (!source.length) return '01/2026'
     let maxAno = 0, maxMes = 0
-    for (const r of source) {
-      if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) { maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num }
-    }
+    for (const r of source) { if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) { maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num } }
     if (!maxAno) return '01/2026'
     return periodoLabel(maxMes, maxAno)
   }, [dfFiltrado, dadosSanitizados])
@@ -418,25 +356,17 @@ export default function VisaoGeral({ data }) {
     maioresValoresDataCompleta, comprasSemConsumoDataCompleta, duplicadosDataCompleta
   } = useMemo(() => {
     const empty = {
-      metrics: {
-        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0, valInsumo: 0,
-        valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0,
-        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0,
-        valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
-      },
+      metrics: { valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0, valInsumo: 0, valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0, valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0, valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0 },
       rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [], rankOperacional: [], rankInsumo: [],
       compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
     if (!snapshot.length && !snapshotPrev.length) return empty
 
-    const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map()
-    const mapObs = new Map(), mapObra = new Map(), mapOp = new Map(), mapInsumo = new Map()
-    const mapCC = new Map(), mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map()
-    const mapSkuAggComprasSemConsumo = new Map()
+    const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map(), mapObs = new Map(), mapObra = new Map(), mapOp = new Map(), mapInsumo = new Map()
+    const mapCC = new Map(), mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map(), mapSkuAggComprasSemConsumo = new Map()
 
-    let valEstoque = 0, valCompras = 0, valConsumo = 0
-    let valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
+    let valEstoque = 0, valCompras = 0, valConsumo = 0, valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
     const skusSet = new Set(), maiores = [], comprasSem = []
 
     for (const r of snapshot) {
@@ -447,12 +377,9 @@ export default function VisaoGeral({ data }) {
       const qtdAtual = parseNumber(r.qtde_saldo_atual)
       const qtdEntrada = parseNumber(r.qtde_entrada_compras) 
       
-      valEstoque += val
-      valCompras += valEntrada
-      valConsumo += Math.abs(valSaida)
+      valEstoque += val; valCompras += valEntrada; valConsumo += Math.abs(valSaida)
 
       if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
-
       if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
       if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
       if (r._isObra) { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
@@ -484,77 +411,44 @@ export default function VisaoGeral({ data }) {
       }
 
       if (val > 0) {
-        const itemCriticoStr = r._isCritico ? 'Sim' : 'Não'
-        maiores.push({ 
-          _rowKey: `${u}-${r.codigo_produto}`, 
-          unidade: u, 
-          ge: geBase,
-          codigo: r.codigo_produto, 
-          nome: r.nome_produto, 
-          quantidade: qtdAtual, 
-          precoMedio: precoMedioBase,
-          itemCritico: itemCriticoStr,
-          valor: val 
-        })
+        maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, ge: geBase, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: qtdAtual, precoMedio: precoMedioBase, itemCritico: r._isCritico ? 'Sim' : 'Não', valor: val })
       }
       
       if (valEntrada > 0 || Math.abs(valSaida) > 0) {
         const skuKey = `${u}-${r.codigo_produto}`
-        if (!mapSkuAggComprasSemConsumo.has(skuKey)) {
-          mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0, qtdeComprada: 0 })
-        }
+        if (!mapSkuAggComprasSemConsumo.has(skuKey)) mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0, qtdeComprada: 0 })
         const item = mapSkuAggComprasSemConsumo.get(skuKey)
-        item.entrada += valEntrada
-        item.saida += Math.abs(valSaida)
-        item.qtdeComprada += qtdEntrada
+        item.entrada += valEntrada; item.saida += Math.abs(valSaida); item.qtdeComprada += qtdEntrada
       }
 
       if (r.nome_produto && u) {
         const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
-        if (!mapChaves.has(chaveGerada)) {
-          mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
-        }
+        if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
         const item = mapChaves.get(chaveGerada)
         if (r.codigo_produto) {
           item.skus.add(r.codigo_produto)
-          if (!item.skusMap.has(r.codigo_produto)) {
-            item.skusMap.set(r.codigo_produto, precoMedioBase)
-          }
+          if (!item.skusMap.has(r.codigo_produto)) item.skusMap.set(r.codigo_produto, precoMedioBase)
         }
-        item.unidades.add(u)
-        item.quantidade += qtdAtual
-        item.valor += val
+        item.unidades.add(u); item.quantidade += qtdAtual; item.valor += val
       }
     }
 
     for (const item of mapSkuAggComprasSemConsumo.values()) {
       if (item.entrada > 0.01 && item.saida <= (item.entrada * 0.05)) {
-        comprasSem.push({ 
-          _rowKey: `${item.u}-${item.cod}`, 
-          unidade: item.u, 
-          codigo: item.cod, 
-          nome: item.nome, 
-          flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, 
-          qtdeComprada: item.qtdeComprada,
-          comprado: item.entrada,
-          consumido: item.saida
-        })
+        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, qtdeComprada: item.qtdeComprada, comprado: item.entrada, consumido: item.saida })
       }
     }
 
-    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
-    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
+    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0, valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
     const skusPrevSet = new Set()
     
     for (const r of snapshotPrev) {
       const u = r.unidade_almoxarifado
       const val = parseNumber(r.valor_saldo_atual)
-      const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = parseNumber(r.valor_saida_cons_interno)
       
       valEstoquePrev += val
-      valComprasPrev += valEntrada
-      valConsumoPrev += Math.abs(valSaida)
+      valComprasPrev += parseNumber(r.valor_entrada_compras)
+      valConsumoPrev += Math.abs(parseNumber(r.valor_saida_cons_interno))
       if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
 
       if (r._isCritico) valCriticoPrev += val
@@ -591,60 +485,30 @@ export default function VisaoGeral({ data }) {
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
         const precosArr = Array.from(dados.skusMap.entries()).map(([sku, preco]) => `SKU ${sku}: ${fmtBRL(preco)}`)
-        duplicados.push({ 
-          _rowKey: dados.nomeExemplo, 
-          nome: dados.nomeExemplo, 
-          qtd_skus: dados.skus.size, 
-          skus_lista: Array.from(dados.skus).join(', '), 
-          precos_detalhados: precosArr.join(' | '),
-          unidades_lista: Array.from(dados.unidades).join(', '), 
-          quantidade: dados.quantidade, 
-          valor: dados.valor 
-        })
+        duplicados.push({ _rowKey: dados.nomeExemplo, nome: dados.nomeExemplo, qtd_skus: dados.skus.size, skus_lista: Array.from(dados.skus).join(', '), precos_detalhados: precosArr.join(' | '), unidades_lista: Array.from(dados.unidades).join(', '), quantidade: dados.quantidade, valor: dados.valor })
       }
     }
-    duplicados.sort((a, b) => b.valor - a.valor)
-    maiores.sort((a, b) => b.valor - a.valor)
-    comprasSem.sort((a, b) => b.comprado - a.comprado)
+    duplicados.sort((a, b) => b.valor - a.valor); maiores.sort((a, b) => b.valor - a.valor); comprasSem.sort((a, b) => b.comprado - a.comprado)
 
     const skusUnidadeArr = [...mapSkus.entries()].map(([u, setSkus]) => {
       let duplicadosUnidade = 0
-      if (mapChavesPorUnidade.has(u)) {
-        for (const setChaves of mapChavesPorUnidade.get(u).values()) {
-          if (setChaves.size > 1) duplicadosUnidade += setChaves.size
-        }
-      }
+      if (mapChavesPorUnidade.has(u)) { for (const setChaves of mapChavesPorUnidade.get(u).values()) { if (setChaves.size > 1) duplicadosUnidade += setChaves.size } }
       return { unidade: u, total: setSkus.size, duplicados: duplicadosUnidade }
     }).filter(d => d.unidade && d.total > 0).sort((a, b) => a.total - b.total)
 
     return {
-      metrics: {
-        valEstoque, valCompras, valConsumo, valSkus: skusSet.size, valInsumo,
-        valCritico, valObsoleto, valObra, valOp,
-        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size, valInsumoPrev,
-        valCriticoPrev, valObsoletoPrev, valObraPrev
-      },
-      rankingUnidade: mapToSort(mapRank),
-      rankCritico: mapToSort(mapCrit),
-      rankObsoleto: mapToSort(mapObs),
-      rankObra: mapToSort(mapObra),
-      rankOperacional: mapToSort(mapOp),
-      rankInsumo: mapToSort(mapInsumo),
+      metrics: { valEstoque, valCompras, valConsumo, valSkus: skusSet.size, valInsumo, valCritico, valObsoleto, valObra, valOp, valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size, valInsumoPrev, valCriticoPrev, valObsoletoPrev, valObraPrev },
+      rankingUnidade: mapToSort(mapRank), rankCritico: mapToSort(mapCrit), rankObsoleto: mapToSort(mapObs), rankObra: mapToSort(mapObra), rankOperacional: mapToSort(mapOp), rankInsumo: mapToSort(mapInsumo),
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
-      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
-      skusUnidade: skusUnidadeArr,
-      exposicaoCategorias: exposicao, 
-      maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
+      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01), skusUnidade: skusUnidadeArr, exposicaoCategorias: exposicao, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
+
   const rankingUnidadeAtivo = useMemo(() => {
     switch(abaRankingUnidade) {
-      case 'operacional': return rankOperacional || [];
-      case 'critico': return rankCritico || [];
-      case 'obsoleto': return rankObsoleto || [];
-      case 'obra': return rankObra || [];
-      case 'insumo': return rankInsumo || [];
-      default: return rankingUnidade || [];
+      case 'operacional': return rankOperacional || []; case 'critico': return rankCritico || [];
+      case 'obsoleto': return rankObsoleto || []; case 'obra': return rankObra || [];
+      case 'insumo': return rankInsumo || []; default: return rankingUnidade || [];
     }
   }, [abaRankingUnidade, rankingUnidade, rankOperacional, rankCritico, rankObsoleto, rankObra, rankInsumo])
 
@@ -653,49 +517,21 @@ export default function VisaoGeral({ data }) {
     return variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
   }, [variacaoUnidade, abaVariacao])
 
-  const skusUnidadeFiltrado = useMemo(() => {
-    return skusUnidade.map(d => ({
-        unidade: d.unidade,
-        total: abaSkusUnidade === 'duplicados' ? d.duplicados : d.total
-    })).filter(d => d.total > 0).sort((a, b) => a.total - b.total);
-  }, [skusUnidade, abaSkusUnidade])
+  const skusUnidadeFiltrado = useMemo(() => skusUnidade.map(d => ({ unidade: d.unidade, total: abaSkusUnidade === 'duplicados' ? d.duplicados : d.total })).filter(d => d.total > 0).sort((a, b) => a.total - b.total), [skusUnidade, abaSkusUnidade])
 
   // =========================================================================
-  // LOGICA PADRONIZADA DE TABELAS (GAVETA 50 | FULLSCREEN 1000)
+  // GAVETAS E FULLSCREEN
   // =========================================================================
 
   const maioresValoresGaveta = useMemo(() => maioresValoresDataCompleta.slice(0, 50), [maioresValoresDataCompleta])
   const filtroUnidadeFSKey = filtroUnidadeFS.join('\0')
-
-  const { dados: maioresValoresFS, total: maioresValoresFSTotal, unidadesOpcoes: unidadesFSMaioresValores } = useMemo(
-    () => filtrarListaFS(maioresValoresDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }),
-    [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
-  )
+  const { dados: maioresValoresFS, total: maioresValoresFSTotal, unidadesOpcoes: unidadesFSMaioresValores } = useMemo(() => filtrarListaFS(maioresValoresDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
 
   const comprasSemConsumoGaveta = useMemo(() => comprasSemConsumoDataCompleta.slice(0, 50), [comprasSemConsumoDataCompleta])
-
-  const { dados: comprasSemConsumoFS, total: comprasSemConsumoFSTotal, unidadesOpcoes: unidadesFSComprasSemConsumo } = useMemo(
-    () => filtrarListaFS(comprasSemConsumoDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }),
-    [comprasSemConsumoDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
-  )
+  const { dados: comprasSemConsumoFS, total: comprasSemConsumoFSTotal, unidadesOpcoes: unidadesFSComprasSemConsumo } = useMemo(() => filtrarListaFS(comprasSemConsumoDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [comprasSemConsumoDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
 
   const duplicadosGaveta = useMemo(() => duplicadosDataCompleta.slice(0, 50), [duplicadosDataCompleta])
-
-  const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(
-    () => filtrarListaFS(duplicadosDataCompleta, {
-      texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'skus_lista'], maxItems: 1000,
-      matchUnidade: (item, setU) => {
-        const raw = item.unidades_lista
-        if (!raw) return false
-        const parts = String(raw).split(',')
-        for (let i = 0; i < parts.length; i++) {
-          if (setU.has(normUnidade(parts[i]))) return true
-        }
-        return false
-      }
-    }),
-    [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey]
-  )
+  const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(() => filtrarListaFS(duplicadosDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'skus_lista'], maxItems: 1000, matchUnidade: (item, setU) => { const parts = String(item.unidades_lista || '').split(','); return parts.some(p => setU.has(normUnidade(p))) } }), [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
 
   // =========================================================================
 
@@ -706,23 +542,15 @@ export default function VisaoGeral({ data }) {
       if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0, compras: 0, consumo: 0, comprasSemConsumo: 0, skus: new Set(), chavesMap: new Map() })
       
       const item = map.get(key)
-      const val = parseNumber(r.valor_saldo_atual)
-      const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      const val = parseNumber(r.valor_saldo_atual), valEntrada = parseNumber(r.valor_entrada_compras), valSaida = parseNumber(r.valor_saida_cons_interno)
 
-      item.total += val
+      item.total += val; item.compras += valEntrada; item.consumo += Math.abs(valSaida)
       if (r._isOperacional) item.operacional += val
       if (r._isCritico) item.critico += val
       if (r._isObsoleto) item.obsoleto += val
       if (r._isObra) item.obra += val
       if (r._isInsumo) item.insumo += val
-      item.compras += valEntrada
-      item.consumo += Math.abs(valSaida)
-      
-      if (valEntrada > 0.01 && Math.abs(valSaida) <= (valEntrada * 0.05)) {
-        item.comprasSemConsumo += valEntrada;
-      }
-
+      if (valEntrada > 0.01 && Math.abs(valSaida) <= (valEntrada * 0.05)) item.comprasSemConsumo += valEntrada
       if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
@@ -734,19 +562,11 @@ export default function VisaoGeral({ data }) {
     }
     const sorted = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
     return {
-      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })), 
-      operacional: sorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
-      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
-      obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })), 
-      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
-      insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
-      comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
-      comprasSemConsumoEvolucao: sorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
-      skus: sorted.map(d => {
-        let skusDupCount = 0
-        for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
-        return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
-      })
+      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })), operacional: sorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
+      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })), obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })), 
+      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })), insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
+      comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })), comprasSemConsumoEvolucao: sorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
+      skus: sorted.map(d => { let skusDupCount = 0; for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size; return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount } })
     }
   }, [dfFiltrado])
 
@@ -761,41 +581,30 @@ export default function VisaoGeral({ data }) {
       const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
       if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
       const item = map.get(key)
-      if (!r._isCritico && !r._isObsoleto) {
-        item.estoque_op += parseNumber(r.valor_saldo_atual)
-        item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
-      }
+      if (!r._isCritico && !r._isObsoleto) { item.estoque_op += parseNumber(r.valor_saldo_atual); item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno)) }
     }
     const monthly = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
 
     let accEst = 0, accCon = 0
-    const giroCoberturaTempo = monthly.map((row, i) => {
-      accEst += row.estoque_op; accCon += row.consumo_op; const n = i + 1; const estMed = accEst / n; const conMed = accCon / n
-      return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 }
-    })
+    const giroCoberturaTempo = monthly.map((row, i) => { accEst += row.estoque_op; accCon += row.consumo_op; const n = i + 1; const estMed = accEst / n; const conMed = accCon / n; return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 } })
 
     const subAtual = monthly.filter((m) => m.ano === p.ano && m.mes <= p.mes && m.estoque_op > 0)
     let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
     if (subAtual.length) {
-      const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
-      const conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
-      if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }
-      if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
+      const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length, conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
+      if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }; if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
     }
 
     const mTetoPrev = p.mes > 1 ? p.mes - 1 : 12, anoPrev = p.mes > 1 ? p.ano : p.ano - 1
     const subPrev = monthly.filter((m) => m.ano === anoPrev && m.mes <= mTetoPrev && m.estoque_op > 0)
     let giroMensalPrev = 0, coberturaMesesPrev = 0
     if (subPrev.length) {
-      const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length
-      const conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
-      if (estMedP > 0) giroMensalPrev = conMedP / estMedP
-      if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
+      const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length, conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
+      if (estMedP > 0) giroMensalPrev = conMedP / estMedP; if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
     }
     return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
   }, [dfFiltrado, periodoEfetivo])
 
-  // --- LÓGICA DE ITENS PARADOS ---
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
@@ -803,19 +612,14 @@ export default function VisaoGeral({ data }) {
     
     const calc = dfFiltrado.filter((r) => {
       if (!r.unidade_almoxarifado || !r.tmp_ano_num || !r.tmp_mes_num) return false
-      const rowIdx = r.tmp_ano_num * 12 + r.tmp_mes_num
-      return rowIdx <= snapshotIdx && !r._isCritico && !r._isObsoleto
+      return (r.tmp_ano_num * 12 + r.tmp_mes_num) <= snapshotIdx && !r._isCritico && !r._isObsoleto
     }).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
 
     const ultimoMov = new Map(), primeiroHist = new Map()
     for (const r of calc) {
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) {
-        ultimoMov.set(key, r.tempo_idx)
-      }
-      if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) {
-        primeiroHist.set(key, r.tempo_idx)
-      }
+      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
+      if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
     }
 
     const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto)
@@ -832,128 +636,128 @@ export default function VisaoGeral({ data }) {
       const mesesParado = Math.max(0, snapshotIdx - ultimo)
       
       if (mesesParado >= 3) {
-        result.push({ 
-          _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, 
-          unidade: r.unidade_almoxarifado, 
-          codigo: r.codigo_produto, 
-          nome: r.nome_produto, 
-          quantidade: parseNumber(r.qtde_saldo_atual), 
-          valor: parseNumber(r.valor_saldo_atual), 
-          mesesParado 
-        })
+        result.push({ _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: parseNumber(r.valor_saldo_atual), mesesParado })
       }
     }
-    
     return result.sort((a, b) => b.valor - a.valor)
   }, [dfFiltrado, periodoEfetivo])
 
   const mesesParadosOpcoes = useMemo(() => [...new Set(itensParados.map(i => i.mesesParado))].sort((a, b) => a - b).map(String), [itensParados])
-
   const paradosChart = useMemo(() => {
     const map = new Map()
     for (const item of itensParados) {
       const m = item.mesesParado
       if (!map.has(m)) map.set(m, { meses: m, label: `${m} Meses`, valor: 0, skus: 0 })
-      const obj = map.get(m)
-      obj.valor += item.valor; obj.skus += 1
+      const obj = map.get(m); obj.valor += item.valor; obj.skus += 1
     }
     return [...map.values()].sort((a, b) => a.meses - b.meses)
   }, [itensParados])
 
   const itensParadosParaExportar = useMemo(() => {
-    let lista = itensParados
-    if (filtroMesParado) {
-      lista = itensParados.filter(item => item.mesesParado === filtroMesParado)
-    }
+    let lista = itensParados; if (filtroMesParado) lista = itensParados.filter(item => item.mesesParado === filtroMesParado)
     return [...lista]
   }, [itensParados, filtroMesParado])
 
   const itensParadosGaveta = useMemo(() => itensParadosParaExportar.slice(0, 50), [itensParadosParaExportar])
-
   const itensParadosPreFS = useMemo(() => {
     let lista = itensParados
-    if (filtroMesParado) {
-      lista = lista.filter(item => item.mesesParado === filtroMesParado)
-    }
-    if (filtroMesParadoFS && filtroMesParadoFS.length > 0) {
-      const setM = new Set(filtroMesParadoFS.map(String));
-      lista = lista.filter(item => setM.has(String(item.mesesParado)));
-    }
+    if (filtroMesParado) lista = lista.filter(item => item.mesesParado === filtroMesParado)
+    if (filtroMesParadoFS && filtroMesParadoFS.length > 0) { const setM = new Set(filtroMesParadoFS.map(String)); lista = lista.filter(item => setM.has(String(item.mesesParado))) }
     return lista;
   }, [itensParados, filtroMesParado, filtroMesParadoFS]);
 
-  const {
-    dados: itensParadosFS,
-    total: itensParadosFSTotal,
-    unidadesOpcoes: unidadesFSParados
-  } = useMemo(
-    () => filtrarListaFS(itensParadosPreFS, {
-      texto: filtroTextoFS,
-      unidades: filtroUnidadeFS,
-      camposTexto: ['nome', 'codigo'],
-      maxItems: 1000
-    }),
-    [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey]
-  )
+  const { dados: itensParadosFS, total: itensParadosFSTotal, unidadesOpcoes: unidadesFSParados } = useMemo(() => filtrarListaFS(itensParadosPreFS, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey])
 
   // ==================== EXPORTAÇÕES COMPLETAS ====================
+  
+  const periodoTxtExport = formatarPeriodoTexto(periodoEfetivo);
+
   const exportarExcelMaioresValores = useCallback(() => {
     setExportando(true);
     setTimeout(() => {
-      const ws = XLSX.utils.json_to_sheet(maioresValoresDataCompleta);
+      const dadosExportacao = maioresValoresDataCompleta.map(i => ({
+        'Período': periodoTxtExport,
+        'Unidade': i.unidade,
+        'Código SKU': i.codigo,
+        'Nome do Produto': i.nome || '—',
+        'GE': i.ge || '—',
+        'Crítico': i.itemCritico,
+        'Quantidade': i.quantidade,
+        'Preço Médio (R$)': i.precoMedio,
+        'Valor em Estoque (R$)': i.valor
+      }));
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Maiores Valores");
-      XLSX.writeFile(wb, `Maiores_Valores_Estoque_${periodoEfetivo.replace('/','-')}.xlsx`);
+      XLSX.writeFile(wb, `Maiores_Valores_Estoque_${periodoTxtExport.replace('/','-')}.xlsx`);
       setExportando(false);
     }, 150);
-  }, [maioresValoresDataCompleta, periodoEfetivo])
+  }, [maioresValoresDataCompleta, periodoTxtExport])
 
   const exportarExcelDuplicados = useCallback(() => {
     setExportando(true);
     setTimeout(() => {
-      const ws = XLSX.utils.json_to_sheet(duplicadosDataCompleta);
+      const dadosExportacao = duplicadosDataCompleta.map(i => ({
+        'Período': periodoTxtExport,
+        'Nome do Produto (Agrupado)': i.nome,
+        'Qtd SKUs': i.qtd_skus,
+        'Lista de SKUs': i.skus_lista,
+        'Qtd Fís.': i.quantidade,
+        'Valor Imobilizado (R$)': i.valor
+      }));
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Duplicados");
-      XLSX.writeFile(wb, `Cadastros_Duplicados_${periodoEfetivo.replace('/','-')}.xlsx`);
+      XLSX.writeFile(wb, `Cadastros_Duplicados_${periodoTxtExport.replace('/','-')}.xlsx`);
       setExportando(false);
     }, 150);
-  }, [duplicadosDataCompleta, periodoEfetivo])
+  }, [duplicadosDataCompleta, periodoTxtExport])
 
   const exportarExcelComprasSemConsumo = useCallback(() => {
     setExportando(true);
     setTimeout(() => {
-      const ws = XLSX.utils.json_to_sheet(comprasSemConsumoDataCompleta.map(i => ({
-        ...i,
-        flags: Object.entries(i.flags).filter(([_, v]) => v).map(([k]) => k).join(', ')
-      })));
+      const dadosExportacao = comprasSemConsumoDataCompleta.map(i => ({
+        'Período': periodoTxtExport,
+        'Unidade': i.unidade,
+        'Código SKU': i.codigo,
+        'Nome do Produto': i.nome || '—',
+        'Atributos (Lentes)': Object.entries(i.flags).filter(([_, v]) => v).map(([k]) => k).join(', '),
+        'Qtde Comprada': i.qtdeComprada,
+        'Valor Comprado (R$)': i.comprado,
+        'Valor Consumido (R$)': i.consumido
+      }));
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Compras Sem Consumo");
-      XLSX.writeFile(wb, `Compras_Sem_Consumo_${periodoEfetivo.replace('/','-')}.xlsx`);
+      XLSX.writeFile(wb, `Compras_Sem_Consumo_${periodoTxtExport.replace('/','-')}.xlsx`);
       setExportando(false);
     }, 150);
-  }, [comprasSemConsumoDataCompleta, periodoEfetivo])
+  }, [comprasSemConsumoDataCompleta, periodoTxtExport])
 
   const exportarExcelParados = useCallback(() => {
     setExportando(true);
     setTimeout(() => {
-      const ws = XLSX.utils.json_to_sheet(itensParadosParaExportar);
+      const dadosExportacao = itensParadosParaExportar.map(i => ({
+        'Período': periodoTxtExport,
+        'Unidade': i.unidade,
+        'Código SKU': i.codigo,
+        'Nome do Produto': i.nome || '—',
+        'Quantidade': i.quantidade,
+        'Valor Parado (R$)': i.valor,
+        'Meses Parado': i.mesesParado
+      }));
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Materiais Parados");
-      XLSX.writeFile(wb, `Materiais_Parados_${periodoEfetivo.replace('/','-')}.xlsx`);
+      XLSX.writeFile(wb, `Materiais_Parados_${periodoTxtExport.replace('/','-')}.xlsx`);
       setExportando(false);
     }, 150);
-  }, [itensParadosParaExportar, periodoEfetivo])
+  }, [itensParadosParaExportar, periodoTxtExport])
 
   const exportarPowerPoint = useCallback(() => {
     setExportando(true);
-    // Simulação de geração de PPTX apenas para impedir travamento da interface.
-    // Você precisará adaptar a geração real do pptxgen aqui com sua base.
-    setTimeout(() => {
-      alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view.");
-      setExportando(false);
-    }, 1000);
+    setTimeout(() => { alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view."); setExportando(false); }, 1000);
   }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
-
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisGiroCobertura = useCallback((key) => setVisGiroCobertura((v) => ({ ...v, [key]: !v[key] })), [])
@@ -1025,6 +829,8 @@ export default function VisaoGeral({ data }) {
     return anns
   }, [timeSeriesAgg, vis, periodoEfetivo])
 
+  // Lógica matemática para as porcentagens no ranking por unidade
+  const sumRanking = useMemo(() => rankingUnidadeAtivo.reduce((acc, curr) => acc + curr.valor, 0), [rankingUnidadeAtivo])
   const maxValRanking = useMemo(() => Math.max(...rankingUnidadeAtivo.map((d) => d.valor), 1), [rankingUnidadeAtivo])
   
   const colorMapRanking = { total: '#f58220', operacional: '#3498db', critico: '#e74c3c', obsoleto: '#9b59b6', obra: '#1abc9c', insumo: '#f1c40f' };
@@ -1034,7 +840,7 @@ export default function VisaoGeral({ data }) {
     {
       type: 'bar', orientation: 'h',
       y: rankingUnidadeAtivo.map((d) => d.unidade),
-      x: rankingUnidadeAtivo.map(() => maxValRanking * 1.25),
+      x: rankingUnidadeAtivo.map(() => maxValRanking * 1.3),
       marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
       hoverinfo: 'none',
       showlegend: false
@@ -1048,8 +854,12 @@ export default function VisaoGeral({ data }) {
       text: rankingUnidadeAtivo.map((d) => {
         const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
         const rawText = fmtValorCurto(d.valor)
+        const pct = sumRanking > 0 ? ((d.valor / sumRanking) * 100).toFixed(1) : 0
         const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
-        return `<span style="color: ${textColor}; margin-left: 6px;">${rawText}</span>`
+        const badgeColor = isSelected ? activeRankColor : 'rgba(140, 155, 165, 0.3)'
+        
+        // Uso de spans e cor transparente (__) para simular margin em Plotly (que n suporta margin inline perfeito no SVG)
+        return `<span style="color: ${textColor};">${rawText}</span><span style="color: transparent;">__</span><span style="color: ${badgeColor}; font-size: 10px; font-weight: 800;">[ ${pct}% ]</span>`
       }),
       textfont: { size: 10, family: 'Inter', weight: 600 },
       marker: {
@@ -1059,7 +869,7 @@ export default function VisaoGeral({ data }) {
       },
       hoverinfo: 'none'
     }
-  ], [rankingUnidadeAtivo, selectedBarraRanking, maxValRanking, activeRankColor])
+  ], [rankingUnidadeAtivo, selectedBarraRanking, maxValRanking, activeRankColor, sumRanking])
 
   const makeInteractiveHBar = useCallback((items, color, selectedBar, fieldName) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
@@ -1434,7 +1244,7 @@ export default function VisaoGeral({ data }) {
           />
         </div>
 
-        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-2.5 px-4 mx-auto shadow-inner w-full">
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#111111]/60 border border-[#2A2A2A]/50 rounded-xl py-3 px-4 mx-auto shadow-inner w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-center sm:justify-start gap-2 w-full">
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -1444,12 +1254,16 @@ export default function VisaoGeral({ data }) {
             </div>
           </div>
           
+          {/* BOTÃO DE RESET SOFISTICADO */}
           <button
             onClick={() => dispatch({ type: 'RESET_FILTROS_GERAIS', payload: anoOpcoes[anoOpcoes.length - 1] })}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-[#222] text-[#8c9ba5] hover:text-white border border-[#333] hover:border-[#555] transition-all text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
+            className="group relative flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#f58220]/20 to-transparent hover:from-[#f58220]/30 border border-[#f58220]/30 hover:border-[#f58220] transition-all duration-300 overflow-hidden shadow-[0_0_10px_rgba(245,130,32,0.1)] hover:shadow-[0_0_20px_rgba(245,130,32,0.3)] whitespace-nowrap"
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-            Restaurar Filtro Padrão
+            <div className="absolute inset-0 bg-[#f58220]/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out"></div>
+            <svg className="w-3.5 h-3.5 text-[#f58220] relative z-10 group-hover:-rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-white relative z-10">Restaurar Padrão</span>
           </button>
         </div>
 
@@ -1526,7 +1340,10 @@ export default function VisaoGeral({ data }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} variant="default" />
-          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
+          
+          {/* CARD SKUs COM TAMANHO GIGANTE */}
+          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-3xl lg:text-4xl text-white font-black drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] tracking-tight" alignCenter={true} invertColor={true} variant="default" />
+          
           <ExecutiveCard cardKey="giro" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} iconBg="bg-[#1c1c1c]" title="GIRO" value={""} valueAtual={giroMensal} valueAnterior={giroMensalPrev} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1">
               <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center transition-colors shadow-inner">
@@ -1557,7 +1374,7 @@ export default function VisaoGeral({ data }) {
       {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         
-        {/* GRÁFICO PRINCIPAL DE ESTOQUE */}
+        {/* GRÁFICO PRINCIPAL DE ESTOQUE (AGORA COM PORCENTAGENS) */}
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1611,7 +1428,7 @@ export default function VisaoGeral({ data }) {
                 bargap: 0.4,
                 height: Math.max(300, rankingUnidadeAtivo.length * 32),
                 margin: { l: 115, r: 90, t: 10, b: 10 },
-                xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValRanking * 1.25] },
+                xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValRanking * 1.3] },
                 yaxis: {
                   showgrid: true, gridcolor: '#4A4A4A', tickson: 'boundaries', tickmode: 'array', tickvals: rankingUnidadeAtivo.map((d) => d.unidade),
                   ticktext: rankingUnidadeAtivo.map((d) => {
