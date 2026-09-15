@@ -668,6 +668,37 @@ export default function VisaoGeral({ data }) {
 
   const { dados: itensParadosFS, total: itensParadosFSTotal, unidadesOpcoes: unidadesFSParados } = useMemo(() => filtrarListaFS(itensParadosPreFS, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey])
 
+  // ==================== FUNÇÃO DE RESET GLOBAL ====================
+
+  const handleResetFiltros = useCallback(() => {
+    // 1. Zera todos os seletores múltiplos na barra superior
+    dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: [] });
+    dispatch({ type: 'SET_ESCOPOS', payload: [] });
+    dispatch({ type: 'SET_UNIDADES', payload: [] });
+    
+    // 2. Reseta o Ano para o último ano válido
+    if (anoOpcoes && anoOpcoes.length > 0) {
+      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] });
+    } else {
+      dispatch({ type: 'SET_ANOS', payload: [] });
+    }
+    
+    // 3. Limpa qualquer foco em barras nos gráficos ou período específico selecionado
+    dispatch({ type: 'SET_PERIODO_ATIVO', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCompraConsumo', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraVariacao', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'filtroMesParado', payload: null });
+
+    // 4. Volta a linha mestre para mostrar apenas o "Estoque Total"
+    setVis({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false });
+  }, [dispatch, anoOpcoes]);
+
   // ==================== EXPORTAÇÕES COMPLETAS ====================
   
   const periodoTxtExport = formatarPeriodoTexto(periodoEfetivo);
@@ -858,7 +889,6 @@ export default function VisaoGeral({ data }) {
         const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
         const badgeColor = isSelected ? activeRankColor : 'rgba(140, 155, 165, 0.3)'
         
-        // Uso de spans e cor transparente (__) para simular margin em Plotly (que n suporta margin inline perfeito no SVG)
         return `<span style="color: ${textColor};">${rawText}</span><span style="color: transparent;">__</span><span style="color: ${badgeColor}; font-size: 10px; font-weight: 800;">[ ${pct}% ]</span>`
       }),
       textfont: { size: 10, family: 'Inter', weight: 600 },
@@ -1254,9 +1284,9 @@ export default function VisaoGeral({ data }) {
             </div>
           </div>
           
-          {/* BOTÃO DE RESET SOFISTICADO */}
+          {/* BOTÃO DE RESET (AGORA ACIONANDO O RESET MANUAL SEGURO) */}
           <button
-            onClick={() => dispatch({ type: 'RESET_FILTROS_GERAIS', payload: anoOpcoes[anoOpcoes.length - 1] })}
+            onClick={handleResetFiltros}
             className="group relative flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#f58220]/20 to-transparent hover:from-[#f58220]/30 border border-[#f58220]/30 hover:border-[#f58220] transition-all duration-300 overflow-hidden shadow-[0_0_10px_rgba(245,130,32,0.1)] hover:shadow-[0_0_20px_rgba(245,130,32,0.3)] whitespace-nowrap"
           >
             <div className="absolute inset-0 bg-[#f58220]/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out"></div>
@@ -1341,8 +1371,8 @@ export default function VisaoGeral({ data }) {
           <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} variant="default" />
           
-          {/* CARD SKUs COM TAMANHO GIGANTE */}
-          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-3xl lg:text-4xl text-white font-black drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] tracking-tight" alignCenter={true} invertColor={true} variant="default" />
+          {/* CARD SKUs COM TAMANHO AJUSTADO (2 graus acima dos outros) */}
+          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-2xl lg:text-3xl text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] tracking-tight" alignCenter={true} invertColor={true} variant="default" />
           
           <ExecutiveCard cardKey="giro" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} iconBg="bg-[#1c1c1c]" title="GIRO" value={""} valueAtual={giroMensal} valueAnterior={giroMensalPrev} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1">
@@ -1374,7 +1404,7 @@ export default function VisaoGeral({ data }) {
       {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
         
-        {/* GRÁFICO PRINCIPAL DE ESTOQUE (AGORA COM PORCENTAGENS) */}
+        {/* GRÁFICO PRINCIPAL DE ESTOQUE */}
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1883,7 +1913,7 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- EVOLUÇÃO SKUs --- */}
+      {/* --- EVOLUÇÃO SKUs (HITBOX CORRIGIDA) --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2.5">
@@ -1903,33 +1933,45 @@ export default function VisaoGeral({ data }) {
               <span>SKUs Duplicados</span>
             </button>
           </div>
-
         </div>
 
         <Plot
-          data={[{
-            x: timeSeriesAgg.skus.map((d) => d.periodo),
-            y: timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total),
-            type: 'scatter',
-            mode: 'lines+markers+text',
-            text: timeSeriesAgg.skus.map((d) => fmtInt(abaSkus === 'duplicados' ? d.duplicados : d.total)),
-            textposition: 'top center',
-            textfont: { color: 'white', size: 11, family: 'Inter' },
-            line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 },
-            marker: { 
-              size: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-              color: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? (abaSkus === 'duplicados' ? '#f1c40f' : '#3498db') : '#080808'), 
-              line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } 
+          data={[
+            {
+              x: timeSeriesAgg.skus.map((d) => d.periodo),
+              y: timeSeriesAgg.skus.map(() => (Math.max(...timeSeriesAgg.skus.map(s => abaSkus === 'duplicados' ? s.duplicados : s.total), 10) || 10) * 1.3),
+              type: 'bar',
+              name: 'clickArea',
+              marker: { color: 'rgba(52, 152, 219, 0.02)' },
+              hoverinfo: 'none',
+              showlegend: false,
+              cliponaxis: false
             },
-            fill: 'tozeroy',
-            fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] },
-            fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)',
-            hoverinfo: 'none',
-            cliponaxis: false
-          }]}
+            {
+              x: timeSeriesAgg.skus.map((d) => d.periodo),
+              y: timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total),
+              type: 'scatter',
+              mode: 'lines+markers+text',
+              text: timeSeriesAgg.skus.map((d) => fmtInt(abaSkus === 'duplicados' ? d.duplicados : d.total)),
+              textposition: 'top center',
+              textfont: { color: 'white', size: 11, family: 'Inter' },
+              line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 },
+              marker: { 
+                size: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
+                color: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? (abaSkus === 'duplicados' ? '#f1c40f' : '#3498db') : '#080808'), 
+                line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } 
+              },
+              fill: 'tozeroy',
+              fillgradient: { type: 'vertical', colorscale: [['0', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.35)' : 'rgba(52,152,219,0.35)'], ['1', abaSkus === 'duplicados' ? 'rgba(241,196,15,0.0)' : 'rgba(52,152,219,0.0)']] },
+              fillcolor: abaSkus === 'duplicados' ? 'rgba(241,196,15,0.15)' : 'rgba(52,152,219,0.15)',
+              hoverinfo: 'none',
+              cliponaxis: false
+            }
+          ]}
           layout={{
             ...PLOT_LAYOUT,
             height: 330,
+            bargap: 0,
             margin: { l: 30, r: 20, t: 40, b: 40 },
             shapes: chartShapesSkus,
             xaxis: { 
