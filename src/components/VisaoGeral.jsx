@@ -637,7 +637,6 @@ export default function VisaoGeral({ data }) {
       maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev])
-
   const rankingUnidadeAtivo = useMemo(() => {
     switch(abaRankingUnidade) {
       case 'operacional': return rankOperacional || [];
@@ -845,7 +844,7 @@ export default function VisaoGeral({ data }) {
       }
     }
     
-    return result.sort((a, b) => b.valor - a.valor) // Lista pura (sem filtros da gaveta)
+    return result.sort((a, b) => b.valor - a.valor)
   }, [dfFiltrado, periodoEfetivo])
 
   const mesesParadosOpcoes = useMemo(() => [...new Set(itensParados.map(i => i.mesesParado))].sort((a, b) => a - b).map(String), [itensParados])
@@ -861,7 +860,6 @@ export default function VisaoGeral({ data }) {
     return [...map.values()].sort((a, b) => a.meses - b.meses)
   }, [itensParados])
 
-  // Lógica de filtro temporário apenas para o GRÁFICO e GAVETA (Se clicou no gráfico)
   const itensParadosParaExportar = useMemo(() => {
     let lista = itensParados
     if (filtroMesParado) {
@@ -870,24 +868,17 @@ export default function VisaoGeral({ data }) {
     return [...lista]
   }, [itensParados, filtroMesParado])
 
-  // Tabela que abre em linha (Gaveta) SEMPRE EXIBE A LISTA LIMPA OU O FILTRO DO GRÁFICO (Sem herdar filtros antigos)
   const itensParadosGaveta = useMemo(() => itensParadosParaExportar.slice(0, 50), [itensParadosParaExportar])
 
-  // Base para o FullScreen (Recebe o Filtro de Meses FullScreen exclusivo)
   const itensParadosPreFS = useMemo(() => {
     let lista = itensParados
-    
-    // 1. Se clicou no gráfico da dashboard, respeita esse filtro na FS
     if (filtroMesParado) {
       lista = lista.filter(item => item.mesesParado === filtroMesParado)
     }
-    
-    // 2. Se usou o select de múltiplos meses no modo Tela Cheia, aplica também
     if (filtroMesParadoFS && filtroMesParadoFS.length > 0) {
       const setM = new Set(filtroMesParadoFS.map(String));
       lista = lista.filter(item => setM.has(String(item.mesesParado)));
     }
-    
     return lista;
   }, [itensParados, filtroMesParado, filtroMesParadoFS]);
 
@@ -906,12 +897,62 @@ export default function VisaoGeral({ data }) {
   )
 
   // ==================== EXPORTAÇÕES COMPLETAS ====================
-  // (Funções de Exportação Excel omitidas por brevidade, permanecem inalteradas)
-  const exportarExcelMaioresValores = useCallback(() => { /* ... */ }, [maioresValoresDataCompleta, periodoEfetivo])
-  const exportarExcelDuplicados = useCallback(() => { /* ... */ }, [duplicadosDataCompleta, periodoEfetivo])
-  const exportarExcelComprasSemConsumo = useCallback(() => { /* ... */ }, [comprasSemConsumoDataCompleta, periodoEfetivo])
-  const exportarExcelParados = useCallback(() => { /* ... */ }, [itensParadosParaExportar, periodoEfetivo])
-  const exportarPowerPoint = useCallback(() => { /* ... */ }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
+  const exportarExcelMaioresValores = useCallback(() => {
+    setExportando(true);
+    setTimeout(() => {
+      const ws = XLSX.utils.json_to_sheet(maioresValoresDataCompleta);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Maiores Valores");
+      XLSX.writeFile(wb, `Maiores_Valores_Estoque_${periodoEfetivo.replace('/','-')}.xlsx`);
+      setExportando(false);
+    }, 150);
+  }, [maioresValoresDataCompleta, periodoEfetivo])
+
+  const exportarExcelDuplicados = useCallback(() => {
+    setExportando(true);
+    setTimeout(() => {
+      const ws = XLSX.utils.json_to_sheet(duplicadosDataCompleta);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Duplicados");
+      XLSX.writeFile(wb, `Cadastros_Duplicados_${periodoEfetivo.replace('/','-')}.xlsx`);
+      setExportando(false);
+    }, 150);
+  }, [duplicadosDataCompleta, periodoEfetivo])
+
+  const exportarExcelComprasSemConsumo = useCallback(() => {
+    setExportando(true);
+    setTimeout(() => {
+      const ws = XLSX.utils.json_to_sheet(comprasSemConsumoDataCompleta.map(i => ({
+        ...i,
+        flags: Object.entries(i.flags).filter(([_, v]) => v).map(([k]) => k).join(', ')
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Compras Sem Consumo");
+      XLSX.writeFile(wb, `Compras_Sem_Consumo_${periodoEfetivo.replace('/','-')}.xlsx`);
+      setExportando(false);
+    }, 150);
+  }, [comprasSemConsumoDataCompleta, periodoEfetivo])
+
+  const exportarExcelParados = useCallback(() => {
+    setExportando(true);
+    setTimeout(() => {
+      const ws = XLSX.utils.json_to_sheet(itensParadosParaExportar);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Materiais Parados");
+      XLSX.writeFile(wb, `Materiais_Parados_${periodoEfetivo.replace('/','-')}.xlsx`);
+      setExportando(false);
+    }, 150);
+  }, [itensParadosParaExportar, periodoEfetivo])
+
+  const exportarPowerPoint = useCallback(() => {
+    setExportando(true);
+    // Simulação de geração de PPTX apenas para impedir travamento da interface.
+    // Você precisará adaptar a geração real do pptxgen aqui com sua base.
+    setTimeout(() => {
+      alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view.");
+      setExportando(false);
+    }, 1000);
+  }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
 
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
@@ -1159,7 +1200,7 @@ export default function VisaoGeral({ data }) {
     obra: 'bg-[#1abc9c]/20 text-[#1abc9c] border-[#1abc9c]/50 shadow-[0_0_10px_rgba(26,188,156,0.15)]',
     insumo: 'bg-[#f1c40f]/20 text-[#f1c40f] border-[#f1c40f]/50 shadow-[0_0_10px_rgba(241,196,15,0.15)]'
   };
-  // --- INÍCIO DA PARTE 2 (Retorno JSX) ---
+
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       <style>{`
@@ -2315,7 +2356,7 @@ export default function VisaoGeral({ data }) {
                       >
                         <svg className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                         <span>Expandir Tabela</span>
-                      </button>             
+                      </button>              
                     </div>
                   </div>
                   <div className="max-h-[600px] overflow-y-auto custom-scrollbar border border-[#2A2A2A] rounded-xl bg-[#121212]">
