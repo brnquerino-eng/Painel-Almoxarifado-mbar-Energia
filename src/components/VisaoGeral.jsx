@@ -1162,7 +1162,14 @@ export default function VisaoGeral({ data }) {
   // --- INÍCIO DA PARTE 2 (Retorno JSX) ---
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
-      <style>{`.js-plotly-plot .plotly .cursor-crosshair { cursor: pointer !important; }`}</style>
+      <style>{`
+        .js-plotly-plot .plotly .cursor-crosshair { cursor: pointer !important; }
+        /* Remove a linha de foco (outline) padrão do navegador ao navegar pelo teclado */
+        div:focus, table:focus, tbody:focus, tr:focus, td:focus, [role="button"]:focus { 
+          outline: none !important; 
+          box-shadow: none !important;
+        }
+      `}</style>
 
       {/* --- CABEÇALHO GLOBAL --- */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 mt-2 px-1">
