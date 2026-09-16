@@ -335,15 +335,112 @@ export default function VisaoGeral({ data }) {
 
   const periodoEfetivo = periodoAtivo || periodoMaximo
 
-  const { snapshot, snapshotPrev } = useMemo(() => {
+  // Lista de meses {ano, mes} que pertencem ao período selecionado (para soma de fluxos / distinct / giro)
+  const periodMonths = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
-    if (!p || !dfFiltrado.length) return { snapshot: [], snapshotPrev: [] }
+    if (!p) return []
+
+    // Descobre o range real de dados filtrados (não inventa futuro)
+    let maxAno = 0, maxMes = 0, minAno = 9999, minMes = 13
+    for (const r of dfFiltrado) {
+      if (!r.tmp_ano_num || !r.tmp_mes_num) continue
+      if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
+        maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
+      }
+      if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
+        minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
+      }
+    }
+    if (!maxAno) return [{ ano: p.ano, mes: p.mes }]
+
+    const maxIdx = maxAno * 12 + maxMes
+    const minIdx = minAno * 12 + minMes
+
+    let startMes, startAno, endMes, endAno
+
+    if (granularidade === 'trimestre') {
+      const tri = Math.ceil(p.mes / 3)
+      startMes = (tri - 1) * 3 + 1
+      startAno = p.ano
+      endMes = tri * 3
+      endAno = p.ano
+    } else if (granularidade === 'semestre') {
+      const sem = p.mes <= 6 ? 1 : 2
+      startMes = sem === 1 ? 1 : 7
+      startAno = p.ano
+      endMes = sem === 1 ? 6 : 12
+      endAno = p.ano
+    } else if (granularidade === 'anual') {
+      startMes = 1
+      startAno = p.ano
+      endMes = 12
+      endAno = p.ano
+    } else {
+      // mensal
+      return [{ ano: p.ano, mes: p.mes }]
+    }
+
+    // Clip ao range real de dados (não inventa meses futuros nem anteriores à base)
+    let startIdx = startAno * 12 + startMes
+    let endIdx = endAno * 12 + endMes
+    startIdx = Math.max(startIdx, minIdx)
+    endIdx = Math.min(endIdx, maxIdx)
+
+    const months = []
+    for (let idx = startIdx; idx <= endIdx; idx++) {
+      const ano = Math.floor((idx - 1) / 12)
+      const mes = ((idx - 1) % 12) + 1
+      months.push({ ano, mes })
+    }
+    return months.length ? months : [{ ano: p.ano, mes: p.mes }]
+  }, [periodoEfetivo, granularidade, dfFiltrado])
+
+  // snapshot = fechamento (último mês do período) → estoques, rankings de saldo, maiores valores, parados
+  // snapshotPeriodo = todos os meses do período → compras, consumo, SKUs, compras sem consumo
+  // snapshotPrev = fechamento do período anterior (para variação de estoque)
+  const { snapshot, snapshotPeriodo, snapshotPrev } = useMemo(() => {
+    const p = parsePeriodo(periodoEfetivo)
+    if (!p || !dfFiltrado.length) return { snapshot: [], snapshotPeriodo: [], snapshotPrev: [] }
+
     const snap = dfFiltrado.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes)
-    let mPrev = p.mes - 1, aPrev = p.ano
-    if (mPrev === 0) { mPrev = 12; aPrev -= 1 }
-    const snapPrev = dfFiltrado.filter((r) => r.tmp_ano_num === aPrev && r.tmp_mes_num === mPrev)
-    return { snapshot: snap, snapshotPrev: snapPrev }
-  }, [dfFiltrado, periodoEfetivo])
+
+    const monthSet = new Set(periodMonths.map(m => `${m.ano}-${m.mes}`))
+    const snapPeriodo = periodMonths.length > 1
+      ? dfFiltrado.filter((r) => monthSet.has(`${r.tmp_ano_num}-${r.tmp_mes_num}`))
+      : snap
+
+    // Período anterior (mesmo tamanho, imediatamente antes)
+    let prevMonths = []
+    if (granularidade === 'mensal') {
+      let mPrev = p.mes - 1, aPrev = p.ano
+      if (mPrev === 0) { mPrev = 12; aPrev -= 1 }
+      prevMonths = [{ ano: aPrev, mes: mPrev }]
+    } else if (granularidade === 'trimestre') {
+      const tri = Math.ceil(p.mes / 3)
+      let prevTri = tri - 1, prevAno = p.ano
+      if (prevTri === 0) { prevTri = 4; prevAno -= 1 }
+      const startM = (prevTri - 1) * 3 + 1
+      for (let m = startM; m <= startM + 2; m++) prevMonths.push({ ano: prevAno, mes: m })
+    } else if (granularidade === 'semestre') {
+      const sem = p.mes <= 6 ? 1 : 2
+      if (sem === 2) {
+        for (let m = 1; m <= 6; m++) prevMonths.push({ ano: p.ano, mes: m })
+      } else {
+        for (let m = 7; m <= 12; m++) prevMonths.push({ ano: p.ano - 1, mes: m })
+      }
+    } else {
+      // anual
+      for (let m = 1; m <= 12; m++) prevMonths.push({ ano: p.ano - 1, mes: m })
+    }
+
+    // Fechamento do período anterior = último mês do prevMonths
+    const lastPrev = prevMonths[prevMonths.length - 1]
+    const snapPrev = lastPrev
+      ? dfFiltrado.filter((r) => r.tmp_ano_num === lastPrev.ano && r.tmp_mes_num === lastPrev.mes)
+      : []
+
+    return { snapshot: snap, snapshotPeriodo: snapPeriodo, snapshotPrev: snapPrev }
+  }, [dfFiltrado, periodoEfetivo, periodMonths, granularidade])
 
   useEffect(() => {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
@@ -361,7 +458,7 @@ export default function VisaoGeral({ data }) {
       compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
-    if (!snapshot.length && !snapshotPrev.length) return empty
+    if (!snapshot.length && !snapshotPrev.length && !(snapshotPeriodo && snapshotPeriodo.length)) return empty
 
     const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map(), mapObs = new Map(), mapObra = new Map(), mapOp = new Map(), mapInsumo = new Map()
     const mapCC = new Map(), mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map(), mapSkuAggComprasSemConsumo = new Map()
@@ -369,16 +466,15 @@ export default function VisaoGeral({ data }) {
     let valEstoque = 0, valCompras = 0, valConsumo = 0, valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
     const skusSet = new Set(), maiores = [], comprasSem = []
 
+    // ========== ESTOQUES (fechamento = snapshot) ==========
     for (const r of snapshot) {
       const u = r.unidade_almoxarifado 
       const val = parseNumber(r.valor_saldo_atual)
-      const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = parseNumber(r.valor_saida_cons_interno)
       const qtdAtual = parseNumber(r.qtde_saldo_atual)
-      const qtdEntrada = parseNumber(r.qtde_entrada_compras) 
+      const precoMedioBase = parseNumber(r.preco_medio)
+      const geBase = r.ge || '—'
       
-      valEstoque += val; valCompras += valEntrada; valConsumo += Math.abs(valSaida)
-
+      valEstoque += val
       if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
       if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
       if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
@@ -386,14 +482,40 @@ export default function VisaoGeral({ data }) {
       if (r._isInsumo) { if (u) mapInsumo.set(u, (mapInsumo.get(u) || 0) + val); valInsumo += val }
       if (r._isOperacional) { if (u) mapOp.set(u, (mapOp.get(u) || 0) + val); valOp += val }
 
+      if (val > 0) {
+        maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, ge: geBase, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: qtdAtual, precoMedio: precoMedioBase, itemCritico: r._isCritico ? 'Sim' : 'Não', valor: val })
+      }
+
+      // Duplicados no fechamento
+      if (r.nome_produto && u) {
+        const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
+        if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
+        const item = mapChaves.get(chaveGerada)
+        if (r.codigo_produto) {
+          item.skus.add(r.codigo_produto)
+          if (!item.skusMap.has(r.codigo_produto)) item.skusMap.set(r.codigo_produto, precoMedioBase)
+        }
+        item.unidades.add(u); item.quantidade += qtdAtual; item.valor += val
+      }
+    }
+
+    // ========== FLUXOS (compras/consumo/SKUs) = soma/distinct no período inteiro ==========
+    const fonteFluxos = (snapshotPeriodo && snapshotPeriodo.length) ? snapshotPeriodo : snapshot
+    for (const r of fonteFluxos) {
+      const u = r.unidade_almoxarifado 
+      const valEntrada = parseNumber(r.valor_entrada_compras)
+      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      const qtdAtual = parseNumber(r.qtde_saldo_atual)
+      const qtdEntrada = parseNumber(r.qtde_entrada_compras) 
+      
+      valCompras += valEntrada
+      valConsumo += Math.abs(valSaida)
+
       if (u) {
         if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
         mapCC.get(u).compras += valEntrada
         mapCC.get(u).consumo += Math.abs(valSaida)
       }
-
-      const precoMedioBase = parseNumber(r.preco_medio)
-      const geBase = r.ge || '—'
 
       if (qtdAtual > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
@@ -409,27 +531,12 @@ export default function VisaoGeral({ data }) {
           }
         }
       }
-
-      if (val > 0) {
-        maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, ge: geBase, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: qtdAtual, precoMedio: precoMedioBase, itemCritico: r._isCritico ? 'Sim' : 'Não', valor: val })
-      }
       
       if (valEntrada > 0 || Math.abs(valSaida) > 0) {
         const skuKey = `${u}-${r.codigo_produto}`
         if (!mapSkuAggComprasSemConsumo.has(skuKey)) mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0, qtdeComprada: 0 })
         const item = mapSkuAggComprasSemConsumo.get(skuKey)
         item.entrada += valEntrada; item.saida += Math.abs(valSaida); item.qtdeComprada += qtdEntrada
-      }
-
-      if (r.nome_produto && u) {
-        const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
-        if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
-        const item = mapChaves.get(chaveGerada)
-        if (r.codigo_produto) {
-          item.skus.add(r.codigo_produto)
-          if (!item.skusMap.has(r.codigo_produto)) item.skusMap.set(r.codigo_produto, precoMedioBase)
-        }
-        item.unidades.add(u); item.quantidade += qtdAtual; item.valor += val
       }
     }
 
@@ -502,7 +609,7 @@ export default function VisaoGeral({ data }) {
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
       variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01), skusUnidade: skusUnidadeArr, exposicaoCategorias: exposicao, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
-  }, [snapshot, snapshotPrev])
+  }, [snapshot, snapshotPrev, snapshotPeriodo])
 
   const rankingUnidadeAtivo = useMemo(() => {
     switch(abaRankingUnidade) {
@@ -590,6 +697,32 @@ export default function VisaoGeral({ data }) {
           if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
           item.chavesMap.get(chave).add(r.codigo_produto)
         }
+      }
+    }
+
+    // Preenche meses sem dado com zero (do primeiro ao último mês existente na base filtrada — sem inventar futuro)
+    if (monthlyMap.size > 0) {
+      const keys = [...monthlyMap.keys()].sort()
+      const firstKey = keys[0]
+      const lastKey = keys[keys.length - 1]
+      const [fAno, fMes] = firstKey.split('-').map(Number)
+      const [lAno, lMes] = lastKey.split('-').map(Number)
+      let a = fAno, m = fMes
+      while (a < lAno || (a === lAno && m <= lMes)) {
+        const key = `${a}-${String(m).padStart(2, '0')}`
+        if (!monthlyMap.has(key)) {
+          monthlyMap.set(key, {
+            periodo: periodoLabel(m, a),
+            ano: a,
+            mes: m,
+            sortKey: key,
+            total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
+            compras: 0, consumo: 0, comprasSemConsumo: 0,
+            skus: new Set(), chavesMap: new Map(),
+          })
+        }
+        m += 1
+        if (m > 12) { m = 1; a += 1 }
       }
     }
 
@@ -701,6 +834,14 @@ export default function VisaoGeral({ data }) {
     return buildReturn(sorted)
   }, [dfFiltrado, granularidade])
 
+  // Label de exibição (T3/26, S2/26, 2026 ou AGO/26) — o que o usuário vê no banner
+  const periodoDisplay = useMemo(() => {
+    const series = timeSeriesAgg?.total || []
+    const point = series.find(d => d.closingPeriodo === periodoEfetivo || d.periodo === periodoEfetivo)
+    if (point?.periodo) return point.periodo
+    return formatarPeriodoTexto(periodoEfetivo)
+  }, [timeSeriesAgg, periodoEfetivo])
+
   const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
     const empty = { giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0, giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: [] }
     if (!dfFiltrado.length) return empty
@@ -719,22 +860,40 @@ export default function VisaoGeral({ data }) {
     let accEst = 0, accCon = 0
     const giroCoberturaTempo = monthly.map((row, i) => { accEst += row.estoque_op; accCon += row.consumo_op; const n = i + 1; const estMed = accEst / n; const conMed = accCon / n; return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 } })
 
-    const subAtual = monthly.filter((m) => m.ano === p.ano && m.mes <= p.mes && m.estoque_op > 0)
+    // KPIs de Giro/Cobertura recalculados para o PERÍODO selecionado (periodMonths)
+    // Giro = Consumo do período / Estoque Médio do período
+    // Cobertura = Estoque Médio / Consumo Médio
+    const monthKeySet = new Set((periodMonths || []).map(m => `${m.ano}-${m.mes}`))
+    const subAtual = monthly.filter((m) => monthKeySet.has(`${m.ano}-${m.mes}`) && m.estoque_op > 0)
     let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
     if (subAtual.length) {
-      const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length, conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
-      if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }; if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
+      const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
+      const conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
+      if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }
+      if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
     }
 
-    const mTetoPrev = p.mes > 1 ? p.mes - 1 : 12, anoPrev = p.mes > 1 ? p.ano : p.ano - 1
-    const subPrev = monthly.filter((m) => m.ano === anoPrev && m.mes <= mTetoPrev && m.estoque_op > 0)
+    // Período anterior (mesmo número de meses, imediatamente antes)
     let giroMensalPrev = 0, coberturaMesesPrev = 0
-    if (subPrev.length) {
-      const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length, conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
-      if (estMedP > 0) giroMensalPrev = conMedP / estMedP; if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
+    if (periodMonths && periodMonths.length) {
+      const first = periodMonths[0]
+      const n = periodMonths.length
+      const firstIdx = first.ano * 12 + first.mes
+      const prevEndIdx = firstIdx - 1
+      const prevStartIdx = prevEndIdx - n + 1
+      const subPrev = monthly.filter((m) => {
+        const idx = m.ano * 12 + m.mes
+        return idx >= prevStartIdx && idx <= prevEndIdx && m.estoque_op > 0
+      })
+      if (subPrev.length) {
+        const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length
+        const conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
+        if (estMedP > 0) giroMensalPrev = conMedP / estMedP
+        if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
+      }
     }
     return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
-  }, [dfFiltrado, periodoEfetivo])
+  }, [dfFiltrado, periodoEfetivo, periodMonths])
 
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
@@ -825,7 +984,7 @@ export default function VisaoGeral({ data }) {
     setVis({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false });
   }, [dispatch, anoOpcoes]);
 
-  const periodoTxtExport = formatarPeriodoTexto(periodoEfetivo);
+  const periodoTxtExport = (periodoDisplay || formatarPeriodoTexto(periodoEfetivo)).replace(/\//g, "-");
 
   const exportarExcelMaioresValores = useCallback(() => {
     setExportando(true);
@@ -1449,7 +1608,7 @@ export default function VisaoGeral({ data }) {
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-accent shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               <span className="text-[11px] text-[#8c9ba5] tracking-wide font-medium">
-                Visualizando período: <strong className="text-white text-xs px-1.5 py-0.5 rounded bg-[#222] border border-[#333] ml-0.5">{formatarPeriodoTexto(periodoEfetivo)}</strong>
+                Visualizando período: <strong className="text-white text-xs px-1.5 py-0.5 rounded bg-[#222] border border-[#333] ml-0.5">{periodoDisplay}</strong>
               </span>
             </div>
           </div>
@@ -1482,7 +1641,7 @@ export default function VisaoGeral({ data }) {
               </div>
               <div>
                 <span className="text-xs font-bold text-white uppercase tracking-wider block">{listaMaioresValoresAberta ? 'Fechar Maiores Valores de Estoque' : 'Ver Maiores Valores de Estoque'}</span>
-                <span className="text-[10px] text-muted font-medium mt-0.5 block">Top SKUs por capital na composição atual (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
+                <span className="text-[10px] text-muted font-medium mt-0.5 block">Top SKUs por capital na composição atual (Snapshot: {periodoDisplay})</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -1823,7 +1982,7 @@ export default function VisaoGeral({ data }) {
               <div className="w-6 h-6 rounded-md bg-[#261010] flex items-center justify-center text-[#e74c3c] shadow-inner shrink-0 border border-[#e74c3c]/30">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
               </div>
-              <div><span className="text-xs font-bold text-[#e74c3c] uppercase tracking-wider block">{listaComprasSemConsumoAberta ? 'Fechar Lista de Compras sem Consumo' : 'Alerta: Compras realizadas com Baixo Consumo'}</span><span className="text-[10px] text-muted font-medium mt-0.5 block">Itens comprados no mês que tiveram pouca ou nenhuma saída registrada na unidade (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span></div>
+              <div><span className="text-xs font-bold text-[#e74c3c] uppercase tracking-wider block">{listaComprasSemConsumoAberta ? 'Fechar Lista de Compras sem Consumo' : 'Alerta: Compras realizadas com Baixo Consumo'}</span><span className="text-[10px] text-muted font-medium mt-0.5 block">Itens com compra e baixo consumo no período (Snapshot: {periodoDisplay})</span></div>
             </div>
             <div className="flex items-center gap-3">
               <span className="hidden sm:inline-block text-[10px] bg-[#e74c3c]/15 text-[#e74c3c] px-2 py-0.5 rounded font-mono border border-[#e74c3c]/30 font-bold">Total: {Number(comprasSemConsumoDataCompleta.length).toLocaleString('pt-BR')}</span>
@@ -2172,7 +2331,7 @@ export default function VisaoGeral({ data }) {
               </div>
               <div>
                 <span className="text-xs font-bold text-[#f1c40f] uppercase tracking-wider block">{listaDuplicadosAberta ? 'Fechar Lista de Duplicados' : 'Alerta: Cadastros Duplicados (Mesmo Nome, SKUs Diferentes)'}</span>
-                <span className="text-[10px] text-muted font-medium mt-0.5 block">Identifica produtos com o mesmo padrão descritivo (ignora pontuação) sob múltiplos códigos (Snapshot: {formatarPeriodoTexto(periodoEfetivo)})</span>
+                <span className="text-[10px] text-muted font-medium mt-0.5 block">Identifica produtos com o mesmo padrão descritivo (ignora pontuação) sob múltiplos códigos (Snapshot: {periodoDisplay})</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
