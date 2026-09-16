@@ -2268,7 +2268,7 @@ export default function VisaoGeral({ data }) {
           data={[
             {
               x: timeSeriesAgg.skus.map((d) => d.periodo),
-              y: timeSeriesAgg.skus.map(() => (Math.max(...timeSeriesAgg.skus.map(s => abaSkus === 'duplicados' ? s.duplicados : s.total), 10) || 10) * 1.3),
+              y: timeSeriesAgg.skus.map(() => (Math.max(...timeSeriesAgg.skus.map(s => abaSkus === 'duplicados' ? s.duplicados : s.total), 10) || 10) * 1.38),
               type: 'bar',
               name: 'clickArea',
               marker: { color: 'rgba(52, 152, 219, 0.02)' },
@@ -2301,7 +2301,7 @@ export default function VisaoGeral({ data }) {
             ...PLOT_LAYOUT,
             height: 330,
             bargap: 0,
-            margin: { l: 30, r: 20, t: 40, b: 40 },
+            margin: { l: 30, r: 20, t: 55, b: 40 },
             shapes: chartShapesSkus,
             xaxis: { 
               showgrid: false, 
@@ -2313,15 +2313,24 @@ export default function VisaoGeral({ data }) {
                 const label = d.periodo
                 return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
               }), 
-              tickpad: 12, 
+              tickpad: 4, 
               automargin: true, 
               range: [-0.6, Math.max(timeSeriesAgg.skus.length - 0.4, 1)] 
             },
-            yaxis: { showgrid: true, gridcolor: '#2A2A2A', zeroline: false, showticklabels: false, range: [0, (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.25] }
+            yaxis: { 
+              showgrid: true, 
+              gridcolor: '#222222', 
+              zeroline: true, 
+              zerolinecolor: '#777777', 
+              showticklabels: false, 
+              range: [
+                -((Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 0.15), 
+                (Math.max(...timeSeriesAgg.skus.map((d) => abaSkus === 'duplicados' ? d.duplicados : d.total), 10) || 10) * 1.38
+              ] 
+            }
           }}
           config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 300, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
         />
-
         {/* TABELA GAVETA 3: CADASTROS DUPLICADOS */}
         <div className="mt-5 border border-[#f1c40f]/30 rounded-xl bg-[#0c0c0c] overflow-hidden shadow-inner">
           <div 
