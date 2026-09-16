@@ -204,7 +204,8 @@ export default function VisaoGeral({ data }) {
     listaAberta, tabelaExpandida,
     listaMaioresValoresAberta, tabelaMaioresValoresExpandida,
     listaComprasSemConsumoAberta, tabelaComprasSemConsumoExpandida,
-    listaDuplicadosAberta, tabelaDuplicadosExpandida
+    listaDuplicadosAberta, tabelaDuplicadosExpandida,
+    granularidade = 'mensal'
   } = state
 
   const abaCompraConsumo = state.abaCompraConsumo || 'comparativo'
@@ -349,7 +350,6 @@ export default function VisaoGeral({ data }) {
     const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
     return () => { cancelAnimationFrame(id); clearTimeout(t) }
   }, [snapshot.length, periodoEfetivo, dfFiltrado.length, abaCompraConsumo, abaRankingUnidade])
-
   const {
     metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra, rankOperacional, rankInsumo,
     compraConsumoUnidade, variacaoUnidade, skusUnidade, exposicaoCategorias,
@@ -519,10 +519,6 @@ export default function VisaoGeral({ data }) {
 
   const skusUnidadeFiltrado = useMemo(() => skusUnidade.map(d => ({ unidade: d.unidade, total: abaSkusUnidade === 'duplicados' ? d.duplicados : d.total })).filter(d => d.total > 0).sort((a, b) => a.total - b.total), [skusUnidade, abaSkusUnidade])
 
-  // =========================================================================
-  // GAVETAS E FULLSCREEN
-  // =========================================================================
-
   const maioresValoresGaveta = useMemo(() => maioresValoresDataCompleta.slice(0, 50), [maioresValoresDataCompleta])
   const filtroUnidadeFSKey = filtroUnidadeFS.join('\0')
   const { dados: maioresValoresFS, total: maioresValoresFSTotal, unidadesOpcoes: unidadesFSMaioresValores } = useMemo(() => filtrarListaFS(maioresValoresDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
@@ -534,23 +530,59 @@ export default function VisaoGeral({ data }) {
   const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(() => filtrarListaFS(duplicadosDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'skus_lista'], maxItems: 1000, matchUnidade: (item, setU) => { const parts = String(item.unidades_lista || '').split(','); return parts.some(p => setU.has(normUnidade(p))) } }), [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
 
   // =========================================================================
-
+  // AGRUPAMENTO TEMPORAL DINÂMICO (MENSAL, TRIMESTRE, SEMESTRE, ANUAL)
+  // =========================================================================
   const timeSeriesAgg = useMemo(() => {
-    const map = new Map()
+    // =========================================================================
+    // 1) Sempre agrega primeiro no nível MENSAL (fonte da verdade)
+    // =========================================================================
+    const monthlyMap = new Map()
     for (const r of dfFiltrado) {
-      const key = `${r.tmp_ano_num}-${String(r.tmp_mes_num).padStart(2, '0')}`
-      if (!map.has(key)) map.set(key, { periodo: periodoLabel(r.tmp_mes_num, r.ano_referencia), ano: r.tmp_ano_num, mes: r.tmp_mes_num, total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0, compras: 0, consumo: 0, comprasSemConsumo: 0, skus: new Set(), chavesMap: new Map() })
-      
-      const item = map.get(key)
-      const val = parseNumber(r.valor_saldo_atual), valEntrada = parseNumber(r.valor_entrada_compras), valSaida = parseNumber(r.valor_saida_cons_interno)
+      const ano = r.tmp_ano_num
+      const mes = r.tmp_mes_num || 1
+      const key = `${ano}-${String(mes).padStart(2, '0')}`
 
-      item.total += val; item.compras += valEntrada; item.consumo += Math.abs(valSaida)
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          periodo: periodoLabel(mes, r.ano_referencia),
+          ano,
+          mes,
+          sortKey: key,
+          total: 0,
+          operacional: 0,
+          critico: 0,
+          obsoleto: 0,
+          obra: 0,
+          insumo: 0,
+          compras: 0,
+          consumo: 0,
+          comprasSemConsumo: 0,
+          skus: new Set(),
+          chavesMap: new Map(),
+        })
+      }
+
+      const item = monthlyMap.get(key)
+      const val = parseNumber(r.valor_saldo_atual)
+      const valEntrada = parseNumber(r.valor_entrada_compras)
+      const valSaida = parseNumber(r.valor_saida_cons_interno)
+
+      // Estoques (saldo) — soma mensal normal (depois pegamos o fechamento)
+      item.total += val
       if (r._isOperacional) item.operacional += val
       if (r._isCritico) item.critico += val
       if (r._isObsoleto) item.obsoleto += val
       if (r._isObra) item.obra += val
       if (r._isInsumo) item.insumo += val
-      if (valEntrada > 0.01 && Math.abs(valSaida) <= (valEntrada * 0.05)) item.comprasSemConsumo += valEntrada
+
+      // Fluxos — sempre somam
+      item.compras += valEntrada
+      item.consumo += Math.abs(valSaida)
+      if (valEntrada > 0.01 && Math.abs(valSaida) <= (valEntrada * 0.05)) {
+        item.comprasSemConsumo += valEntrada
+      }
+
+      // SKUs
       if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
@@ -560,15 +592,119 @@ export default function VisaoGeral({ data }) {
         }
       }
     }
-    const sorted = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
-    return {
-      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })), operacional: sorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
-      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })), obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })), 
-      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })), insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
-      comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })), comprasSemConsumoEvolucao: sorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
-      skus: sorted.map(d => { let skusDupCount = 0; for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size; return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount } })
+
+    const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+
+    // =========================================================================
+    // 2) Se granularidade === 'mensal' → retorna direto
+    // =========================================================================
+    if (granularidade === 'mensal') {
+      return {
+        total: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.total })),
+        operacional: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
+        critico: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
+        obsoleto: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })),
+        obra: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
+        insumo: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
+        comprasConsumo: monthlySorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
+        comprasSemConsumoEvolucao: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
+        skus: monthlySorted.map(d => {
+          let skusDupCount = 0
+          for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
+          return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
+        }),
+      }
     }
-  }, [dfFiltrado])
+
+    // =========================================================================
+    // 3) Agregação para TRIMESTRE / SEMESTRE / ANUAL
+    //    - Estoques → FECHAMENTO (último mês disponível do período)
+    //    - Compras / Consumo / ComprasSemConsumo → SOMA
+    //    - SKUs → DISTINCT no período inteiro
+    // =========================================================================
+    const groupMap = new Map()
+
+    for (const m of monthlySorted) {
+      let groupKey = ''
+      let periodoLabelStr = ''
+
+      if (granularidade === 'trimestre') {
+        const tri = Math.ceil(m.mes / 3)
+        groupKey = `${m.ano}-Q${tri}`
+        periodoLabelStr = `Q${tri}/${String(m.ano).slice(-2)}`
+      } else if (granularidade === 'semestre') {
+        const sem = m.mes <= 6 ? 1 : 2
+        groupKey = `${m.ano}-S${sem}`
+        periodoLabelStr = `S${sem}/${String(m.ano).slice(-2)}`
+      } else {
+        // anual
+        groupKey = `${m.ano}`
+        periodoLabelStr = `${m.ano}`
+      }
+
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          periodo: periodoLabelStr,
+          sortKey: groupKey,
+          latestMes: -1, // controla o fechamento
+          total: 0,
+          operacional: 0,
+          critico: 0,
+          obsoleto: 0,
+          obra: 0,
+          insumo: 0,
+          compras: 0,
+          consumo: 0,
+          comprasSemConsumo: 0,
+          skus: new Set(),
+          chavesMap: new Map(),
+        })
+      }
+
+      const g = groupMap.get(groupKey)
+
+      // --- Fluxos: sempre SOMA ---
+      g.compras += m.compras
+      g.consumo += m.consumo
+      g.comprasSemConsumo += m.comprasSemConsumo
+
+      // --- SKUs: DISTINCT (união dos sets) ---
+      for (const sku of m.skus) g.skus.add(sku)
+      for (const [chave, setSkus] of m.chavesMap.entries()) {
+        if (!g.chavesMap.has(chave)) g.chavesMap.set(chave, new Set())
+        for (const sku of setSkus) g.chavesMap.get(chave).add(sku)
+      }
+
+      // --- Estoques: FECHAMENTO (só atualiza se este mês for o mais recente do grupo) ---
+      if (m.mes > g.latestMes) {
+        g.latestMes = m.mes
+        g.total = m.total
+        g.operacional = m.operacional
+        g.critico = m.critico
+        g.obsoleto = m.obsoleto
+        g.obra = m.obra
+        g.insumo = m.insumo
+      }
+    }
+
+    const sorted = [...groupMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+
+    return {
+      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })),
+      operacional: sorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
+      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
+      obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })),
+      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
+      insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
+      comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
+      comprasSemConsumoEvolucao: sorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
+      skus: sorted.map(d => {
+        let skusDupCount = 0
+        for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
+        return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
+      }),
+    }
+  }, [dfFiltrado, granularidade])
 
   const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
     const empty = { giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0, giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: [] }
@@ -668,22 +804,17 @@ export default function VisaoGeral({ data }) {
 
   const { dados: itensParadosFS, total: itensParadosFSTotal, unidadesOpcoes: unidadesFSParados } = useMemo(() => filtrarListaFS(itensParadosPreFS, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey])
 
-  // ==================== FUNÇÃO DE RESET GLOBAL ====================
-
   const handleResetFiltros = useCallback(() => {
-    // 1. Zera todos os seletores múltiplos na barra superior
     dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: [] });
     dispatch({ type: 'SET_ESCOPOS', payload: [] });
     dispatch({ type: 'SET_UNIDADES', payload: [] });
     
-    // 2. Reseta o Ano para o último ano válido
     if (anoOpcoes && anoOpcoes.length > 0) {
-      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] });
+      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
     } else {
-      dispatch({ type: 'SET_ANOS', payload: [] });
+      dispatch({ type: 'SET_ANOS', payload: [] })
     }
     
-    // 3. Limpa qualquer foco em barras nos gráficos ou período específico selecionado
     dispatch({ type: 'SET_PERIODO_ATIVO', payload: null });
     dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null });
     dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null });
@@ -694,13 +825,11 @@ export default function VisaoGeral({ data }) {
     dispatch({ type: 'SET_FIELD', field: 'selectedBarraVariacao', payload: null });
     dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null });
     dispatch({ type: 'SET_FIELD', field: 'filtroMesParado', payload: null });
+    dispatch({ type: 'SET_FIELD', field: 'granularidade', payload: 'mensal' });
 
-    // 4. Volta a linha mestre para mostrar apenas o "Estoque Total"
     setVis({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false });
   }, [dispatch, anoOpcoes]);
 
-  // ==================== EXPORTAÇÕES COMPLETAS ====================
-  
   const periodoTxtExport = formatarPeriodoTexto(periodoEfetivo);
 
   const exportarExcelMaioresValores = useCallback(() => {
@@ -789,6 +918,7 @@ export default function VisaoGeral({ data }) {
     setExportando(true);
     setTimeout(() => { alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view."); setExportando(false); }, 1000);
   }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
+
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisGiroCobertura = useCallback((key) => setVisGiroCobertura((v) => ({ ...v, [key]: !v[key] })), [])
@@ -860,10 +990,8 @@ export default function VisaoGeral({ data }) {
     return anns
   }, [timeSeriesAgg, vis, periodoEfetivo])
 
-  // Lógica matemática para as porcentagens no ranking por unidade
   const sumRanking = useMemo(() => rankingUnidadeAtivo.reduce((acc, curr) => acc + curr.valor, 0), [rankingUnidadeAtivo])
   const maxValRanking = useMemo(() => Math.max(...rankingUnidadeAtivo.map((d) => d.valor), 1), [rankingUnidadeAtivo])
-  
   const colorMapRanking = { total: '#f58220', operacional: '#3498db', critico: '#e74c3c', obsoleto: '#9b59b6', obra: '#1abc9c', insumo: '#f1c40f' };
   const activeRankColor = colorMapRanking[abaRankingUnidade] || '#f58220';
 
@@ -888,7 +1016,6 @@ export default function VisaoGeral({ data }) {
         const pct = sumRanking > 0 ? ((d.valor / sumRanking) * 100).toFixed(1) : 0
         const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
         const badgeColor = isSelected ? activeRankColor : 'rgba(140, 155, 165, 0.3)'
-        
         return `<span style="color: ${textColor};">${rawText}</span><span style="color: transparent;">__</span><span style="color: ${badgeColor}; font-size: 10px; font-weight: 800;">[ ${pct}% ]</span>`
       }),
       textfont: { size: 10, family: 'Inter', weight: 600 },
@@ -1045,7 +1172,6 @@ export default function VisaoGeral({ data }) {
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       <style>{`
         .js-plotly-plot .plotly .cursor-crosshair { cursor: pointer !important; }
-        /* Remove a linha de foco (outline) padrão do navegador ao navegar pelo teclado */
         div:focus, table:focus, tbody:focus, tr:focus, td:focus, [role="button"]:focus { 
           outline: none !important; 
           box-shadow: none !important;
@@ -1065,13 +1191,34 @@ export default function VisaoGeral({ data }) {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* SELETOR DE GRANULARIDADE TEMPORAL (MENSAL, TRIMESTRE, SEMESTRE, ANUAL) */}
+          <div className="flex items-center bg-[#161616] border border-[#2A2A2A] rounded-lg p-1">
+            {[
+              { key: 'mensal', label: 'Mensal' },
+              { key: 'trimestre', label: 'Trimestre' },
+              { key: 'semestre', label: 'Semestre' },
+              { key: 'anual', label: 'Anual' }
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => dispatch({ type: 'SET_FIELD', field: 'granularidade', payload: key })}
+                className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all ${
+                  granularidade === key 
+                    ? 'bg-accent text-[#080808] shadow' 
+                    : 'text-[#8c9ba5] hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <button onClick={exportarPowerPoint} disabled={exportando} className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#121212] hover:bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#f58220]/50 text-white font-bold text-[11px] tracking-widest shadow-sm transition-all disabled:opacity-50 disabled:cursor-wait">
             <svg className="w-4 h-4 text-[#f58220]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
             <span>{exportando ? 'Gerando...' : 'PPTX'}</span>
           </button>
         </div>
       </div>
-
       {/* --- FILTROS E GRÁFICO PRINCIPAL --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1081,7 +1228,7 @@ export default function VisaoGeral({ data }) {
             <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1 flex items-center gap-3">Painel Gerencial Âmbar Energia</div>
             <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide">
               <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-              EVOLUÇÃO TEMPORAL DO ESTOQUE (R$)
+              EVOLUÇÃO TEMPORAL DO ESTOQUE (R$) [{granularidade.toUpperCase()}]
             </h2>
           </div>
 
@@ -1261,7 +1408,7 @@ export default function VisaoGeral({ data }) {
                 tickvals: timeSeriesAgg.total.map(d => d.periodo), 
                 ticktext: timeSeriesAgg.total.map(d => {
                   const isSelected = d.periodo === periodoEfetivo
-                  const label = formatarPeriodoTexto(d.periodo)
+                  const label = d.periodo
                   return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
                 }), 
                 tickpad: 12, 
@@ -1284,7 +1431,6 @@ export default function VisaoGeral({ data }) {
             </div>
           </div>
           
-          {/* BOTÃO DE RESET (AGORA ACIONANDO O RESET MANUAL SEGURO) */}
           <button
             onClick={handleResetFiltros}
             className="group relative flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#f58220]/20 to-transparent hover:from-[#f58220]/30 border border-[#f58220]/30 hover:border-[#f58220] transition-all duration-300 overflow-hidden shadow-[0_0_10px_rgba(245,130,32,0.1)] hover:shadow-[0_0_20px_rgba(245,130,32,0.3)] whitespace-nowrap"
@@ -1349,7 +1495,7 @@ export default function VisaoGeral({ data }) {
       {/* --- LINHA FINANCEIRA --- */}
       <div>
         <div className="flex items-center gap-2 mb-3 ml-2 mt-2">
-          <div className="w-5 h-5 rounded-md bg-[#16221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08-.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
+          <div className="w-5 h-5 rounded-md bg-[#12221d] flex items-center justify-center text-[#2ecc71] shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08-.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>
           <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Exposição Financeira Absoluta</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1367,20 +1513,17 @@ export default function VisaoGeral({ data }) {
           <div className="w-5 h-5 rounded-md bg-[#262014] flex items-center justify-center text-accent shadow-inner"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
           <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">Movimentação Operacional</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gapxl-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <ExecutiveCard cardKey="compras" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) COMPRAS" value={fmtBRL(metrics.valCompras)} valueAtual={metrics.valCompras} valueAnterior={metrics.valComprasPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="consumo" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>} iconBg="bg-[#1c1c1c]" title="(R$) CONSUMO" value={fmtBRL(metrics.valConsumo)} valueAtual={metrics.valConsumo} valueAnterior={metrics.valConsumoPrev} valueFontSize="text-base lg:text-lg text-white font-black" alignCenter={true} variant="default" />
-          
-          {/* CARD SKUs COM TAMANHO AJUSTADO (2 graus acima dos outros) */}
-          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-xl lg:text-1,5xl text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] tracking-tight" alignCenter={true} invertColor={true} variant="default" />
-          
+          <ExecutiveCard cardKey="skus" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>} iconBg="bg-[#1c1c1c]" title="SKUs ÚNICOS" value={fmtInt(metrics.valSkus)} valueAtual={metrics.valSkus} valueAnterior={metrics.valSkusPrev} valueFontSize="text-xl lg:text-xl text-white font-black tracking-tight" alignCenter={true} invertColor={true} variant="default" />
           <ExecutiveCard cardKey="giro" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>} iconBg="bg-[#1c1c1c]" title="GIRO" value={""} valueAtual={giroMensal} valueAnterior={giroMensalPrev} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1">
-              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center transition-colors shadow-inner">
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center shadow-inner">
                 <span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">MENSAL</span>
                 <span className="text-base font-black text-white font-mono">{fmtDec(giroMensal)}</span>
               </div>
-              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center transition-colors shadow-inner">
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center shadow-inner">
                 <span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">ANUAL</span>
                 <span className="text-base font-black text-white font-mono">{fmtDec(giroAnual)}</span>
               </div>
@@ -1388,11 +1531,11 @@ export default function VisaoGeral({ data }) {
           </ExecutiveCard>
           <ExecutiveCard cardKey="cobertura" activeCard={activeCard} onCardClick={handleCardClick} paddingClass="py-3 px-5" icon={<svg className="w-4 h-4 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} iconBg="bg-[#1c1c1c]" title="COBERTURA" value={""} valueAtual={coberturaMeses} valueAnterior={coberturaMesesPrev} invertColor={true} variant="default">
             <div className="grid grid-cols-2 gap-2 mt-1">
-              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center transition-colors shadow-inner">
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center shadow-inner">
                 <span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">MENSAL</span>
                 <span className="text-base font-black text-white font-mono">{fmtMes(coberturaMeses)}</span>
               </div>
-              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center transition-colors shadow-inner">
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-1.5 text-center shadow-inner">
                 <span className="text-[9px] tracking-[0.15em] text-[#8c9ba5] font-bold block mb-1">ANUAL</span>
                 <span className="text-base font-black text-white font-mono">{fmtMes(coberturaAnos)}</span>
               </div>
@@ -1403,8 +1546,6 @@ export default function VisaoGeral({ data }) {
 
       {/* --- RANKING + EXPOSIÇÃO --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
-        
-        {/* GRÁFICO PRINCIPAL DE ESTOQUE */}
         <div onClick={() => handleCardClick('ranking_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isRankingSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isRankingSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1525,10 +1666,10 @@ export default function VisaoGeral({ data }) {
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-[#2ecc71]/50 to-transparent pointer-events-none" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
           <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-lg bg-[#16221d] flex items-center justify-center border shadow-inner shrink-0 ${abaCompraConsumo === 'sem_consumo' ? 'border-[#e74c3c]/30' : 'border-[#2ecc71]/30'}`}>
+            <div className={`w-8 h-8 rounded-lg bg-[#12221d] flex items-center justify-center border shadow-inner shrink-0 ${abaCompraConsumo === 'sem_consumo' ? 'border-[#e74c3c]/30' : 'border-[#2ecc71]/30'}`}>
               <svg className={`w-4 h-4 ${abaCompraConsumo === 'sem_consumo' ? 'text-[#e74c3c]' : 'text-[#2ecc71]'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>
             </div>
-            <h2 className="text-sm font-bold text-white tracking-wide uppercase">EVOLUÇÃO TEMPORAL COMPRA x CONSUMO (R$)</h2>
+            <h2 className="text-sm font-bold text-white tracking-wide uppercase">EVOLUÇÃO TEMPORAL COMPRA x CONSUMO (R$) [{granularidade.toUpperCase()}]</h2>
           </div>
           
           <div className="flex flex-col-reverse sm:flex-row items-end sm:items-center gap-4 ml-auto">
@@ -1629,7 +1770,7 @@ export default function VisaoGeral({ data }) {
               tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), 
               ticktext: timeSeriesAgg.comprasConsumo.map(d => {
                 const isSelected = d.periodo === periodoEfetivo
-                const label = formatarPeriodoTexto(d.periodo)
+                const label = d.periodo
                 return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
               }), 
               showspikes: true, 
@@ -1693,7 +1834,6 @@ export default function VisaoGeral({ data }) {
 
       {/* --- COMPRA x CONSUMO POR UNIDADE + VARIAÇÃO + SKUs --- */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
-        
         <div onClick={() => handleCardClick('compra_consumo_unidade')} className={`bg-[#161616] border rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all duration-300 transform relative overflow-hidden flex flex-col justify-between group cursor-pointer ${isCompraConsumoSelected ? 'border-accent shadow-[0_0_25px_rgba(245,130,32,0.35)] bg-[#1c1612] -translate-y-1.5 ring-1 ring-accent/50' : 'border-[#2A2A2A] hover:border-accent/60 hover:-translate-y-1 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]'}`}>
           {isCompraConsumoSelected && (<div className="absolute top-2.5 right-2.5 flex items-center justify-center" title="Foco Ativo"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent shadow-[0_0_10px_rgba(245,130,32,0.8)]"></span></span></div>)}
           <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
@@ -1913,14 +2053,14 @@ export default function VisaoGeral({ data }) {
         </div>
       </div>
 
-      {/* --- EVOLUÇÃO SKUs (HITBOX CORRIGIDA) --- */}
+      {/* --- EVOLUÇÃO SKUs --- */}
       <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl p-4 sm:p-6 shadow-xl mt-6 transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2.5">
             <div className={`w-7 h-7 rounded-lg bg-[#161c24] flex items-center justify-center shadow-inner shrink-0 ${abaSkus === 'duplicados' ? 'text-[#f1c40f]' : 'text-[#3498db]'}`}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10L4 7v10l8 4" /></svg>
             </div>
-            <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE SKUs (QTDE)</span>
+            <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">EVOLUÇÃO TEMPORAL DE SKUs (QTDE) [{granularidade.toUpperCase()}]</span>
           </div>
           
           <div role="tablist" aria-label="Visualização de SKUs" className="flex items-center gap-4 text-[11px] font-medium tracking-wider">
@@ -1981,7 +2121,7 @@ export default function VisaoGeral({ data }) {
               tickvals: timeSeriesAgg.skus.map(d => d.periodo), 
               ticktext: timeSeriesAgg.skus.map(d => {
                 const isSelected = d.periodo === periodoEfetivo
-                const label = formatarPeriodoTexto(d.periodo)
+                const label = d.periodo
                 return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
               }), 
               tickpad: 12, 
@@ -2100,7 +2240,7 @@ export default function VisaoGeral({ data }) {
                 tickvals: giroCoberturaTempo.map(d => d.periodo), 
                 ticktext: giroCoberturaTempo.map(d => {
                   const isSelected = d.periodo === periodoEfetivo
-                  const label = formatarPeriodoTexto(d.periodo)
+                  const label = d.periodo
                   return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
                 }), 
                 tickpad: 12, 
@@ -2174,7 +2314,6 @@ export default function VisaoGeral({ data }) {
               />
             </div>
             
-            {/* GAVETA INLINE: ITENS PARADOS (SEM FILTROS DE TELA CHEIA) */}
             <div className="mt-4 border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden">
               <div 
                 role="button"
@@ -2232,12 +2371,9 @@ export default function VisaoGeral({ data }) {
       {/* =============================== MODAIS FULLSCREEN ==================================== */}
       {/* ====================================================================================== */}
 
-      {/* MODAL FULLSCREEN: ITENS PARADOS */}
       {tabelaExpandida && (
         <FullScreenPortal onClose={() => fecharModalFS('tabelaExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col backdrop-blur-sm animate-fade-in">
-            
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shrink-0 shadow-xl">
               <div className="flex items-center gap-3">
                 <svg className="w-6 h-6 text-accent drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
@@ -2251,52 +2387,26 @@ export default function VisaoGeral({ data }) {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   <span>Baixar Base Excel</span>
                 </button>
-                <button 
-                  onClick={() => fecharModalFS('tabelaExpandida')}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"
-                >
+                <button onClick={() => fecharModalFS('tabelaExpandida')} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   <span>Fechar Janela</span>
                 </button>
               </div>
             </div>
 
-            {/* Barra de Filtros Tela Cheia */}
             <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
-              {/* FILTRO 1: UNIDADE */}
               <div className="w-full sm:w-64">
-                <CyberMultiSelect 
-                  options={unidadesFSParados} 
-                  selected={filtroUnidadeFS} 
-                  onChange={onChangeUnidadeFS} 
-                  placeholder="Unidades" 
-                />
+                <CyberMultiSelect options={unidadesFSParados} selected={filtroUnidadeFS} onChange={onChangeUnidadeFS} placeholder="Unidades" />
               </div>
-
-              {/* FILTRO 2: MESES PARADOS */}
               <div className="w-full sm:w-56">
-                <CyberMultiSelect 
-                  options={mesesParadosOpcoes} 
-                  selected={filtroMesParadoFS} 
-                  onChange={(val) => setFiltroMesParadoFS(val)} 
-                  placeholder="Meses Parado" 
-                />
+                <CyberMultiSelect options={mesesParadosOpcoes} selected={filtroMesParadoFS} onChange={(val) => setFiltroMesParadoFS(val)} placeholder="Meses Parado" />
               </div>
-
-              {/* FILTRO 3: BUSCA POR TEXTO */}
               <div className="flex-1 relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                <input 
-                  type="text" 
-                  placeholder="Buscar produto por nome ou código..." 
-                  value={filtroTextoFS}
-                  onChange={onChangeTextoFS}
-                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-accent text-xs transition-colors"
-                />
+                <input type="text" placeholder="Buscar produto por nome ou código..." value={filtroTextoFS} onChange={onChangeTextoFS} className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-accent text-xs transition-colors" />
               </div>
             </div>
 
-            {/* Tabela de Dados */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
@@ -2308,12 +2418,9 @@ export default function VisaoGeral({ data }) {
         </FullScreenPortal>
       )}
 
-      {/* MODAL: MAIORES VALORES */}
       {tabelaMaioresValoresExpandida && (
         <FullScreenPortal onClose={() => fecharModalFS('tabelaMaioresValoresExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
-            
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
                 <svg className="w-6 h-6 text-[#3498db] drop-shadow-[0_0_10px_rgba(52,152,219,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
@@ -2334,31 +2441,16 @@ export default function VisaoGeral({ data }) {
               </div>
             </div>
 
-            {/* Barra de Filtros Fullscreen */}
             <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
-              {/* FILTRO 1: UNIDADE */}
               <div className="w-full sm:w-80">
-                <CyberMultiSelect 
-                  options={unidadesFSMaioresValores} 
-                  selected={filtroUnidadeFS} 
-                  onChange={onChangeUnidadeFS} 
-                  placeholder="Filtrar por Unidades" 
-                />
+                <CyberMultiSelect options={unidadesFSMaioresValores} selected={filtroUnidadeFS} onChange={onChangeUnidadeFS} placeholder="Filtrar por Unidades" />
               </div>
-              {/* FILTRO 2: TEXTO */}
               <div className="flex-1 relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                <input 
-                  type="text" 
-                  placeholder="Buscar produto por nome ou código..." 
-                  value={filtroTextoFS}
-                  onChange={onChangeTextoFS}
-                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#3498db] text-xs transition-colors"
-                />
+                <input type="text" placeholder="Buscar produto por nome ou código..." value={filtroTextoFS} onChange={onChangeTextoFS} className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#3498db] text-xs transition-colors" />
               </div>
             </div>
 
-            {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
@@ -2370,12 +2462,9 @@ export default function VisaoGeral({ data }) {
         </FullScreenPortal>
       )}
 
-      {/* MODAL: COMPRAS SEM CONSUMO */}
       {tabelaComprasSemConsumoExpandida && (
         <FullScreenPortal onClose={() => fecharModalFS('tabelaComprasSemConsumoExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
-            
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
                 <svg className="w-6 h-6 text-[#e74c3c] drop-shadow-[0_0_10px_rgba(231,76,60,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
@@ -2396,31 +2485,16 @@ export default function VisaoGeral({ data }) {
               </div>
             </div>
 
-            {/* Barra de Filtros Fullscreen */}
             <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
-              {/* FILTRO 1: UNIDADE */}
               <div className="w-full sm:w-80">
-                <CyberMultiSelect 
-                  options={unidadesFSComprasSemConsumo} 
-                  selected={filtroUnidadeFS} 
-                  onChange={onChangeUnidadeFS} 
-                  placeholder="Filtrar por Unidades" 
-                />
+                <CyberMultiSelect options={unidadesFSComprasSemConsumo} selected={filtroUnidadeFS} onChange={onChangeUnidadeFS} placeholder="Filtrar por Unidades" />
               </div>
-              {/* FILTRO 2: TEXTO */}
               <div className="flex-1 relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                <input 
-                  type="text" 
-                  placeholder="Buscar produto por nome ou código..." 
-                  value={filtroTextoFS}
-                  onChange={onChangeTextoFS}
-                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#e74c3c] text-xs transition-colors"
-                />
+                <input type="text" placeholder="Buscar produto por nome ou código..." value={filtroTextoFS} onChange={onChangeTextoFS} className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#e74c3c] text-xs transition-colors" />
               </div>
             </div>
 
-            {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
@@ -2432,12 +2506,9 @@ export default function VisaoGeral({ data }) {
         </FullScreenPortal>
       )}
 
-      {/* MODAL: CADASTROS DUPLICADOS */}
       {tabelaDuplicadosExpandida && (
         <FullScreenPortal onClose={() => fecharModalFS('tabelaDuplicadosExpandida')}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
-            
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
                 <svg className="w-6 h-6 text-[#f1c40f] drop-shadow-[0_0_10px_rgba(241,196,15,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
@@ -2458,31 +2529,16 @@ export default function VisaoGeral({ data }) {
               </div>
             </div>
             
-            {/* Barra de Filtros Fullscreen */}
             <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
-              {/* FILTRO 1: UNIDADE */}
               <div className="w-full sm:w-80">
-                <CyberMultiSelect 
-                  options={unidadesFSDuplicados} 
-                  selected={filtroUnidadeFS} 
-                  onChange={onChangeUnidadeFS} 
-                  placeholder="Filtrar por Unidades" 
-                />
+                <CyberMultiSelect options={unidadesFSDuplicados} selected={filtroUnidadeFS} onChange={onChangeUnidadeFS} placeholder="Filtrar por Unidades" />
               </div>
-              {/* FILTRO 2: TEXTO */}
               <div className="flex-1 relative">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                <input 
-                  type="text" 
-                  placeholder="Buscar produto por nome ou código..." 
-                  value={filtroTextoFS}
-                  onChange={onChangeTextoFS}
-                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#f1c40f] text-xs transition-colors"
-                />
+                <input type="text" placeholder="Buscar produto por nome ou código..." value={filtroTextoFS} onChange={onChangeTextoFS} className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-[#f1c40f] text-xs transition-colors" />
               </div>
             </div>
 
-            {/* Corpo da Tabela */}
             <div className="flex-grow overflow-y-auto custom-scrollbar p-6 bg-[#080808] relative">
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col">
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">

@@ -6,6 +6,7 @@ const initialState = {
   anosSel: [],
   tiposEstoqueSel: [],
   periodoAtivo: null,
+  escalaTempo: 'mes', // NOVO: 'mes', 'trimestre', 'semestre', ou 'ano'
   activeCard: null,
   selectedBarraRanking: null,
   selectedBarraExposicao: null,
@@ -54,6 +55,8 @@ function reducer(state, action) {
       return { ...state, tiposEstoqueSel: action.payload }
     case 'SET_PERIODO_ATIVO':
       return { ...state, periodoAtivo: action.payload }
+    case 'SET_ESCALA_TEMPO': // NOVO: Ação para alterar a lente de tempo
+      return { ...state, escalaTempo: action.payload }
     case 'RESET_SELECOES_FILTRO':
       return {
         ...state,
@@ -72,6 +75,7 @@ function reducer(state, action) {
         unidadesSel: [],
         anosSel: action.payload ? [action.payload] : [],
         tiposEstoqueSel: [],
+        escalaTempo: 'mes', // NOVO: Reseta a escala para 'mes' ao restaurar padrão
         selectedBarraRanking: null,
         selectedBarraCritico: null,
         selectedBarraObsoleto: null,
