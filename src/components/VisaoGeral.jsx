@@ -700,32 +700,39 @@ export default function VisaoGeral({ data }) {
       }
     }
 
-    // Preenche meses sem dado com zero (do primeiro ao último mês existente na base filtrada — sem inventar futuro)
-    if (monthlyMap.size > 0) {
-      const keys = [...monthlyMap.keys()].sort()
-      const firstKey = keys[0]
-      const lastKey = keys[keys.length - 1]
-      const [fAno, fMes] = firstKey.split('-').map(Number)
-      const [lAno, lMes] = lastKey.split('-').map(Number)
-      let a = fAno, m = fMes
-      while (a < lAno || (a === lAno && m <= lMes)) {
-        const key = `${a}-${String(m).padStart(2, '0')}`
-        if (!monthlyMap.has(key)) {
-          monthlyMap.set(key, {
-            periodo: periodoLabel(m, a),
-            ano: a,
-            mes: m,
-            sortKey: key,
-            total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
-            compras: 0, consumo: 0, comprasSemConsumo: 0,
-            skus: new Set(), chavesMap: new Map(),
-          })
-        }
-        m += 1
-        if (m > 12) { m = 1; a += 1 }
-      }
+ // Preenche meses sem dado com zero (do primeiro ao último mês da base de dados, garantindo meses intermediários zerados e sem extrapolar o futuro)
+ if (dadosSanitizados && dadosSanitizados.length > 0) {
+  let minAno = 9999, minMes = 13, maxAno = 0, maxMes = 0
+  for (const r of dadosSanitizados) {
+    if (!r.tmp_ano_num || !r.tmp_mes_num) continue
+    if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length && !anosSel.includes(String(r.ano_referencia))) continue
+    if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
+      minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
     }
-
+    if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
+      maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
+    }
+  }
+  if (minAno <= maxAno) {
+    let a = minAno, m = minMes
+    while (a < maxAno || (a === maxAno && m <= maxMes)) {
+      const key = `${a}-${String(m).padStart(2, '0')}`
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          periodo: periodoLabel(m, a),
+          ano: a,
+          mes: m,
+          sortKey: key,
+          total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
+          compras: 0, consumo: 0, comprasSemConsumo: 0,
+          skus: new Set(), chavesMap: new Map(),
+        })
+      }
+      m += 1
+      if (m > 12) { m = 1; a += 1 }
+    }
+  }
+}
     const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
 
     // Helper: monta o objeto de retorno a partir de uma lista de pontos
@@ -832,7 +839,7 @@ export default function VisaoGeral({ data }) {
 
     const sorted = [...groupMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
     return buildReturn(sorted)
-  }, [dfFiltrado, granularidade])
+  }, [dfFiltrado, dadosSanitizados, anosSel, anoOpcoes, granularidade])
 
   // Label de exibição (T3/26, S2/26, 2026 ou AGO/26) — o que o usuário vê no banner
   const periodoDisplay = useMemo(() => {
@@ -2726,7 +2733,7 @@ export default function VisaoGeral({ data }) {
                 <div className="overflow-y-auto custom-scrollbar flex-grow scroll-pt-14">
                   <TabelaGenerica key={`duplicados-${filtroUnidadeFSKey}-${filtroTextoFS}`} dados={duplicadosFS} columns={colsDuplicados} highlightColor="#f1c40f" />
                 </div>
-              </div>
+              </div> 
             </div>
           </div>
         </FullScreenPortal>
