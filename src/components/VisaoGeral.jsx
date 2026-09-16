@@ -595,25 +595,32 @@ export default function VisaoGeral({ data }) {
 
     const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
 
+    // Helper: monta o objeto de retorno a partir de uma lista de pontos
+    const buildReturn = (points) => ({
+      total: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.total })),
+      operacional: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.operacional })),
+      critico: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.critico })),
+      obsoleto: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.obsoleto })),
+      obra: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.obra })),
+      insumo: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.insumo })),
+      comprasConsumo: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, compras: d.compras, consumo: d.consumo })),
+      comprasSemConsumoEvolucao: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.comprasSemConsumo })),
+      skus: points.map(d => {
+        let skusDupCount = 0
+        for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
+        return { periodo: d.periodo, closingPeriodo: d.closingPeriodo, total: d.skus.size, duplicados: skusDupCount }
+      }),
+    })
+
     // =========================================================================
-    // 2) Se granularidade === 'mensal' → retorna direto
+    // 2) Se granularidade === 'mensal' → retorna direto (closingPeriodo = periodo)
     // =========================================================================
     if (granularidade === 'mensal') {
-      return {
-        total: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.total })),
-        operacional: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
-        critico: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
-        obsoleto: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })),
-        obra: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
-        insumo: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
-        comprasConsumo: monthlySorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
-        comprasSemConsumoEvolucao: monthlySorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
-        skus: monthlySorted.map(d => {
-          let skusDupCount = 0
-          for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
-          return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
-        }),
-      }
+      const points = monthlySorted.map(d => ({
+        ...d,
+        closingPeriodo: d.periodo, // mensal: o próprio período é o fechamento
+      }))
+      return buildReturn(points)
     }
 
     // =========================================================================
@@ -621,6 +628,7 @@ export default function VisaoGeral({ data }) {
     //    - Estoques → FECHAMENTO (último mês disponível do período)
     //    - Compras / Consumo / ComprasSemConsumo → SOMA
     //    - SKUs → DISTINCT no período inteiro
+    //    - closingPeriodo → label mensal do mês de fechamento (para snapshot/cards)
     // =========================================================================
     const groupMap = new Map()
 
@@ -630,8 +638,8 @@ export default function VisaoGeral({ data }) {
 
       if (granularidade === 'trimestre') {
         const tri = Math.ceil(m.mes / 3)
-        groupKey = `${m.ano}-Q${tri}`
-        periodoLabelStr = `Q${tri}/${String(m.ano).slice(-2)}`
+        groupKey = `${m.ano}-T${tri}`
+        periodoLabelStr = `T${tri}/${String(m.ano).slice(-2)}`   // T de Trimestre (não Q)
       } else if (granularidade === 'semestre') {
         const sem = m.mes <= 6 ? 1 : 2
         groupKey = `${m.ano}-S${sem}`
@@ -646,7 +654,8 @@ export default function VisaoGeral({ data }) {
         groupMap.set(groupKey, {
           periodo: periodoLabelStr,
           sortKey: groupKey,
-          latestMes: -1, // controla o fechamento
+          latestMes: -1,
+          closingPeriodo: m.periodo, // será atualizado com o mês mais recente
           total: 0,
           operacional: 0,
           critico: 0,
@@ -678,6 +687,7 @@ export default function VisaoGeral({ data }) {
       // --- Estoques: FECHAMENTO (só atualiza se este mês for o mais recente do grupo) ---
       if (m.mes > g.latestMes) {
         g.latestMes = m.mes
+        g.closingPeriodo = m.periodo   // label mensal do fechamento
         g.total = m.total
         g.operacional = m.operacional
         g.critico = m.critico
@@ -688,22 +698,7 @@ export default function VisaoGeral({ data }) {
     }
 
     const sorted = [...groupMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-
-    return {
-      total: sorted.map(d => ({ periodo: d.periodo, valor: d.total })),
-      operacional: sorted.map(d => ({ periodo: d.periodo, valor: d.operacional })),
-      critico: sorted.map(d => ({ periodo: d.periodo, valor: d.critico })),
-      obsoleto: sorted.map(d => ({ periodo: d.periodo, valor: d.obsoleto })),
-      obra: sorted.map(d => ({ periodo: d.periodo, valor: d.obra })),
-      insumo: sorted.map(d => ({ periodo: d.periodo, valor: d.insumo })),
-      comprasConsumo: sorted.map(d => ({ periodo: d.periodo, compras: d.compras, consumo: d.consumo })),
-      comprasSemConsumoEvolucao: sorted.map(d => ({ periodo: d.periodo, valor: d.comprasSemConsumo })),
-      skus: sorted.map(d => {
-        let skusDupCount = 0
-        for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
-        return { periodo: d.periodo, total: d.skus.size, duplicados: skusDupCount }
-      }),
-    }
+    return buildReturn(sorted)
   }, [dfFiltrado, granularidade])
 
   const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
@@ -923,9 +918,37 @@ export default function VisaoGeral({ data }) {
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisGiroCobertura = useCallback((key) => setVisGiroCobertura((v) => ({ ...v, [key]: !v[key] })), [])
 
+  // Helper: um ponto da série está selecionado se o período efetivo (sempre mensal)
+  // for igual ao closingPeriodo do ponto (ou ao próprio periodo no modo mensal)
+  const isPeriodSelected = useCallback((d) => {
+    if (!periodoEfetivo || !d) return false
+    if (d.closingPeriodo && d.closingPeriodo === periodoEfetivo) return true
+    if (d.periodo === periodoEfetivo) return true
+    return false
+  }, [periodoEfetivo])
+
+  // Clique no gráfico: sempre grava o closingPeriodo (mensal) para o snapshot/cards funcionarem
   const handleChartClick = useCallback((event) => {
-    if (event?.points?.[0]?.x) dispatch({ type: 'SET_PERIODO_ATIVO', payload: event.points[0].x })
-  }, [dispatch])
+    if (!event?.points?.[0]?.x) return
+    const clickedLabel = event.points[0].x
+    // Procura o ponto correspondente em qualquer série para pegar o closingPeriodo
+    const series = timeSeriesAgg.total || []
+    const point = series.find(d => d.periodo === clickedLabel)
+    const periodoParaSnapshot = point?.closingPeriodo || clickedLabel
+    dispatch({ type: 'SET_PERIODO_ATIVO', payload: periodoParaSnapshot })
+  }, [dispatch, timeSeriesAgg.total])
+
+  // Ao mudar a granularidade, seleciona automaticamente o ÚLTIMO período disponível
+  useEffect(() => {
+    const series = timeSeriesAgg.total || []
+    if (!series.length) return
+    const last = series[series.length - 1]
+    const closing = last.closingPeriodo || last.periodo
+    if (closing) {
+      dispatch({ type: 'SET_PERIODO_ATIVO', payload: closing })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [granularidade]) // só reage à mudança de granularidade
 
   const maxValorGlobal = useMemo(() => {
     let m = 10
@@ -939,8 +962,8 @@ export default function VisaoGeral({ data }) {
   }, [vis, timeSeriesAgg])
 
   const getChartShapes = (aggKey, colorBase) => {
-    if (!periodoEfetivo || !timeSeriesAgg[aggKey].length) return []
-    const index = timeSeriesAgg[aggKey].findIndex((d) => d.periodo === periodoEfetivo)
+    if (!periodoEfetivo || !timeSeriesAgg[aggKey]?.length) return []
+    const index = timeSeriesAgg[aggKey].findIndex((d) => isPeriodSelected(d))
     if (index === -1) return []
     return [
       { type: 'line', xref: 'x', yref: 'paper', x0: index, x1: index, y0: 0, y1: 1, line: { color: colorBase, width: 1.5, dash: 'dot' }, layer: 'below' },
@@ -948,8 +971,8 @@ export default function VisaoGeral({ data }) {
     ]
   }
 
-  const chartShapes = useMemo(() => getChartShapes('total', 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.total, periodoEfetivo])
-  const chartShapesSkus = useMemo(() => getChartShapes('skus', abaSkus === 'duplicados' ? 'rgba(241, 196, 15, 1)' : 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.skus, periodoEfetivo, abaSkus])
+  const chartShapes = useMemo(() => getChartShapes('total', 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.total, periodoEfetivo, isPeriodSelected])
+  const chartShapesSkus = useMemo(() => getChartShapes('skus', abaSkus === 'duplicados' ? 'rgba(241, 196, 15, 1)' : 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.skus, periodoEfetivo, abaSkus, isPeriodSelected])
   
   const chartShapesGiro = useMemo(() => {
     if (!periodoEfetivo || !giroCoberturaTempo.length) return []
@@ -964,7 +987,7 @@ export default function VisaoGeral({ data }) {
   const chartAnnotations = useMemo(() => {
     let anns = []
     const createAnns = (dataArr, color, yOffset) => dataArr.map(d => {
-      const isSelected = d.periodo === periodoEfetivo
+      const isSelected = isPeriodSelected(d)
       return {
         x: d.periodo, 
         y: d.valor, 
@@ -1223,8 +1246,8 @@ export default function VisaoGeral({ data }) {
       <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
-          <div>
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
+          <div className="shrink-0">
             <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1 flex items-center gap-3">Painel Gerencial Âmbar Energia</div>
             <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide">
               <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
@@ -1232,8 +1255,8 @@ export default function VisaoGeral({ data }) {
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3 z-30">
-            <div>
+          <div className="flex flex-row flex-wrap items-end justify-end gap-3 z-30 shrink-0">
+            <div className="min-w-[140px]">
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Categoria</label>
               <CyberMultiSelect 
                 options={['Operacional', 'Crítico', 'Obsoleto', 'Obra', 'Insumo']} 
@@ -1308,8 +1331,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#f58220', width: 2, shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.total.map(d => d.periodo === periodoEfetivo ? 12 : 10), 
-                  color: timeSeriesAgg.total.map(d => d.periodo === periodoEfetivo ? '#f58220' : '#080808'), 
+                  size: timeSeriesAgg.total.map(d => isPeriodSelected(d) ? 12 : 10), 
+                  color: timeSeriesAgg.total.map(d => isPeriodSelected(d) ? '#f58220' : '#080808'), 
                   line: { color: '#f58220', width: 1.5 } 
                 }, 
                 fill: 'tozeroy', 
@@ -1326,8 +1349,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#3498db', width: 1.5, dash: 'solid', shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.operacional.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: timeSeriesAgg.operacional.map(d => d.periodo === periodoEfetivo ? '#3498db' : '#080808'), 
+                  size: timeSeriesAgg.operacional.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: timeSeriesAgg.operacional.map(d => isPeriodSelected(d) ? '#3498db' : '#080808'), 
                   line: { color: '#3498db', width: 1.5 } 
                 }, 
                 cliponaxis: false 
@@ -1341,8 +1364,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#e74c3c', width: 1.5, dash: 'dash', shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.critico.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: timeSeriesAgg.critico.map(d => d.periodo === periodoEfetivo ? '#e74c3c' : '#080808'), 
+                  size: timeSeriesAgg.critico.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: timeSeriesAgg.critico.map(d => isPeriodSelected(d) ? '#e74c3c' : '#080808'), 
                   line: { color: '#e74c3c', width: 1.5 } 
                 }, 
                 cliponaxis: false 
@@ -1356,8 +1379,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#9b59b6', width: 1.5, dash: 'dot', shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.obsoleto.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: timeSeriesAgg.obsoleto.map(d => d.periodo === periodoEfetivo ? '#9b59b6' : '#080808'), 
+                  size: timeSeriesAgg.obsoleto.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: timeSeriesAgg.obsoleto.map(d => isPeriodSelected(d) ? '#9b59b6' : '#080808'), 
                   line: { color: '#9b59b6', width: 1.5 } 
                 }, 
                 cliponaxis: false 
@@ -1371,8 +1394,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#1abc9c', width: 1.5, dash: 'longdash', shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: timeSeriesAgg.obra.map(d => d.periodo === periodoEfetivo ? '#1abc9c' : '#080808'), 
+                  size: timeSeriesAgg.obra.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: timeSeriesAgg.obra.map(d => isPeriodSelected(d) ? '#1abc9c' : '#080808'), 
                   line: { color: '#1abc9c', width: 1.5 } 
                 }, 
                 cliponaxis: false 
@@ -1386,8 +1409,8 @@ export default function VisaoGeral({ data }) {
                 hoverinfo: 'none', 
                 line: { color: '#f1c40f', width: 1.5, dash: 'dashdot', shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: timeSeriesAgg.insumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: timeSeriesAgg.insumo.map(d => d.periodo === periodoEfetivo ? '#f1c40f' : '#080808'), 
+                  size: timeSeriesAgg.insumo.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: timeSeriesAgg.insumo.map(d => isPeriodSelected(d) ? '#f1c40f' : '#080808'), 
                   line: { color: '#f1c40f', width: 1.5 } 
                 }, 
                 cliponaxis: false 
@@ -1407,7 +1430,7 @@ export default function VisaoGeral({ data }) {
                 tickmode: 'array', 
                 tickvals: timeSeriesAgg.total.map(d => d.periodo), 
                 ticktext: timeSeriesAgg.total.map(d => {
-                  const isSelected = d.periodo === periodoEfetivo
+                  const isSelected = isPeriodSelected(d)
                   const label = d.periodo
                   return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
                 }), 
@@ -1705,8 +1728,8 @@ export default function VisaoGeral({ data }) {
               mode: 'lines+markers', 
               line: { color: '#e74c3c', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
               marker: { 
-                size: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                color: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? '#e74c3c' : '#080808'), 
+                size: timeSeriesAgg.comprasConsumo.map(d => isPeriodSelected(d) ? 11 : 8), 
+                color: timeSeriesAgg.comprasConsumo.map(d => isPeriodSelected(d) ? '#e74c3c' : '#080808'), 
                 line: { color: '#e74c3c', width: 1.5 } 
               }, 
               customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.compras)), 
@@ -1720,8 +1743,8 @@ export default function VisaoGeral({ data }) {
               mode: 'lines+markers', 
               line: { color: '#2ecc71', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
               marker: { 
-                size: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                color: timeSeriesAgg.comprasConsumo.map(d => d.periodo === periodoEfetivo ? '#2ecc71' : '#080808'), 
+                size: timeSeriesAgg.comprasConsumo.map(d => isPeriodSelected(d) ? 11 : 8), 
+                color: timeSeriesAgg.comprasConsumo.map(d => isPeriodSelected(d) ? '#2ecc71' : '#080808'), 
                 line: { color: '#2ecc71', width: 1.5 } 
               }, 
               customdata: timeSeriesAgg.comprasConsumo.map((d) => fmtBRL(d.consumo)), 
@@ -1736,8 +1759,8 @@ export default function VisaoGeral({ data }) {
               mode: 'lines+markers', 
               line: { color: '#e74c3c', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
               marker: { 
-                size: timeSeriesAgg.comprasSemConsumoEvolucao.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                color: timeSeriesAgg.comprasSemConsumoEvolucao.map(d => d.periodo === periodoEfetivo ? '#e74c3c' : '#080808'), 
+                size: timeSeriesAgg.comprasSemConsumoEvolucao.map(d => isPeriodSelected(d) ? 11 : 8), 
+                color: timeSeriesAgg.comprasSemConsumoEvolucao.map(d => isPeriodSelected(d) ? '#e74c3c' : '#080808'), 
                 line: { color: '#e74c3c', width: 1.5 } 
               },
               fill: 'tozeroy', 
@@ -1769,7 +1792,7 @@ export default function VisaoGeral({ data }) {
               tickmode: 'array', 
               tickvals: timeSeriesAgg.comprasConsumo.map(d => d.periodo), 
               ticktext: timeSeriesAgg.comprasConsumo.map(d => {
-                const isSelected = d.periodo === periodoEfetivo
+                const isSelected = isPeriodSelected(d)
                 const label = d.periodo
                 return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
               }), 
@@ -2097,8 +2120,8 @@ export default function VisaoGeral({ data }) {
               textfont: { color: 'white', size: 11, family: 'Inter' },
               line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 2, shape: 'spline', smoothing: 1.3 },
               marker: { 
-                size: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                color: timeSeriesAgg.skus.map(d => d.periodo === periodoEfetivo ? (abaSkus === 'duplicados' ? '#f1c40f' : '#3498db') : '#080808'), 
+                size: timeSeriesAgg.skus.map(d => isPeriodSelected(d) ? 11 : 8), 
+                color: timeSeriesAgg.skus.map(d => isPeriodSelected(d) ? (abaSkus === 'duplicados' ? '#f1c40f' : '#3498db') : '#080808'), 
                 line: { color: abaSkus === 'duplicados' ? '#f1c40f' : '#3498db', width: 1.5 } 
               },
               fill: 'tozeroy',
@@ -2120,7 +2143,7 @@ export default function VisaoGeral({ data }) {
               tickmode: 'array', 
               tickvals: timeSeriesAgg.skus.map(d => d.periodo), 
               ticktext: timeSeriesAgg.skus.map(d => {
-                const isSelected = d.periodo === periodoEfetivo
+                const isSelected = isPeriodSelected(d)
                 const label = d.periodo
                 return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
               }), 
@@ -2202,8 +2225,8 @@ export default function VisaoGeral({ data }) {
                 mode: 'lines+markers', 
                 line: { color: '#3498db', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? '#3498db' : '#080808'), 
+                  size: giroCoberturaTempo.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: giroCoberturaTempo.map(d => isPeriodSelected(d) ? '#3498db' : '#080808'), 
                   line: { color: '#3498db', width: 1.5 } 
                 }, 
                 customdata: giroCoberturaTempo.map((d) => fmtDec(d.giro)), 
@@ -2218,8 +2241,8 @@ export default function VisaoGeral({ data }) {
                 yaxis: 'y2', 
                 line: { color: '#f58220', width: 2.5, shape: 'spline', smoothing: 1.3 }, 
                 marker: { 
-                  size: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? 11 : 8), 
-                  color: giroCoberturaTempo.map(d => d.periodo === periodoEfetivo ? '#f58220' : '#080808'), 
+                  size: giroCoberturaTempo.map(d => isPeriodSelected(d) ? 11 : 8), 
+                  color: giroCoberturaTempo.map(d => isPeriodSelected(d) ? '#f58220' : '#080808'), 
                   line: { color: '#f58220', width: 1.5 } 
                 }, 
                 customdata: giroCoberturaTempo.map((d) => fmtMes(d.cobertura)), 
@@ -2239,7 +2262,7 @@ export default function VisaoGeral({ data }) {
                 tickmode: 'array', 
                 tickvals: giroCoberturaTempo.map(d => d.periodo), 
                 ticktext: giroCoberturaTempo.map(d => {
-                  const isSelected = d.periodo === periodoEfetivo
+                  const isSelected = isPeriodSelected(d)
                   const label = d.periodo
                   return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
                 }), 
