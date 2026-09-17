@@ -6,6 +6,7 @@ import pptxgen from 'pptxgenjs'
 import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
 import { FullScreenPortal } from './FullScreenPortal.jsx'
 import { CyberMultiSelect } from './CyberMultiSelect.jsx'
+import { TabelaGenerica } from './TabelaGenerica.jsx'
 
 const MAPA_MESES = {
   '1': '01 - Janeiro', '2': '02 - Fevereiro', '3': '03 - Março', '4': '04 - Abril',
@@ -68,7 +69,6 @@ export default function PainelInventarios({ data = [] }) {
   const [selResumoRow, setSelResumoRow] = useState(null)
   const [selEvolucaoRow, setSelEvolucaoRow] = useState(null)
   const [selAcuraciaCard, setSelAcuraciaCard] = useState(null)
-  const [selDivRow, setSelDivRow] = useState(null)
 
   // Suporte global para a tecla ESC (fecha modal, gaveta de detalhamentos e limpa seleções)
   useEffect(() => {
@@ -80,7 +80,6 @@ export default function PainelInventarios({ data = [] }) {
         setSelResumoRow(null)
         setSelEvolucaoRow(null)
         setSelAcuraciaCard(null)
-        setSelDivRow(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -95,7 +94,7 @@ export default function PainelInventarios({ data = [] }) {
 
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
 
-  // 1. Gera as listas de filtro globais a partir da base pura (resolve o bug de sumir opções)
+  // 1. Gera as listas de filtro globais a partir da base pura
   const listasMaster = useMemo(() => {
     const dadosValidos = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
     const empresas = [...new Set(dadosValidos.map((r) => r.empresa_nome).filter(Boolean))].sort()
@@ -121,7 +120,6 @@ export default function PainelInventarios({ data = [] }) {
     let dfBaseAnos = data.filter(r => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
     if (empresaSel.length) dfBaseAnos = dfBaseAnos.filter(r => empresaSel.includes(r.empresa_nome))
 
-    // Identifica o último ano e mês com dados reais na base
     let maxAnoDados = 0
     let maxMesDados = 0
     dfBaseAnos.forEach(r => {
@@ -323,7 +321,16 @@ export default function PainelInventarios({ data = [] }) {
       const dq = r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? 0;
       const dv = r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0;
       return Math.abs(dq) > 0 || Math.abs(dv) !== 0;
-    })
+    }).sort((a, b) => {
+      const getVal = (item) => {
+        const sis = item.saldo_anterior_consolidado ?? item.saldo_anterior ?? item.saldo_sistema ?? item.qtd_sistema ?? item.sistema ?? 0;
+        const fis = item.inventario_consolidado ?? item.quantidade_contada ?? item.qtd_fisica ?? item.fisico ?? 0;
+        const divQtd = item.diferenca_consolidada ?? item.diferenca_qtd ?? item.qtd_diferenca ?? item.diff_qtd ?? (fis - sis);
+        const prMedio = item.custo_unitario ?? item.preco_medio ?? item.valor_unitario ?? 0;
+        return item.diferenca_val ?? item.val_diferenca ?? item.diff_val ?? (divQtd * prMedio);
+      };
+      return getVal(b) - getVal(a); // Ordem decrescente com sinal (positivos maiores primeiro, negativos embaixo)
+    });
     
     const itensDivergentes = rowsDivergentes.length
     const idsComDivergencia = [...new Set(rowsDivergentes.map(r => limparId(r.id_inventario)))].sort((a, b) => Number(a) - Number(b))
@@ -572,6 +579,88 @@ export default function PainelInventarios({ data = [] }) {
     XLSX.writeFile(wb, `itens_divergentes_${mesClicado || 'atual'}.xlsx`)
   }, [stats.linhasDivergentes, mesClicado])
 
+  const colsDivergencias = useMemo(() => [
+    { 
+      key: 'unidade', 
+      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>Unidade</span>, 
+      className: 'text-white font-medium max-w-[140px] truncate', 
+      title: (r) => r.empresa_nome || r.unidade || '—', 
+      render: (r) => r.empresa_nome || r.unidade || '—' 
+    },
+    { 
+      key: 'idInv', 
+      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>Nº Inv.</span>, 
+      className: 'text-white font-mono', 
+      render: (r) => limparId(r.id_inventario) 
+    },
+    { 
+      key: 'cod', 
+      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>Código SKU</span>, 
+      className: 'text-[#60a5fa] font-mono', 
+      render: (r) => r.codigo_produto || r.codigo || '—' 
+    },
+    { 
+      key: 'nome', 
+      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>Nome do Produto</span>, 
+      className: 'text-white truncate max-w-[300px]', 
+      title: (r) => r.nome_produto ?? r.descricao_produto ?? r.nome ?? r.descricao ?? r.produto ?? '—', 
+      render: (r) => r.nome_produto ?? r.descricao_produto ?? r.nome ?? r.descricao ?? r.produto ?? '—' 
+    },
+    { 
+      key: 'sis', 
+      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>Sistema</span>, 
+      align: 'right', 
+      className: 'text-white font-mono', 
+      render: (r) => {
+        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
+        return fmtInt(sis);
+    }},
+    { 
+      key: 'fis', 
+      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>Físico</span>, 
+      align: 'right', 
+      className: 'text-white font-mono', 
+      render: (r) => {
+        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
+        return fmtInt(fis);
+    }},
+    { 
+      key: 'divQtd', 
+      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>Divergência</span>, 
+      align: 'right', 
+      className: 'font-mono font-bold', 
+      render: (r) => {
+        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
+        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
+        const divQtd = r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? (fis - sis);
+        const colorClass = divQtd < 0 ? 'text-[#e74c3c]' : 'text-white';
+        return <span className={colorClass}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</span>;
+    }},
+    { 
+      key: 'prMedio', 
+      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Preço Médio</span>, 
+      align: 'right', 
+      className: 'text-white font-mono', 
+      render: (r) => {
+        const prMedio = r.custo_unitario ?? r.preco_medio ?? r.valor_unitario ?? 0;
+        return fmtBRL(prMedio);
+    }},
+    { 
+      key: 'divVal', 
+      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Valor Total</span>, 
+      align: 'right', 
+      className: 'font-mono font-bold', 
+      render: (r) => {
+        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
+        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
+        const divQtd = r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? (fis - sis);
+        const prMedio = r.custo_unitario ?? r.preco_medio ?? r.valor_unitario ?? 0;
+        const divVal = r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? (divQtd * prMedio);
+        const colorClass = divVal < 0 ? 'text-[#e74c3c]' : 'text-white';
+        return <span className={colorClass}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</span>;
+    }}
+  ], [])
+
   if (!data.length) { return <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl text-center py-16 text-muted shadow-xl text-xs">⚠️ Nenhum dado de inventário encontrado na base.</div> }
 
   const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 135, showlegend: false }
@@ -694,6 +783,12 @@ export default function PainelInventarios({ data = [] }) {
         .js-plotly-plot .plotly .cursor-crosshair {
           cursor: pointer !important;
         }
+        /* Remove completely any unwanted row selection borders/lines/outlines */
+        table tr, table td, tr *, td *, [role="row"], .tabela-generica tr, .tabela-generica td {
+          border-color: transparent !important;
+          box-shadow: none !important;
+          outline: none !important;
+        }
       `}</style>
 
       {/* CABEÇALHO SUPERIOR */}
@@ -706,10 +801,18 @@ export default function PainelInventarios({ data = [] }) {
         </div>
         
         <div className="flex items-center gap-2 bg-[#161616] border border-[#2A2A2A] rounded-xl p-1 shadow-inner">
-           <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#1a2e22] text-[#2ecc71] border border-[#2ecc71]/40 hover:bg-[#203a2b] transition-all flex items-center gap-1.5 shadow-sm"><span>📥</span> Excel</button>
-           <button onClick={handleExportPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1616] text-[#e74c3c] border border-[#e74c3c]/40 hover:bg-[#3a1c1c] transition-all flex items-center gap-1.5 shadow-sm"><span>📄</span> PDF</button>
-           <button onClick={handleExportWord} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#162432] text-[#3498db] border border-[#3498db]/40 hover:bg-[#1c2e40] transition-all flex items-center gap-1.5 shadow-sm"><span>📝</span> Word</button>
-           <button onClick={handleExportPPTX} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1b16] text-[#f58220] border border-[#f58220]/40 hover:bg-[#3a251c] transition-all flex items-center gap-1.5 shadow-sm ml-1 border-l-2 border-l-[#f58220]"><span>📊</span> PPTX</button>
+           <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#1a2e22] text-[#2ecc71] border border-[#2ecc71]/40 hover:bg-[#203a2b] transition-all flex items-center gap-1.5 shadow-sm">
+             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Excel
+           </button>
+           <button onClick={handleExportPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1616] text-[#e74c3c] border border-[#e74c3c]/40 hover:bg-[#3a1c1c] transition-all flex items-center gap-1.5 shadow-sm">
+             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>PDF
+           </button>
+           <button onClick={handleExportWord} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#162432] text-[#3498db] border border-[#3498db]/40 hover:bg-[#1c2e40] transition-all flex items-center gap-1.5 shadow-sm">
+             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>Word
+           </button>
+           <button onClick={handleExportPPTX} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1b16] text-[#f58220] border border-[#f58220]/40 hover:bg-[#3a251c] transition-all flex items-center gap-1.5 shadow-sm ml-1 border-l-2 border-l-[#f58220]">
+             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>PPTX
+           </button>
         </div>
       </div>
 
@@ -1134,68 +1237,19 @@ export default function PainelInventarios({ data = [] }) {
                   onClick={() => setIsModalOpen(true)}
                   className="flex items-center gap-1.5 bg-accent/15 border border-accent/40 hover:bg-accent/30 text-accent font-bold text-[10px] px-3 py-1.5 rounded-lg transition-all shadow-sm uppercase tracking-wider"
                 >
-                  <span>⛶ Expandir Janela / Tela Cheia</span>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                  <span>Expandir Janela / Tela Cheia</span>
                 </button>
               )}
             </div>
           </div>
 
           {stats.linhasDivergentes.length > 0 ? (
-            <div className="overflow-x-auto overflow-y-auto custom-scrollbar border border-[#222222] rounded-xl shadow-inner bg-[#111111] max-h-[380px]">
-              <table className="w-full text-left text-[10px] whitespace-nowrap relative">
-                <thead className="bg-[#1a1a1a] border-b border-[#333333] sticky top-0 z-10">
-                  <tr className="text-[#8c9ba5] uppercase font-bold tracking-wider">
-                    <th className="py-2.5 px-3">Unidade</th>
-                    <th className="py-2.5 px-3">Nº Inv.</th>
-                    <th className="py-2.5 px-3">Código SKU</th>
-                    <th className="py-2.5 px-3">Nome do Produto</th>
-                    <th className="py-2.5 px-3 text-right">Sistema</th>
-                    <th className="py-2.5 px-3 text-right">Físico</th>
-                    <th className="py-2.5 px-3 text-right">Divergência</th>
-                    <th className="py-2.5 px-3 text-right">Preço Médio</th>
-                    <th className="py-2.5 px-3 text-right">Valor Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#222222]">
-                  {stats.linhasDivergentes.slice(0, 50).map((row, idx) => {
-                    const emp = row.empresa_nome || row.unidade || '—'
-                    const idInv = limparId(row.id_inventario)
-                    const cod = row.codigo_produto || row.codigo || '—'
-                    const nome = row.nome_produto ?? row.descricao_produto ?? row.nome ?? row.descricao ?? row.produto ?? '—'
-                    
-                    const sis = row.saldo_anterior_consolidado ?? row.saldo_anterior ?? row.saldo_sistema ?? row.qtd_sistema ?? row.sistema ?? 0
-                    const fis = row.inventario_consolidado ?? row.quantidade_contada ?? row.qtd_fisica ?? row.fisico ?? 0
-                    
-                    const divQtd = row.diferenca_consolidada ?? row.diferenca_qtd ?? row.qtd_diferenca ?? row.diff_qtd ?? (fis - sis)
-                    const prMedio = row.custo_unitario ?? row.preco_medio ?? row.valor_unitario ?? 0
-                    const divVal = row.diferenca_val ?? row.val_diferenca ?? row.diff_val ?? (divQtd * prMedio)
-                    
-                    const isNeg = divQtd < 0 || divVal < 0
-                    const colorClass = isNeg ? 'text-[#e74c3c]' : 'text-white'
-                    
-                    const rowKey = `${idInv}_${cod}_${idx}`
-                    const isActive = selDivRow === rowKey
-
-                    return (
-                      <tr 
-                        key={idx} 
-                        onClick={() => setSelDivRow(isActive ? null : rowKey)}
-                        className={`cursor-pointer transition-colors ${isActive ? 'bg-[#1c1612] shadow-[inset_0_0_15px_rgba(245,130,32,0.15)] border-accent/30' : 'hover:bg-[#1f1f1f]'}`}
-                      >
-                        <td className="py-2.5 px-3 text-white font-medium max-w-[140px] truncate" title={emp}>{emp}</td>
-                        <td className="py-2.5 px-3 text-white font-mono">{idInv}</td>
-                        <td className="py-2.5 px-3 text-[#60a5fa] font-mono">{cod}</td>
-                        <td className="py-2.5 px-3 text-white truncate max-w-[300px]" title={nome}>{nome}</td>
-                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(sis)}</td>
-                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtInt(fis)}</td>
-                        <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</td>
-                        <td className="py-2.5 px-3 text-white font-mono text-right">{fmtBRL(prMedio)}</td>
-                        <td className={`py-2.5 px-3 font-mono text-right font-bold ${colorClass}`}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="overflow-x-auto overflow-y-auto custom-scrollbar border border-[#222222] rounded-xl shadow-inner bg-[#111111] max-h-[380px] scroll-pt-12">
+              <TabelaGenerica
+                dados={stats.linhasDivergentes.slice(0, 50)}
+                columns={colsDivergencias}
+              />
             </div>
           ) : (
             <div className="bg-[#111111] border border-[#222222] rounded-xl p-6 text-center flex flex-col items-center justify-center">
@@ -1214,15 +1268,25 @@ export default function PainelInventarios({ data = [] }) {
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
-                <span className="text-accent text-2xl drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]">⚠️</span>
+                <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shadow-inner shrink-0">
+                  <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
                 <h2 className="text-base font-bold text-white uppercase tracking-wider">Lista Completa de Itens Divergentes (Tela Cheia)</h2>
                 <span className="ml-3 text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
                   Total filtrado: {Number(linhasDivergentesFiltradasModal.length).toLocaleString('pt-BR')} registros
                 </span>
               </div>
               <div className="flex gap-3 items-center">
-                <button onClick={exportarExcelDivergencias} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)]"><span>📥</span><span>Baixar Excel Completo</span></button>
-                <button onClick={() => setIsModalOpen(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)]"><span>✕</span><span>Fechar Janela</span></button>
+                <button onClick={exportarExcelDivergencias} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)]">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  <span>Baixar Excel Completo</span>
+                </button>
+                <button onClick={() => setIsModalOpen(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)]">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  <span>Fechar Janela</span>
+                </button>
               </div>
             </div>
 
@@ -1247,61 +1311,11 @@ export default function PainelInventarios({ data = [] }) {
               </div>
 
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col flex-grow">
-                <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh]">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-[#1a1a1a] border-b border-[#333333] sticky top-0 z-10">
-                      <tr className="text-[#8c9ba5] uppercase font-bold tracking-wider text-[10px]">
-                        <th className="py-3 px-4">Unidade</th>
-                        <th className="py-3 px-4">Nº Inv.</th>
-                        <th className="py-3 px-4">Código SKU</th>
-                        <th className="py-3 px-4 w-full">Nome do Produto</th>
-                        <th className="py-3 px-4 text-right">Sistema</th>
-                        <th className="py-3 px-4 text-right">Físico</th>
-                        <th className="py-3 px-4 text-right">Divergência</th>
-                        <th className="py-3 px-4 text-right">Preço Médio</th>
-                        <th className="py-3 px-4 text-right">Valor Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#222222]">
-                      {linhasDivergentesFiltradasModal.slice(0, 1000).map((row, idx) => {
-                        const emp = row.empresa_nome || row.unidade || '—'
-                        const idInv = limparId(row.id_inventario)
-                        const cod = row.codigo_produto || row.codigo || '—'
-                        const nome = row.nome_produto ?? row.descricao_produto ?? row.nome ?? row.descricao ?? row.produto ?? '—'
-                        
-                        const sis = row.saldo_anterior_consolidado ?? row.saldo_anterior ?? row.saldo_sistema ?? row.qtd_sistema ?? 0
-                        const fis = row.inventario_consolidado ?? row.quantidade_contada ?? row.qtd_fisica ?? 0
-                        
-                        const divQtd = row.diferenca_consolidada ?? row.diferenca_qtd ?? row.qtd_diferenca ?? (fis - sis)
-                        const prMedio = row.custo_unitario ?? row.preco_medio ?? 0
-                        const divVal = row.diferenca_val ?? row.val_diferenca ?? (divQtd * prMedio)
-                        
-                        const isNeg = divQtd < 0 || divVal < 0
-                        const colorClass = isNeg ? 'text-[#e74c3c]' : 'text-white'
-
-                        const rowKey = `${idInv}_${cod}_${idx}`
-                        const isActive = selDivRow === rowKey
-
-                        return (
-                          <tr 
-                            key={idx} 
-                            onClick={() => setSelDivRow(isActive ? null : rowKey)}
-                            className={`cursor-pointer transition-colors ${isActive ? 'bg-[#1c1612] shadow-[inset_0_0_15px_rgba(245,130,32,0.15)] border-accent/30' : 'hover:bg-[#1a1a1a]'}`}
-                          >
-                            <td className="py-2.5 px-4 text-white font-medium">{emp}</td>
-                            <td className="py-2.5 px-4 text-white font-mono">{idInv}</td>
-                            <td className="py-2.5 px-4 text-[#60a5fa] font-mono">{cod}</td>
-                            <td className="py-2.5 px-4 text-white font-medium truncate max-w-[350px]" title={nome}>{nome}</td>
-                            <td className="py-2.5 px-4 text-white font-mono text-right">{fmtInt(sis)}</td>
-                            <td className="py-2.5 px-4 text-white font-mono text-right">{fmtInt(fis)}</td>
-                            <td className={`py-2.5 px-4 font-mono text-right font-bold ${colorClass}`}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</td>
-                            <td className="py-2.5 px-4 text-white font-mono text-right">{fmtBRL(prMedio)}</td>
-                            <td className={`py-2.5 px-4 font-mono text-right font-bold ${colorClass}`}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh] scroll-pt-12">
+                  <TabelaGenerica
+                    dados={linhasDivergentesFiltradasModal.slice(0, 1000)}
+                    columns={colsDivergencias}
+                  />
                   {linhasDivergentesFiltradasModal.length > 1000 && (
                     <div className="p-4 text-center text-xs text-muted border-t border-[#333]">
                       Mostrando os primeiros 1.000 itens para garantir o desempenho visual. Faça o download em Excel para visualizar todos os {linhasDivergentesFiltradasModal.length} registros.
