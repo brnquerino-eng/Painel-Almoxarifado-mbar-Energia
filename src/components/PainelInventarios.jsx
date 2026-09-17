@@ -6,7 +6,6 @@ import pptxgen from 'pptxgenjs'
 import { fmtBRL, fmtInt, isRotativo } from '../utils/format'
 import { FullScreenPortal } from './FullScreenPortal.jsx'
 import { CyberMultiSelect } from './CyberMultiSelect.jsx'
-import { TabelaGenerica } from './TabelaGenerica.jsx'
 
 const MAPA_MESES = {
   '1': '01 - Janeiro', '2': '02 - Fevereiro', '3': '03 - Março', '4': '04 - Abril',
@@ -69,17 +68,21 @@ export default function PainelInventarios({ data = [] }) {
   const [selResumoRow, setSelResumoRow] = useState(null)
   const [selEvolucaoRow, setSelEvolucaoRow] = useState(null)
   const [selAcuraciaCard, setSelAcuraciaCard] = useState(null)
+  const [selDivergenciaKey, setSelDivergenciaKey] = useState(null)
 
   // Suporte global para a tecla ESC (fecha modal, gaveta de detalhamentos e limpa seleções)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setIsModalOpen(false)
+        setModalUnidadesSel([])
+        setModalSearch('')
         setExpanded(false)
         setSelEmpresaRow(null)
         setSelResumoRow(null)
         setSelEvolucaoRow(null)
         setSelAcuraciaCard(null)
+        setSelDivergenciaKey(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -104,9 +107,9 @@ export default function PainelInventarios({ data = [] }) {
     return { empresas, tiposVisual, anos }
   }, [data])
 
-  useMemo(() => {
+  useEffect(() => {
     if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
-  }, [listasMaster])
+  }, [listasMaster.anos, anoSel.length])
 
   // 2. dfMaster aplica os filtros selecionados
   const dfMaster = useMemo(() => {
@@ -329,7 +332,7 @@ export default function PainelInventarios({ data = [] }) {
         const prMedio = item.custo_unitario ?? item.preco_medio ?? item.valor_unitario ?? 0;
         return item.diferenca_val ?? item.val_diferenca ?? item.diff_val ?? (divQtd * prMedio);
       };
-      return getVal(b) - getVal(a); // Do maior para o menor (com sinal: positivos no topo, negativos embaixo)
+      return getVal(b) - getVal(a);
     });
     
     const itensDivergentes = rowsDivergentes.length
@@ -560,6 +563,12 @@ export default function PainelInventarios({ data = [] }) {
     return lista
   }, [stats.linhasDivergentes, modalUnidadesSel, modalSearch])
 
+  const fecharModalDivergencias = useCallback(() => {
+    setIsModalOpen(false)
+    setModalUnidadesSel([])
+    setModalSearch('')
+  }, [])
+
   const exportarExcelDivergencias = useCallback(() => {
     if (!stats.linhasDivergentes.length) return
     const wsData = stats.linhasDivergentes.map(row => ({
@@ -579,88 +588,6 @@ export default function PainelInventarios({ data = [] }) {
     XLSX.writeFile(wb, `itens_divergentes_${mesClicado || 'atual'}.xlsx`)
   }, [stats.linhasDivergentes, mesClicado])
 
-  const colsDivergencias = useMemo(() => [
-    { 
-      key: 'unidade', 
-      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>Unidade</span>, 
-      className: 'text-white font-medium max-w-[140px] truncate', 
-      title: (r) => r.empresa_nome || r.unidade || '—', 
-      render: (r) => r.empresa_nome || r.unidade || '—' 
-    },
-    { 
-      key: 'idInv', 
-      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>Nº Inv.</span>, 
-      className: 'text-white font-mono', 
-      render: (r) => limparId(r.id_inventario) 
-    },
-    { 
-      key: 'cod', 
-      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>Código SKU</span>, 
-      className: 'text-[#60a5fa] font-mono', 
-      render: (r) => r.codigo_produto || r.codigo || '—' 
-    },
-    { 
-      key: 'nome', 
-      label: <span className="flex items-center gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>Nome do Produto</span>, 
-      className: 'text-white truncate max-w-[300px]', 
-      title: (r) => r.nome_produto ?? r.descricao_produto ?? r.nome ?? r.descricao ?? r.produto ?? '—', 
-      render: (r) => r.nome_produto ?? r.descricao_produto ?? r.nome ?? r.descricao ?? r.produto ?? '—' 
-    },
-    { 
-      key: 'sis', 
-      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>Sistema</span>, 
-      align: 'right', 
-      className: 'text-white font-mono', 
-      render: (r) => {
-        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
-        return fmtInt(sis);
-    }},
-    { 
-      key: 'fis', 
-      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>Físico</span>, 
-      align: 'right', 
-      className: 'text-white font-mono', 
-      render: (r) => {
-        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
-        return fmtInt(fis);
-    }},
-    { 
-      key: 'divQtd', 
-      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>Divergência</span>, 
-      align: 'right', 
-      className: 'font-mono font-bold', 
-      render: (r) => {
-        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
-        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
-        const divQtd = r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? (fis - sis);
-        const colorClass = divQtd < 0 ? 'text-[#e74c3c]' : 'text-white';
-        return <span className={colorClass}>{divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}</span>;
-    }},
-    { 
-      key: 'prMedio', 
-      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Preço Médio</span>, 
-      align: 'right', 
-      className: 'text-white font-mono', 
-      render: (r) => {
-        const prMedio = r.custo_unitario ?? r.preco_medio ?? r.valor_unitario ?? 0;
-        return fmtBRL(prMedio);
-    }},
-    { 
-      key: 'divVal', 
-      label: <span className="flex items-center justify-end gap-1.5"><svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>Valor Total</span>, 
-      align: 'right', 
-      className: 'font-mono font-bold', 
-      render: (r) => {
-        const sis = r.saldo_anterior_consolidado ?? r.saldo_anterior ?? r.saldo_sistema ?? r.qtd_sistema ?? r.sistema ?? 0;
-        const fis = r.inventario_consolidado ?? r.quantidade_contada ?? r.qtd_fisica ?? r.fisico ?? 0;
-        const divQtd = r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? (fis - sis);
-        const prMedio = r.custo_unitario ?? r.preco_medio ?? r.valor_unitario ?? 0;
-        const divVal = r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? (divQtd * prMedio);
-        const colorClass = divVal < 0 ? 'text-[#e74c3c]' : 'text-white';
-        return <span className={colorClass}>{divVal > 0 ? '+' : ''}{fmtBRL(divVal)}</span>;
-    }}
-  ], [])
-
   if (!data.length) { return <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl text-center py-16 text-muted shadow-xl text-xs">⚠️ Nenhum dado de inventário encontrado na base.</div> }
 
   const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 135, showlegend: false }
@@ -676,7 +603,7 @@ export default function PainelInventarios({ data = [] }) {
     return (
       <div 
         onClick={() => setSelResumoRow(isActive ? null : id)}
-        className={`grid grid-cols-12 items-center py-2.5 border-b border-[#222222] transition-colors rounded-lg px-2 cursor-pointer ${isActive ? 'bg-[#1c1612] border-accent/40 shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' : 'hover:bg-[#1a1a1a]'}`}
+        className={`grid grid-cols-12 items-center py-2.5 border-b border-[#222222] transition-colors rounded-lg px-2 cursor-pointer ${isActive ? 'bg-[#1c1612] border-l-3 border-l-accent border-accent/40 shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' : 'hover:bg-[#1a1a1a] border-l-3 border-l-transparent'}`}
       >
         <div className="col-span-5 flex items-center gap-2">
           <div className="text-[#60a5fa]">{icon}</div>
@@ -690,6 +617,62 @@ export default function PainelInventarios({ data = [] }) {
         </div>
         <div className="col-span-1 text-right">
           <span className={`text-xs font-black ${statusColor}`}>{statusIcon}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Componente de Linha de Divergência padronizado em Grade (Sem tabelas nativas)
+  const DivergenceRowItem = ({ row, index }) => {
+    const uniqueKey = `${row.empresa_nome || row.unidade}-${row.codigo_produto || row.codigo}-${row.id_inventario}-${index}`
+    const isActive = selDivergenciaKey === uniqueKey
+
+    const unidade = row.empresa_nome || row.unidade || '—'
+    const idInv = limparId(row.id_inventario)
+    const cod = row.codigo_produto || row.codigo || '—'
+    const nome = row.nome_produto ?? row.descricao_produto ?? row.nome ?? row.descricao ?? row.produto ?? '—'
+    
+    const sis = row.saldo_anterior_consolidado ?? row.saldo_anterior ?? row.saldo_sistema ?? row.qtd_sistema ?? row.sistema ?? 0
+    const fis = row.inventario_consolidado ?? row.quantidade_contada ?? row.qtd_fisica ?? row.fisico ?? 0
+    const divQtd = row.diferenca_consolidada ?? row.diferenca_qtd ?? row.qtd_diferenca ?? row.diff_qtd ?? (fis - sis)
+    const prMedio = row.custo_unitario ?? row.preco_medio ?? row.valor_unitario ?? 0
+    const divVal = row.diferenca_val ?? row.val_diferenca ?? row.diff_val ?? (divQtd * prMedio)
+
+    // Positivo = azul | Negativo = vermelho | Zero = branco
+    const corQtd = divQtd > 0 ? 'text-[#3498db]' : divQtd < 0 ? 'text-[#e74c3c]' : 'text-white'
+    const corVal = divVal > 0 ? 'text-[#3498db]' : divVal < 0 ? 'text-[#e74c3c]' : 'text-white'
+
+    const toggle = () => setSelDivergenciaKey(isActive ? null : uniqueKey)
+
+    return (
+      <div 
+        role="row"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        }}
+        className={`grid grid-cols-12 items-center py-2.5 px-3 border-b border-[#222222] transition-all rounded-lg cursor-pointer text-xs outline-none focus:ring-1 focus:ring-[#3498db]/50 focus:bg-[#1a1a1a] ${
+          isActive 
+            ? 'bg-[#1c1612] border-l-3 border-l-accent border-accent/40 shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' 
+            : 'hover:bg-[#1a1a1a] border-l-3 border-l-transparent'
+        }`}
+      >
+        <div className="col-span-2 text-white font-medium truncate pr-2" title={unidade}>{unidade}</div>
+        <div className="col-span-1 text-white font-mono text-center">{idInv}</div>
+        <div className="col-span-1 text-[#60a5fa] font-mono truncate px-1" title={cod}>{cod}</div>
+        <div className="col-span-3 text-white truncate px-2" title={nome}>{nome}</div>
+        <div className="col-span-1 text-white font-mono text-right">{fmtInt(sis)}</div>
+        <div className="col-span-1 text-white font-mono text-right">{fmtInt(fis)}</div>
+        <div className={`col-span-1 font-mono font-bold text-right ${corQtd}`}>
+          {divQtd > 0 ? '+' : ''}{fmtInt(divQtd)}
+        </div>
+        <div className="col-span-1 text-white font-mono text-right">{fmtBRL(prMedio)}</div>
+        <div className={`col-span-1 font-mono font-bold text-right ${corVal}`}>
+          {divVal > 0 ? '+' : ''}{fmtBRL(divVal)}
         </div>
       </div>
     )
@@ -782,16 +765,6 @@ export default function PainelInventarios({ data = [] }) {
       <style>{`
         .js-plotly-plot .plotly .cursor-crosshair {
           cursor: pointer !important;
-        }
-        /* Remove ugly bounding boxes/outlines on table rows when clicked/active */
-        table tr:focus, table tr:active, table td:focus, table td:active,
-        [role="row"]:focus, [role="row"]:active {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        /* Restore left accent border highlight when table rows are active/selected */
-        table tr[aria-selected="true"], table tr.selected, table tr:active {
-          border-left: 3px solid #f58220 !important;
         }
       `}</style>
 
@@ -898,16 +871,14 @@ export default function PainelInventarios({ data = [] }) {
 
             <div className="mt-4 pt-4 border-t border-[#2A2A2A] relative z-20">
               {mesClicado ? (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-accent/15 via-[#161616] to-accent/10 rounded-xl border border-accent/40 shadow-[0_4px_20px_rgba(245,130,32,0.15)] animate-fade-in">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center border border-accent/40 shrink-0">
-                      <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </div>
-                    <span className="text-xs text-white tracking-wide font-medium">Filtro ativo por snapshot temporal: <b className="text-accent font-mono text-xs px-2 py-0.5 bg-[#080808] border border-accent/30 rounded shadow-inner ml-1">{mesClicado}</b></span>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-3.5 py-2.5 bg-[#111111] rounded-xl border border-[#2A2A2A] animate-fade-in">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5 text-[#8c9ba5] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span className="text-xs text-[#8c9ba5] tracking-wide font-medium">Visualizando período: <strong className="text-white text-xs px-1.5 py-0.5 rounded bg-[#222] border border-[#333] ml-0.5">{mesClicado}</strong></span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                     {!isCurrentMonth && ( <button onClick={handleGoToCurrent} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/90 text-dark-900 font-bold text-xs transition-all duration-300 shadow-md"><span>Voltar ao Atual</span></button> )}
-                     <button onClick={() => setMesClicado(null)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-transparent border border-danger/50 hover:bg-danger/10 text-danger font-bold text-xs transition-all duration-300 shadow-md"><span>✖ Remover Filtro</span></button>
+                  <div className="flex flex-wrap items-center gap-2">
+                     {!isCurrentMonth && ( <button onClick={handleGoToCurrent} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#444] text-[#8c9ba5] hover:text-white font-bold text-[10px] transition-all"><span>Voltar ao Atual</span></button> )}
+                     <button onClick={() => setMesClicado(null)} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] hover:border-[#444] text-[#8c9ba5] hover:text-white font-bold text-[10px] transition-all">RESTAURAR PADRÃO</button>
                   </div>
                 </div>
               ) : (
@@ -1231,9 +1202,14 @@ export default function PainelInventarios({ data = [] }) {
         {/* FULL WIDTH BOTTOM ROW (TABELA DIVERGÊNCIAS) */}
         <div className="bg-[#0c0c0c] border-t border-[#2A2A2A] p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[11px] font-bold tracking-widest text-[#e74c3c] uppercase flex items-center gap-2">
-              <span>⚠️ DETALHAMENTO DE DIVERGÊNCIAS</span>
-            </h3>
+            <div>
+              <h3 className="text-[11px] font-bold tracking-widest text-[#e74c3c] uppercase flex items-center gap-2">
+                <span>⚠️ DETALHAMENTO DE DIVERGÊNCIAS</span>
+              </h3>
+              <span className="text-[10px] text-muted font-medium mt-0.5 block">
+                Itens com diferença entre sistema e físico (Snapshot: {mesClicado || 'Todo o histórico'})
+              </span>
+            </div>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-muted font-mono">{stats.linhasDivergentes.length} registros</span>
               {stats.linhasDivergentes.length > 0 && (
@@ -1249,11 +1225,23 @@ export default function PainelInventarios({ data = [] }) {
           </div>
 
           {stats.linhasDivergentes.length > 0 ? (
-            <div className="overflow-x-auto overflow-y-auto custom-scrollbar border border-[#222222] rounded-xl shadow-inner bg-[#111111] max-h-[380px] scroll-pt-12">
-              <TabelaGenerica
-                dados={stats.linhasDivergentes.slice(0, 50)}
-                columns={colsDivergencias}
-              />
+            <div className="border border-[#222222] rounded-xl shadow-inner bg-[#111111] overflow-hidden">
+              <div className="grid grid-cols-12 px-3 py-2.5 border-b border-[#222222] text-[10px] font-bold text-[#8c9ba5] uppercase tracking-wider bg-[#101010]">
+                <div className="col-span-2">Unidade</div>
+                <div className="col-span-1 text-center">Nº Inv.</div>
+                <div className="col-span-1 px-1">Código SKU</div>
+                <div className="col-span-3 px-2">Nome do Produto</div>
+                <div className="col-span-1 text-right">Sistema</div>
+                <div className="col-span-1 text-right">Físico</div>
+                <div className="col-span-1 text-right">Divergência</div>
+                <div className="col-span-1 text-right">Preço Médio</div>
+                <div className="col-span-1 text-right">Valor Total</div>
+              </div>
+              <div className="max-h-[380px] overflow-y-auto custom-scrollbar p-1 space-y-1" tabIndex={0} role="list">
+                {stats.linhasDivergentes.slice(0, 50).map((row, idx) => (
+                  <DivergenceRowItem key={idx} row={row} index={idx} />
+                ))}
+              </div>
             </div>
           ) : (
             <div className="bg-[#111111] border border-[#222222] rounded-xl p-6 text-center flex flex-col items-center justify-center">
@@ -1268,7 +1256,7 @@ export default function PainelInventarios({ data = [] }) {
 
       {/* MODAL EM TELA CHEIA */}
       {isModalOpen && (
-        <FullScreenPortal onClose={() => setIsModalOpen(false)}>
+        <FullScreenPortal onClose={fecharModalDivergencias}>
           <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col animate-fade-in backdrop-blur-sm">
             <div className="flex justify-between items-center px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shadow-xl shrink-0">
               <div className="flex items-center gap-3">
@@ -1287,7 +1275,7 @@ export default function PainelInventarios({ data = [] }) {
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   <span>Baixar Excel Completo</span>
                 </button>
-                <button onClick={() => setIsModalOpen(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)]">
+                <button onClick={fecharModalDivergencias} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)]">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   <span>Fechar Janela</span>
                 </button>
@@ -1315,11 +1303,21 @@ export default function PainelInventarios({ data = [] }) {
               </div>
 
               <div className="border border-[#2A2A2A] rounded-xl bg-[#121212] overflow-hidden shadow-2xl h-full flex flex-col flex-grow">
-                <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh] scroll-pt-12">
-                  <TabelaGenerica
-                    dados={linhasDivergentesFiltradasModal.slice(0, 1000)}
-                    columns={colsDivergencias}
-                  />
+                <div className="grid grid-cols-12 px-3 py-2.5 border-b border-[#222222] text-[10px] font-bold text-[#8c9ba5] uppercase tracking-wider bg-[#101010] shrink-0">
+                  <div className="col-span-2">Unidade</div>
+                  <div className="col-span-1 text-center">Nº Inv.</div>
+                  <div className="col-span-1 px-1">Código SKU</div>
+                  <div className="col-span-3 px-2">Nome do Produto</div>
+                  <div className="col-span-1 text-right">Sistema</div>
+                  <div className="col-span-1 text-right">Físico</div>
+                  <div className="col-span-1 text-right">Divergência</div>
+                  <div className="col-span-1 text-right">Preço Médio</div>
+                  <div className="col-span-1 text-right">Valor Total</div>
+                </div>
+                <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh] p-1 space-y-1" tabIndex={0} role="list">
+                  {linhasDivergentesFiltradasModal.slice(0, 1000).map((row, idx) => (
+                    <DivergenceRowItem key={idx} row={row} index={idx} />
+                  ))}
                   {linhasDivergentesFiltradasModal.length > 1000 && (
                     <div className="p-4 text-center text-xs text-muted border-t border-[#333]">
                       Mostrando os primeiros 1.000 itens para garantir o desempenho visual. Faça o download em Excel para visualizar todos os {linhasDivergentesFiltradasModal.length} registros.
@@ -1347,7 +1345,7 @@ function EmpresaRow({ emp, dados, activeIds, onToggle, onToggleAll, isSelected, 
     <div 
       onClick={onSelect}
       className={`rounded-xl p-3 transition-all duration-300 cursor-pointer shadow-inner ${
-        isSelected ? 'bg-[#1c1612] border border-accent shadow-[0_0_15px_rgba(245,130,32,0.2)]' : 'bg-[#111111] border border-[#2A2A2A] hover:border-[#444]'
+        isSelected ? 'bg-[#1c1612] border-l-3 border-l-accent border border-accent shadow-[0_0_15px_rgba(245,130,32,0.2)]' : 'bg-[#111111] border-l-3 border-l-transparent border border-[#2A2A2A] hover:border-[#444]'
       }`}
     >
       <div className="grid grid-cols-12 gap-0 items-center text-xs">
