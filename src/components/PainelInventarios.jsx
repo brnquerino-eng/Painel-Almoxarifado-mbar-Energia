@@ -329,7 +329,7 @@ export default function PainelInventarios({ data = [] }) {
         const prMedio = item.custo_unitario ?? item.preco_medio ?? item.valor_unitario ?? 0;
         return item.diferenca_val ?? item.val_diferenca ?? item.diff_val ?? (divQtd * prMedio);
       };
-      return getVal(b) - getVal(a); // Ordem decrescente com sinal (positivos maiores primeiro, negativos embaixo)
+      return getVal(b) - getVal(a); // Do maior para o menor (com sinal: positivos no topo, negativos embaixo)
     });
     
     const itensDivergentes = rowsDivergentes.length
@@ -531,7 +531,7 @@ export default function PainelInventarios({ data = [] }) {
       });
     });
 
-    const nomeArquivo = `Apresentacao_Inventarios_${mesClicado ? mesClicado.replace('/','-') : 'Geral'}.pptx`;
+    const nomeArquivo = `Apresentacao_Inventarios_${mesClicado ? mesClicado.replace('/','-' ) : 'Geral'}.pptx`;
     pres.writeFile({ fileName: nomeArquivo });
   }, [stats, empresasDisponiveis, dfInv, mesClicado]);
 
@@ -783,11 +783,15 @@ export default function PainelInventarios({ data = [] }) {
         .js-plotly-plot .plotly .cursor-crosshair {
           cursor: pointer !important;
         }
-        /* Remove completely any unwanted row selection borders/lines/outlines */
-        table tr, table td, tr *, td *, [role="row"], .tabela-generica tr, .tabela-generica td {
-          border-color: transparent !important;
-          box-shadow: none !important;
+        /* Remove ugly bounding boxes/outlines on table rows when clicked/active */
+        table tr:focus, table tr:active, table td:focus, table td:active,
+        [role="row"]:focus, [role="row"]:active {
           outline: none !important;
+          box-shadow: none !important;
+        }
+        /* Restore left accent border highlight when table rows are active/selected */
+        table tr[aria-selected="true"], table tr.selected, table tr:active {
+          border-left: 3px solid #f58220 !important;
         }
       `}</style>
 
