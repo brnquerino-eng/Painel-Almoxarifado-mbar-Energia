@@ -294,7 +294,7 @@ export default function PainelInventarios({ data = [] }) {
 
     const invsFinalizadosSet = new Set(
       dfInv.filter(r => r.data_fim && String(r.data_fim).trim() !== '' && String(r.data_fim).toLowerCase() !== 'none' && String(r.data_fim).toLowerCase() !== 'null')
-           .map(r => r.id_inventario)
+         .map(r => r.id_inventario)
     )
 
     const idsPendentes = [...uniqueInvs].filter(id => !invsFinalizadosSet.has(id)).map(limparId).sort((a, b) => Number(a) - Number(b))
@@ -588,6 +588,55 @@ export default function PainelInventarios({ data = [] }) {
     XLSX.writeFile(wb, `itens_divergentes_${mesClicado || 'atual'}.xlsx`)
   }, [stats.linhasDivergentes, mesClicado])
 
+  // Gerenciamento global de navegação por teclado com identificação correta do container (Main vs Modal)
+  useEffect(() => {
+    const handleNavigationKeyDown = (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      
+      const items = isModalOpen ? linhasDivergentesFiltradasModal.slice(0, 1000) : stats.linhasDivergentes.slice(0, 50);
+      if (!items.length) return;
+
+      e.preventDefault();
+
+      let nextIndex = 0;
+
+      if (!selDivergenciaKey) {
+        nextIndex = 0;
+      } else {
+        const currentIndex = items.findIndex((row, idx) => {
+          return `${row.empresa_nome || row.unidade}-${row.codigo_produto || row.codigo}-${row.id_inventario}-${idx}` === selDivergenciaKey;
+        });
+
+        if (currentIndex !== -1) {
+          if (e.key === 'ArrowDown') {
+            nextIndex = Math.min(currentIndex + 1, items.length - 1);
+          } else {
+            nextIndex = Math.max(currentIndex - 1, 0);
+          }
+        } else {
+          nextIndex = 0;
+        }
+      }
+
+      const nextRow = items[nextIndex];
+      if (nextRow) {
+        const nextKey = `${nextRow.empresa_nome || nextRow.unidade}-${nextRow.codigo_produto || nextRow.codigo}-${nextRow.id_inventario}-${nextIndex}`;
+        setSelDivergenciaKey(nextKey);
+
+        setTimeout(() => {
+          const domId = isModalOpen ? `row-modal-${nextKey}` : `row-main-${nextKey}`;
+          const el = document.getElementById(domId);
+          if (el) {
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+        }, 20);
+      }
+    };
+
+    window.addEventListener('keydown', handleNavigationKeyDown);
+    return () => window.removeEventListener('keydown', handleNavigationKeyDown);
+  }, [selDivergenciaKey, isModalOpen, linhasDivergentesFiltradasModal, stats.linhasDivergentes]);
+
   if (!data.length) { return <div className="bg-[#161616] border border-[#2A2A2A] rounded-2xl text-center py-16 text-muted shadow-xl text-xs">⚠️ Nenhum dado de inventário encontrado na base.</div> }
 
   const DONUT_LAYOUT = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: { l: 0, r: 0, t: 0, b: 0 }, height: 135, showlegend: false }
@@ -603,7 +652,7 @@ export default function PainelInventarios({ data = [] }) {
     return (
       <div 
         onClick={() => setSelResumoRow(isActive ? null : id)}
-        className={`grid grid-cols-12 items-center py-2.5 border-b border-[#222222] transition-colors rounded-lg px-2 cursor-pointer ${isActive ? 'bg-[#1c1612] border-l-3 border-l-accent border-accent/40 shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' : 'hover:bg-[#1a1a1a] border-l-3 border-l-transparent'}`}
+        className={`grid grid-cols-12 items-center py-2.5 border-b border-[#222222] transition-colors rounded-lg px-2 cursor-pointer ${isActive ? 'bg-[#1c1612] border border-accent/20 border-l-[4px] border-l-accent shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' : 'hover:bg-[#1a1a1a] border border-transparent border-b-[#222222] border-l-[4px] border-l-transparent'}`}
       >
         <div className="col-span-5 flex items-center gap-2">
           <div className="text-[#60a5fa]">{icon}</div>
@@ -622,10 +671,11 @@ export default function PainelInventarios({ data = [] }) {
     )
   }
 
-  // Componente de Linha de Divergência padronizado em Grade (Sem tabelas nativas)
-  const DivergenceRowItem = ({ row, index }) => {
+  // Componente de Linha de Divergência padronizado com suporte a ID isolado (Main vs Modal)
+  const DivergenceRowItem = ({ row, index, isModal = false }) => {
     const uniqueKey = `${row.empresa_nome || row.unidade}-${row.codigo_produto || row.codigo}-${row.id_inventario}-${index}`
     const isActive = selDivergenciaKey === uniqueKey
+    const domId = isModal ? `row-modal-${uniqueKey}` : `row-main-${uniqueKey}`
 
     const unidade = row.empresa_nome || row.unidade || '—'
     const idInv = limparId(row.id_inventario)
@@ -638,7 +688,6 @@ export default function PainelInventarios({ data = [] }) {
     const prMedio = row.custo_unitario ?? row.preco_medio ?? row.valor_unitario ?? 0
     const divVal = row.diferenca_val ?? row.val_diferenca ?? row.diff_val ?? (divQtd * prMedio)
 
-    // Positivo = azul | Negativo = vermelho | Zero = branco
     const corQtd = divQtd > 0 ? 'text-[#3498db]' : divQtd < 0 ? 'text-[#e74c3c]' : 'text-white'
     const corVal = divVal > 0 ? 'text-[#3498db]' : divVal < 0 ? 'text-[#e74c3c]' : 'text-white'
 
@@ -646,6 +695,7 @@ export default function PainelInventarios({ data = [] }) {
 
     return (
       <div 
+        id={domId}
         role="row"
         tabIndex={0}
         onClick={toggle}
@@ -655,10 +705,10 @@ export default function PainelInventarios({ data = [] }) {
             toggle()
           }
         }}
-        className={`grid grid-cols-12 items-center py-2.5 px-3 border-b border-[#222222] transition-all rounded-lg cursor-pointer text-xs outline-none focus:ring-1 focus:ring-[#3498db]/50 focus:bg-[#1a1a1a] ${
+        className={`grid grid-cols-12 items-center py-2.5 px-3 transition-all rounded-lg cursor-pointer text-xs outline-none focus:ring-1 focus:ring-accent/50 ${
           isActive 
-            ? 'bg-[#1c1612] border-l-3 border-l-accent border-accent/40 shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' 
-            : 'hover:bg-[#1a1a1a] border-l-3 border-l-transparent'
+            ? 'bg-[#1c1612] border border-accent/30 border-l-[4px] border-l-accent shadow-[inset_0_0_15px_rgba(245,130,32,0.15)]' 
+            : 'hover:bg-[#1a1a1a] border border-transparent border-b-[#222222] border-l-[4px] border-l-transparent'
         }`}
       >
         <div className="col-span-2 text-white font-medium truncate pr-2" title={unidade}>{unidade}</div>
@@ -1237,9 +1287,13 @@ export default function PainelInventarios({ data = [] }) {
                 <div className="col-span-1 text-right">Preço Médio</div>
                 <div className="col-span-1 text-right">Valor Total</div>
               </div>
-              <div className="max-h-[380px] overflow-y-auto custom-scrollbar p-1 space-y-1" tabIndex={0} role="list">
+              <div 
+                className="max-h-[380px] overflow-y-auto custom-scrollbar p-1 space-y-1 outline-none focus:ring-1 focus:ring-accent/30" 
+                tabIndex={0} 
+                role="list"
+              >
                 {stats.linhasDivergentes.slice(0, 50).map((row, idx) => (
-                  <DivergenceRowItem key={idx} row={row} index={idx} />
+                  <DivergenceRowItem key={idx} row={row} index={idx} isModal={false} />
                 ))}
               </div>
             </div>
@@ -1314,9 +1368,13 @@ export default function PainelInventarios({ data = [] }) {
                   <div className="col-span-1 text-right">Preço Médio</div>
                   <div className="col-span-1 text-right">Valor Total</div>
                 </div>
-                <div className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh] p-1 space-y-1" tabIndex={0} role="list">
+                <div 
+                  className="overflow-y-auto custom-scrollbar flex-grow max-h-[70vh] p-1 space-y-1 outline-none focus:ring-1 focus:ring-accent/30" 
+                  tabIndex={0} 
+                  role="list"
+                >
                   {linhasDivergentesFiltradasModal.slice(0, 1000).map((row, idx) => (
-                    <DivergenceRowItem key={idx} row={row} index={idx} />
+                    <DivergenceRowItem key={idx} row={row} index={idx} isModal={true} />
                   ))}
                   {linhasDivergentesFiltradasModal.length > 1000 && (
                     <div className="p-4 text-center text-xs text-muted border-t border-[#333]">
