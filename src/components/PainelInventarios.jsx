@@ -661,8 +661,8 @@ export default function PainelInventarios({ data = [] }) {
     return anns
   }, [chartEvolucao, vis, mesClicado])
 
-  const getCor = (val) => val >= 95 ? '#2ecc71' : val >= 80 ? '#f58220' : '#e74c3c'
-  const getStatusConf = (val) => val >= 95 ? 'EXCELENTE' : val >= 80 ? 'ATENÇÃO' : 'CRÍTICO'
+  const getCor = (val) => val >= 95 ? '#2ecc71' : val >= 90 ? '#f58220' : '#e74c3c'
+  const getStatusConf = (val) => val >= 95 ? 'EXCELENTE' : val >= 90 ? 'ATENÇÃO' : 'CRÍTICO'
 
   const corAcuFis = getCor(stats.acuraciaItens)
   const corAcuFin = getCor(stats.acuraciaValor)
