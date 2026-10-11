@@ -62,7 +62,9 @@ const COLS = [
   'codigo_local_estoque',
   'ge',
   'preco_medio',
-  'qtde_entrada_compras'
+  'qtde_entrada_compras',
+  'Segmento',
+  'Região'
 ].join(',')
 
 function cleanStr(val) {
@@ -89,6 +91,8 @@ function normalizeRow(row) {
     nome_local_estoque: cleanStr(row.nome_local_estoque),
     codigo_local_estoque: cleanStr(row.codigo_local_estoque),
     ge: cleanStr(row.ge),
+    Segmento: cleanStr(row.Segmento || row.segmento),
+    Região: cleanStr(row.Região || row.regiao),
     preco_medio: toNum(row.preco_medio),
     qtde_entrada_compras: toNum(row.qtde_entrada_compras),
     valor_saldo_atual: toNum(row.valor_saldo_atual),
@@ -120,7 +124,9 @@ export function useEstoqueData() {
                            cachedData.length > 0 && 
                            'ge' in cachedData[0] && 
                            'preco_medio' in cachedData[0] &&
-                           'qtde_entrada_compras' in cachedData[0]
+                           'qtde_entrada_compras' in cachedData[0] &&
+                           ('Segmento' in cachedData[0] || 'segmento' in cachedData[0]) &&
+                           ('Região' in cachedData[0] || 'regiao' in cachedData[0])
 
       if (isValidCache) {
         setData(cachedData)
