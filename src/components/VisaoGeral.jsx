@@ -398,9 +398,11 @@ export default function VisaoGeral({ data }) {
   // snapshot = fechamento (último mês do período) → estoques, rankings de saldo, maiores valores, parados
   // snapshotPeriodo = todos os meses do período → compras, consumo, SKUs, compras sem consumo
   // snapshotPrev = fechamento do período anterior (para variação de estoque)
-  const { snapshot, snapshotPeriodo, snapshotPrev } = useMemo(() => {
+  const { snapshot, snapshotPeriodo, snapshotPrev, snapshotPeriodoPrev } = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
-    if (!p || !dfFiltrado.length) return { snapshot: [], snapshotPeriodo: [], snapshotPrev: [] }
+    if (!p || !dfFiltrado.length) {
+      return { snapshot: [], snapshotPeriodo: [], snapshotPrev: [], snapshotPeriodoPrev: [] }
+    }
 
     const snap = dfFiltrado.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes)
 
@@ -433,13 +435,24 @@ export default function VisaoGeral({ data }) {
       for (let m = 1; m <= 12; m++) prevMonths.push({ ano: p.ano - 1, mes: m })
     }
 
-    // Fechamento do período anterior = último mês do prevMonths
+    // Fechamento do período anterior = último mês do prevMonths (para ESTOQUE)
     const lastPrev = prevMonths[prevMonths.length - 1]
     const snapPrev = lastPrev
       ? dfFiltrado.filter((r) => r.tmp_ano_num === lastPrev.ano && r.tmp_mes_num === lastPrev.mes)
       : []
 
-    return { snapshot: snap, snapshotPeriodo: snapPeriodo, snapshotPrev: snapPrev }
+    // Período anterior COMPLETO (para COMPRAS / CONSUMO / SKUs)
+    const prevMonthSet = new Set(prevMonths.map(m => `${m.ano}-${m.mes}`))
+    const snapPeriodoPrev = prevMonths.length > 1
+      ? dfFiltrado.filter((r) => prevMonthSet.has(`${r.tmp_ano_num}-${r.tmp_mes_num}`))
+      : snapPrev
+
+    return {
+      snapshot: snap,
+      snapshotPeriodo: snapPeriodo,
+      snapshotPrev: snapPrev,
+      snapshotPeriodoPrev: snapPeriodoPrev,
+    }
   }, [dfFiltrado, periodoEfetivo, periodMonths, granularidade])
 
   useEffect(() => {
@@ -546,24 +559,36 @@ export default function VisaoGeral({ data }) {
       }
     }
 
-    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0, valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
+    // ========== PERÍODO ANTERIOR ==========
+    // Estoques / categorias → FECHAMENTO (snapshotPrev)
+    // Compras / Consumo / SKUs → PERÍODO INTEIRO (snapshotPeriodoPrev)
+    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
+    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
     const skusPrevSet = new Set()
-    
+
     for (const r of snapshotPrev) {
       const u = r.unidade_almoxarifado
       const val = parseNumber(r.valor_saldo_atual)
-      
+
       valEstoquePrev += val
-      valComprasPrev += parseNumber(r.valor_entrada_compras)
-      valConsumoPrev += Math.abs(parseNumber(r.valor_saida_cons_interno))
       if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
 
       if (r._isCritico) valCriticoPrev += val
       if (r._isObsoleto) valObsoletoPrev += val
       if (r._isObra) valObraPrev += val
       if (r._isInsumo) valInsumoPrev += val
-      
-      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) skusPrevSet.add(r.codigo_produto)
+    }
+
+    const fonteFluxosPrev = (snapshotPeriodoPrev && snapshotPeriodoPrev.length)
+      ? snapshotPeriodoPrev
+      : snapshotPrev
+
+    for (const r of fonteFluxosPrev) {
+      valComprasPrev += parseNumber(r.valor_entrada_compras)
+      valConsumoPrev += Math.abs(parseNumber(r.valor_saida_cons_interno))
+      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
+        skusPrevSet.add(r.codigo_produto)
+      }
     }
 
     const arrVariacao = []
@@ -609,7 +634,7 @@ export default function VisaoGeral({ data }) {
       compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
       variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01), skusUnidade: skusUnidadeArr, exposicaoCategorias: exposicao, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
     }
-  }, [snapshot, snapshotPrev, snapshotPeriodo])
+  }, [snapshot, snapshotPrev, snapshotPeriodo, snapshotPeriodoPrev])
 
   const rankingUnidadeAtivo = useMemo(() => {
     switch(abaRankingUnidade) {
@@ -664,6 +689,7 @@ export default function VisaoGeral({ data }) {
           compras: 0,
           consumo: 0,
           comprasSemConsumo: 0,
+          skuFluxos: new Map(), // unidade||codigo → { entrada, saida }
           skus: new Set(),
           chavesMap: new Map(),
         })
@@ -685,8 +711,14 @@ export default function VisaoGeral({ data }) {
       // Fluxos — sempre somam
       item.compras += valEntrada
       item.consumo += Math.abs(valSaida)
-      if (valEntrada > 0.01 && Math.abs(valSaida) <= (valEntrada * 0.05)) {
-        item.comprasSemConsumo += valEntrada
+
+      // Fluxo por SKU (regra unificada de compras sem consumo aplicada depois)
+      if ((valEntrada > 0 || Math.abs(valSaida) > 0) && r.codigo_produto) {
+        const skuKey = `${r.unidade_almoxarifado || ''}||${r.codigo_produto}`
+        if (!item.skuFluxos.has(skuKey)) item.skuFluxos.set(skuKey, { entrada: 0, saida: 0 })
+        const flux = item.skuFluxos.get(skuKey)
+        flux.entrada += valEntrada
+        flux.saida += Math.abs(valSaida)
       }
 
       // SKUs
@@ -725,6 +757,7 @@ export default function VisaoGeral({ data }) {
           sortKey: key,
           total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
           compras: 0, consumo: 0, comprasSemConsumo: 0,
+          skuFluxos: new Map(),
           skus: new Set(), chavesMap: new Map(),
         })
       }
@@ -733,6 +766,17 @@ export default function VisaoGeral({ data }) {
     }
   }
 }
+    // Calcula comprasSemConsumo mensal com a MESMA regra da tabela (por SKU no mês)
+    for (const item of monthlyMap.values()) {
+      let csc = 0
+      for (const flux of item.skuFluxos.values()) {
+        if (flux.entrada > 0.01 && flux.saida <= flux.entrada * 0.05) {
+          csc += flux.entrada
+        }
+      }
+      item.comprasSemConsumo = csc
+    }
+
     const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
 
     // Helper: monta o objeto de retorno a partir de uma lista de pontos
@@ -785,9 +829,9 @@ export default function VisaoGeral({ data }) {
         groupKey = `${m.ano}-S${sem}`
         periodoLabelStr = `S${sem}/${String(m.ano).slice(-2)}`
       } else {
-        // anual
+        // anual — label NÃO numérico para o Plotly não tratar como eixo linear
         groupKey = `${m.ano}`
-        periodoLabelStr = `${m.ano}`
+        periodoLabelStr = `Ano ${m.ano}`
       }
 
       if (!groupMap.has(groupKey)) {
@@ -805,6 +849,7 @@ export default function VisaoGeral({ data }) {
           compras: 0,
           consumo: 0,
           comprasSemConsumo: 0,
+          skuFluxos: new Map(),
           skus: new Set(),
           chavesMap: new Map(),
         })
@@ -815,7 +860,14 @@ export default function VisaoGeral({ data }) {
       // --- Fluxos: sempre SOMA ---
       g.compras += m.compras
       g.consumo += m.consumo
-      g.comprasSemConsumo += m.comprasSemConsumo
+
+      // --- Compras sem consumo: une fluxos por SKU (regra aplicada depois no grupo) ---
+      for (const [skuKey, flux] of m.skuFluxos.entries()) {
+        if (!g.skuFluxos.has(skuKey)) g.skuFluxos.set(skuKey, { entrada: 0, saida: 0 })
+        const gf = g.skuFluxos.get(skuKey)
+        gf.entrada += flux.entrada
+        gf.saida += flux.saida
+      }
 
       // --- SKUs: DISTINCT (união dos sets) ---
       for (const sku of m.skus) g.skus.add(sku)
@@ -835,6 +887,17 @@ export default function VisaoGeral({ data }) {
         g.obra = m.obra
         g.insumo = m.insumo
       }
+    }
+
+    // Aplica regra dos 5% no PERÍODO do grupo (igual à tabela)
+    for (const g of groupMap.values()) {
+      let csc = 0
+      for (const flux of g.skuFluxos.values()) {
+        if (flux.entrada > 0.01 && flux.saida <= flux.entrada * 0.05) {
+          csc += flux.entrada
+        }
+      }
+      g.comprasSemConsumo = csc
     }
 
     const sorted = [...groupMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
@@ -1591,6 +1654,7 @@ export default function VisaoGeral({ data }) {
               shapes: chartShapes, 
               annotations: chartAnnotations, 
               xaxis: { 
+                type: 'category',
                 showgrid: false, 
                 zeroline: false, 
                 tickmode: 'array', 
@@ -1952,7 +2016,8 @@ export default function VisaoGeral({ data }) {
             hovermode: 'x unified', 
             hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, 
             shapes: chartShapes, 
-            xaxis: { 
+            xaxis: {
+              type: 'category', 
               showgrid: false, 
               zeroline: false, 
               tickmode: 'array', 
@@ -2303,7 +2368,8 @@ export default function VisaoGeral({ data }) {
             bargap: 0,
             margin: { l: 30, r: 20, t: 55, b: 40 },
             shapes: chartShapesSkus,
-            xaxis: { 
+            xaxis: {
+              type: 'category', 
               showgrid: false, 
               zeroline: false, 
               tickmode: 'array', 
@@ -2431,7 +2497,8 @@ export default function VisaoGeral({ data }) {
               hovermode: 'x unified', 
               hoverlabel: { bgcolor: '#0c0c0c', bordercolor: '#333333', font: { color: '#ffffff', family: 'Inter', size: 12 } }, 
               shapes: chartShapesGiro, 
-              xaxis: { 
+              xaxis: {
+              type: 'category', 
                 showgrid: false, 
                 zeroline: false, 
                 tickmode: 'array', 
