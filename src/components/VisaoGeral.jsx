@@ -194,9 +194,10 @@ export default function VisaoGeral({ data }) {
   const { state, dispatch } = useInventoryState()
   const [initialLoad, setInitialLoad] = useState(true)
 
-  const {
-    escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
-    periodoAtivo, activeCard, selectedBarraRanking,
+const {
+  escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
+  regioesSel = [], segmentosSel = [],
+  periodoAtivo, activeCard, selectedBarraRanking,
     selectedBarraExposicao, selectedBarraCritico,
     selectedBarraObsoleto, selectedBarraObra,
     selectedBarraCompraConsumo, selectedBarraVariacao,
@@ -271,14 +272,19 @@ export default function VisaoGeral({ data }) {
     })
   }, [data])
 
-  const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes } = useMemo(() => {
-    if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [] }
-    const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
-    const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
-    const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
-    const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
-    return { unidadesOpcoes: uniques, unidadesAtivas: ativas, unidadesGerenciais: gerenciais, anoOpcoes: anos }
-  }, [dadosSanitizados])
+const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes, regioesOpcoes, segmentosOpcoes } = useMemo(() => {
+  if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [], regioesOpcoes: [], segmentosOpcoes: [] }
+  const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
+  const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
+  const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
+  const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
+  
+  // Tratativa para capturar "Região" / "Segmento" independente do case sensitive que vier do banco
+  const regioes = [...new Set(dadosSanitizados.map((r) => r['Região'] || r.regiao).filter(Boolean))].sort()
+  const segmentos = [...new Set(dadosSanitizados.map((r) => r['Segmento'] || r.segmento).filter(Boolean))].sort()
+  
+  return { unidadesOpcoes: uniques, unidadesAtivas: ativas, unidadesGerenciais: gerenciais, anoOpcoes: anos, regioesOpcoes: regioes, segmentosOpcoes: segmentos }
+}, [dadosSanitizados])
 
   useEffect(() => {
     if (anoOpcoes && anoOpcoes.length > 0 && initialLoad) {
@@ -311,18 +317,27 @@ export default function VisaoGeral({ data }) {
       const setA = new Set(anosSel)
       df = df.filter(r => setA.has(String(r.ano_referencia)))
     }
-    if (tiposEstoqueSel.length > 0) {
-      const querCritico = tiposEstoqueSel.includes('Crítico')
-      const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
-      const querObra = tiposEstoqueSel.includes('Obra')
-      const querInsumo = tiposEstoqueSel.includes('Insumo')
-      const querOp = tiposEstoqueSel.includes('Operacional')
-      df = df.filter(r => (querCritico && r._isCritico) || (querObsoleto && r._isObsoleto) || (querObra && r._isObra) || (querInsumo && r._isInsumo) || (querOp && r._isOperacional))
-    }
-    return df
-  }, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, getUnidadesPermitidas, anoOpcoes])
+// NOVO BLOCO
+if (tiposEstoqueSel.length > 0) {
+  const querCritico = tiposEstoqueSel.includes('Crítico')
+  const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
+  const querObra = tiposEstoqueSel.includes('Obra')
+  const querInsumo = tiposEstoqueSel.includes('Insumo')
+  const querOp = tiposEstoqueSel.includes('Operacional')
+  df = df.filter(r => (querCritico && r._isCritico) || (querObsoleto && r._isObsoleto) || (querObra && r._isObra) || (querInsumo && r._isInsumo) || (querOp && r._isOperacional))
+}
+if (regioesSel.length > 0) {
+  const setR = new Set(regioesSel)
+  df = df.filter(r => setR.has(r['Região'] || r.regiao))
+}
+if (segmentosSel.length > 0) {
+  const setS = new Set(segmentosSel)
+  df = df.filter(r => setS.has(r['Segmento'] || r.segmento))
+}
+return df
+}, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, getUnidadesPermitidas, anoOpcoes])
 
-  useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
+useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
@@ -1032,6 +1047,8 @@ export default function VisaoGeral({ data }) {
     dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: [] });
     dispatch({ type: 'SET_ESCOPOS', payload: [] });
     dispatch({ type: 'SET_UNIDADES', payload: [] });
+    dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: [] });
+    dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: [] });
     
     if (anoOpcoes && anoOpcoes.length > 0) {
       dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
@@ -1514,7 +1531,27 @@ export default function VisaoGeral({ data }) {
                 placeholder={unidadesSel.length === 0 || unidadesSel.length === opcoesUnid.length ? 'Todas as Usinas' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} 
               />
             </div>
-            
+          
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Região</label>
+              <CyberMultiSelect 
+                options={regioesOpcoes} 
+                selected={regioesSel} 
+                onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: val })} 
+                placeholder={regioesSel.length === 0 || regioesSel.length === regioesOpcoes.length ? 'Todas' : (regioesSel.length === 1 ? regioesSel[0] : `${regioesSel.length} Sel.`)} 
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Segmento</label>
+              <CyberMultiSelect 
+                options={segmentosOpcoes} 
+                selected={segmentosSel} 
+                onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: val })} 
+                placeholder={segmentosSel.length === 0 || segmentosSel.length === segmentosOpcoes.length ? 'Todos' : (segmentosSel.length === 1 ? segmentosSel[0] : `${segmentosSel.length} Sel.`)} 
+              />
+            </div>
+
             <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label>
               <CyberMultiSelect 
