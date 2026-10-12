@@ -120,6 +120,47 @@ function normalizeSelectedUnidades(raw) {
   return out
 }
 
+
+/** Normaliza nome de coluna: minúsculo, sem acento, sem espaços extras */
+function normKeyName(k) {
+  return String(k || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_\-]+/g, '')
+    .trim()
+}
+
+/**
+ * Busca valor em um registro por nomes candidatos de coluna.
+ * Aceita variação de acento, case e espaços (ex.: "Região", "REGIAO", "regiao ").
+ */
+function pickField(r, candidates) {
+  if (!r || typeof r !== 'object') return ''
+  const wanted = new Set(candidates.map(normKeyName))
+  // 1) tentativa direta (rápida)
+  for (const c of candidates) {
+    if (r[c] != null && String(r[c]).trim() !== '') return String(r[c]).trim()
+  }
+  // 2) varre chaves normalizando
+  for (const k of Object.keys(r)) {
+    if (wanted.has(normKeyName(k))) {
+      const v = r[k]
+      if (v != null && String(v).trim() !== '') return String(v).trim()
+    }
+  }
+  return ''
+}
+
+function getRegiaoFromRow(r) {
+  return pickField(r, ['Região', 'Regiao', 'regiao', 'REGIAO', 'REGIÃO', 'region', 'Region', 'nm_regiao', 'nome_regiao'])
+}
+
+function getSegmentoFromRow(r) {
+  return pickField(r, ['Segmento', 'segmento', 'SEGMENTO', 'segment', 'Segment', 'nm_segmento', 'nome_segmento', 'ds_segmento'])
+}
+
+
 function filtrarListaFS(lista, { texto, unidades, camposTexto = ['nome', 'codigo'], maxItems = 1000, matchUnidade }) {
   if (!lista || lista.length === 0) {
     return { dados: [], total: 0, unidadesOpcoes: [] }
@@ -272,26 +313,42 @@ const {
     })
   }, [data])
 
-const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes, regioesOpcoes, segmentosOpcoes } = useMemo(() => {
-  if (!dadosSanitizados || dadosSanitizados.length === 0) return { unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [], anoOpcoes: [], regioesOpcoes: [], segmentosOpcoes: [] }
-  const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
-  const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
-  const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
-  const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
-  
-  // Tratativa para capturar "Região" / "Segmento" independente do case sensitive que vier do banco
-  const regioes = [...new Set(dadosSanitizados.map((r) => r['Região'] || r.regiao).filter(Boolean))].sort()
-  const segmentos = [...new Set(dadosSanitizados.map((r) => r['Segmento'] || r.segmento).filter(Boolean))].sort()
-  
-  return { unidadesOpcoes: uniques, unidadesAtivas: ativas, unidadesGerenciais: gerenciais, anoOpcoes: anos, regioesOpcoes: regioes, segmentosOpcoes: segmentos }
-}, [dadosSanitizados])
+  // Catálogo completo (fonte bruta — não cascateia)
+  const {
+    unidadesOpcoes, unidadesAtivas, unidadesGerenciais,
+    anoOpcoesAll, regioesOpcoesAll, segmentosOpcoesAll,
+  } = useMemo(() => {
+    if (!dadosSanitizados || dadosSanitizados.length === 0) {
+      return {
+        unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [],
+        anoOpcoesAll: [], regioesOpcoesAll: [], segmentosOpcoesAll: [],
+      }
+    }
+    const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
+    const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
+    const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
+    const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
+    const regioes = [...new Set(dadosSanitizados.map((r) => getRegiaoFromRow(r)).filter(Boolean))].sort()
+    const segmentos = [...new Set(dadosSanitizados.map((r) => getSegmentoFromRow(r)).filter(Boolean))].sort()
+    return {
+      unidadesOpcoes: uniques,
+      unidadesAtivas: ativas,
+      unidadesGerenciais: gerenciais,
+      anoOpcoesAll: anos,
+      regioesOpcoesAll: regioes,
+      segmentosOpcoesAll: segmentos,
+    }
+  }, [dadosSanitizados])
+
+  // Compat: anoOpcoes "completo" para lógica de "todos selecionados"
+  const anoOpcoes = anoOpcoesAll
 
   useEffect(() => {
-    if (anoOpcoes && anoOpcoes.length > 0 && initialLoad) {
-      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
+    if (anoOpcoesAll && anoOpcoesAll.length > 0 && initialLoad) {
+      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoesAll[anoOpcoesAll.length - 1])] })
       setInitialLoad(false)
     }
-  }, [anoOpcoes, initialLoad, dispatch])
+  }, [anoOpcoesAll, initialLoad, dispatch])
 
   const getUnidadesPermitidas = useCallback((escopos) => {
     if (!escopos || escopos.length === 0) return unidadesOpcoes
@@ -301,43 +358,209 @@ const { unidadesOpcoes, unidadesAtivas, unidadesGerenciais, anoOpcoes, regioesOp
     return [...new Set(allowed)].sort()
   }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
-  const opcoesUnid = useMemo(() => getUnidadesPermitidas(escoposSel), [escoposSel, getUnidadesPermitidas])
+  // Helpers de campo (robustos a acento/case/espaços — ver getRegiaoFromRow / getSegmentoFromRow)
+  const getRegiaoRow = getRegiaoFromRow
+  const getSegmentoRow = getSegmentoFromRow
 
-  const dfFiltrado = useMemo(() => {
+  /**
+   * Aplica todos os filtros mestres, opcionalmente ignorando uma dimensão.
+   * Usado para montar as opções cascateadas de cada dropdown.
+   * exclude: 'escopo' | 'unidade' | 'ano' | 'tipo' | 'regiao' | 'segmento'
+   */
+  const aplicarFiltrosMestre = useCallback((exclude = null) => {
     let df = dadosSanitizados || []
-    if (escoposSel.length > 0) {
-      const allowed = new Set(getUnidadesPermitidas(escoposSel))
-      df = df.filter(r => allowed.has(r.unidade_almoxarifado))
-    }
-    if (unidadesSel.length > 0) {
-      const setU = new Set(unidadesSel)
-      df = df.filter(r => setU.has(r.unidade_almoxarifado))
-    }
-    if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length) {
-      const setA = new Set(anosSel)
-      df = df.filter(r => setA.has(String(r.ano_referencia)))
-    }
-// NOVO BLOCO
-if (tiposEstoqueSel.length > 0) {
-  const querCritico = tiposEstoqueSel.includes('Crítico')
-  const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
-  const querObra = tiposEstoqueSel.includes('Obra')
-  const querInsumo = tiposEstoqueSel.includes('Insumo')
-  const querOp = tiposEstoqueSel.includes('Operacional')
-  df = df.filter(r => (querCritico && r._isCritico) || (querObsoleto && r._isObsoleto) || (querObra && r._isObra) || (querInsumo && r._isInsumo) || (querOp && r._isOperacional))
-}
-if (regioesSel.length > 0) {
-  const setR = new Set(regioesSel)
-  df = df.filter(r => setR.has(r['Região'] || r.regiao))
-}
-if (segmentosSel.length > 0) {
-  const setS = new Set(segmentosSel)
-  df = df.filter(r => setS.has(r['Segmento'] || r.segmento))
-}
-return df
-}, [dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, getUnidadesPermitidas, anoOpcoes])
 
-useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
+    // Escopo (Ativa / Gerencial)
+    if (exclude !== 'escopo' && escoposSel.length > 0) {
+      const allowed = new Set(getUnidadesPermitidas(escoposSel))
+      df = df.filter((r) => allowed.has(r.unidade_almoxarifado))
+    }
+
+    // Usina
+    if (exclude !== 'unidade' && unidadesSel.length > 0) {
+      const setU = new Set(unidadesSel)
+      df = df.filter((r) => setU.has(r.unidade_almoxarifado))
+    }
+
+    // Ano (só restringe se não estiver "todos" do catálogo completo)
+    if (exclude !== 'ano' && anosSel.length > 0 && anoOpcoesAll.length > 0 && anosSel.length < anoOpcoesAll.length) {
+      const setA = new Set(anosSel)
+      df = df.filter((r) => setA.has(String(r.ano_referencia)))
+    }
+
+    // Categoria / lentes
+    if (exclude !== 'tipo' && tiposEstoqueSel.length > 0) {
+      const querCritico = tiposEstoqueSel.includes('Crítico')
+      const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
+      const querObra = tiposEstoqueSel.includes('Obra')
+      const querInsumo = tiposEstoqueSel.includes('Insumo')
+      const querOp = tiposEstoqueSel.includes('Operacional')
+      df = df.filter((r) =>
+        (querCritico && r._isCritico) ||
+        (querObsoleto && r._isObsoleto) ||
+        (querObra && r._isObra) ||
+        (querInsumo && r._isInsumo) ||
+        (querOp && r._isOperacional)
+      )
+    }
+
+    // Região
+    if (exclude !== 'regiao' && regioesSel.length > 0) {
+      const setR = new Set(regioesSel)
+      df = df.filter((r) => setR.has(getRegiaoRow(r)))
+    }
+
+    // Segmento
+    if (exclude !== 'segmento' && segmentosSel.length > 0) {
+      const setS = new Set(segmentosSel)
+      df = df.filter((r) => setS.has(getSegmentoRow(r)))
+    }
+
+    return df
+  }, [
+    dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
+    regioesSel, segmentosSel, getUnidadesPermitidas, anoOpcoesAll,
+  ])
+
+  // ---- Opções CASCATEADAS (cada lista vê o resultado dos OUTROS filtros) ----
+
+  // Usinas disponíveis (respeita escopo + demais filtros, ignora a própria seleção de usina)
+  const opcoesUnid = useMemo(() => {
+    const df = aplicarFiltrosMestre('unidade')
+    // Ainda aplica o recorte de escopo Ativa/Gerencial sobre o catálogo de unidades
+    const baseEscopo = new Set(getUnidadesPermitidas(escoposSel))
+    const set = new Set()
+    for (const r of df) {
+      const u = r.unidade_almoxarifado
+      if (u && baseEscopo.has(u)) set.add(u)
+    }
+    return [...set].sort()
+  }, [aplicarFiltrosMestre, getUnidadesPermitidas, escoposSel])
+
+  // Regiões disponíveis
+  const regioesOpcoes = useMemo(() => {
+    const df = aplicarFiltrosMestre('regiao')
+    const opts = [...new Set(df.map(getRegiaoFromRow).filter(Boolean))].sort()
+    // fallback: se o recorte não trouxe (campo ausente em parte dos rows), usa catálogo completo
+    return opts.length ? opts : regioesOpcoesAll
+  }, [aplicarFiltrosMestre, regioesOpcoesAll])
+
+  // Segmentos disponíveis
+  const segmentosOpcoes = useMemo(() => {
+    const df = aplicarFiltrosMestre('segmento')
+    const opts = [...new Set(df.map(getSegmentoFromRow).filter(Boolean))].sort()
+    return opts.length ? opts : segmentosOpcoesAll
+  }, [aplicarFiltrosMestre, segmentosOpcoesAll])
+
+  // Anos disponíveis
+  const anoOpcoesCascata = useMemo(() => {
+    const df = aplicarFiltrosMestre('ano')
+    return [...new Set(df.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
+  }, [aplicarFiltrosMestre])
+
+  // Categorias disponíveis (só mostra lentes que existem no recorte atual)
+  const tiposEstoqueOpcoes = useMemo(() => {
+    const df = aplicarFiltrosMestre('tipo')
+    const opts = []
+    let hasOp = false, hasCrit = false, hasObs = false, hasObra = false, hasIns = false
+    for (const r of df) {
+      if (r._isOperacional) hasOp = true
+      if (r._isCritico) hasCrit = true
+      if (r._isObsoleto) hasObs = true
+      if (r._isObra) hasObra = true
+      if (r._isInsumo) hasIns = true
+      if (hasOp && hasCrit && hasObs && hasObra && hasIns) break
+    }
+    if (hasOp) opts.push('Operacional')
+    if (hasCrit) opts.push('Crítico')
+    if (hasObs) opts.push('Obsoleto')
+    if (hasObra) opts.push('Obra')
+    if (hasIns) opts.push('Insumo')
+    return opts
+  }, [aplicarFiltrosMestre])
+
+  // Escopos disponíveis (Ativa/Gerencial) conforme dados no recorte
+  const escoposOpcoes = useMemo(() => {
+    const df = aplicarFiltrosMestre('escopo')
+    const opts = []
+    let hasAtiva = false, hasGer = false
+    for (const r of df) {
+      const u = String(r.unidade_almoxarifado || '')
+      if (!u) continue
+      if (u.includes('GERENCIAL')) hasGer = true
+      else hasAtiva = true
+      if (hasAtiva && hasGer) break
+    }
+    if (hasAtiva) opts.push('Ativa')
+    if (hasGer) opts.push('Gerencial')
+    return opts
+  }, [aplicarFiltrosMestre])
+
+  // Dataset final já com todos os filtros
+  const dfFiltrado = useMemo(() => aplicarFiltrosMestre(null), [aplicarFiltrosMestre])
+
+  // Limpa seleções que ficaram inválidas após o cascade (ex.: usina de outra região)
+  useEffect(() => {
+    if (unidadesSel.length > 0) {
+      const set = new Set(opcoesUnid)
+      const next = unidadesSel.filter((u) => set.has(u))
+      if (next.length !== unidadesSel.length) {
+        dispatch({ type: 'SET_UNIDADES', payload: next })
+      }
+    }
+  }, [opcoesUnid]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (regioesSel.length > 0) {
+      const set = new Set(regioesOpcoes)
+      const next = regioesSel.filter((v) => set.has(v))
+      if (next.length !== regioesSel.length) {
+        dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: next })
+      }
+    }
+  }, [regioesOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (segmentosSel.length > 0) {
+      const set = new Set(segmentosOpcoes)
+      const next = segmentosSel.filter((v) => set.has(v))
+      if (next.length !== segmentosSel.length) {
+        dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: next })
+      }
+    }
+  }, [segmentosOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (anosSel.length > 0) {
+      const set = new Set(anoOpcoesCascata)
+      const next = anosSel.filter((v) => set.has(String(v))).map(String)
+      if (next.length !== anosSel.length) {
+        dispatch({ type: 'SET_ANOS', payload: next.length ? next : (anoOpcoesCascata.length ? [anoOpcoesCascata[anoOpcoesCascata.length - 1]] : []) })
+      }
+    }
+  }, [anoOpcoesCascata]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (tiposEstoqueSel.length > 0) {
+      const set = new Set(tiposEstoqueOpcoes)
+      const next = tiposEstoqueSel.filter((v) => set.has(v))
+      if (next.length !== tiposEstoqueSel.length) {
+        dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: next })
+      }
+    }
+  }, [tiposEstoqueOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (escoposSel.length > 0) {
+      const set = new Set(escoposOpcoes)
+      const next = escoposSel.filter((v) => set.has(v))
+      if (next.length !== escoposSel.length) {
+        dispatch({ type: 'SET_ESCOPOS', payload: next })
+      }
+    }
+  }, [escoposOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
@@ -1502,43 +1725,16 @@ useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, un
           </div>
 
           <div className="flex flex-row flex-wrap items-end justify-end gap-3 z-30 shrink-0">
+            {/* Ordem: Categoria → Segmento → Unidade → Região → Usina → Ano
+                A cascata funciona em qualquer sequência de clique (cada lista
+                monta opções com base em TODOS os outros filtros). */}
             <div className="min-w-[140px]">
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Categoria</label>
               <CyberMultiSelect 
-                options={['Operacional', 'Crítico', 'Obsoleto', 'Obra', 'Insumo']} 
+                options={tiposEstoqueOpcoes} 
                 selected={tiposEstoqueSel} 
                 onChange={(val) => dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: val })} 
-                placeholder={tiposEstoqueSel.length === 0 || tiposEstoqueSel.length === 5 ? 'Todas as Categorias' : tiposEstoqueSel.join(', ')} 
-              />
-            </div>
-            
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label>
-              <CyberMultiSelect 
-                options={['Ativa', 'Gerencial']} 
-                selected={escoposSel} 
-                onChange={(val) => dispatch({ type: 'SET_ESCOPOS', payload: val })} 
-                placeholder={escoposSel.length === 0 || escoposSel.length === 2 ? 'Todas' : escoposSel.join(', ')} 
-              />
-            </div>
-            
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Usina</label>
-              <CyberMultiSelect 
-                options={opcoesUnid} 
-                selected={unidadesSel} 
-                onChange={(val) => dispatch({ type: 'SET_UNIDADES', payload: val })} 
-                placeholder={unidadesSel.length === 0 || unidadesSel.length === opcoesUnid.length ? 'Todas as Usinas' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} 
-              />
-            </div>
-          
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Região</label>
-              <CyberMultiSelect 
-                options={regioesOpcoes} 
-                selected={regioesSel} 
-                onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: val })} 
-                placeholder={regioesSel.length === 0 || regioesSel.length === regioesOpcoes.length ? 'Todas' : (regioesSel.length === 1 ? regioesSel[0] : `${regioesSel.length} Sel.`)} 
+                placeholder={tiposEstoqueSel.length === 0 || tiposEstoqueSel.length === tiposEstoqueOpcoes.length ? 'Todas as Categorias' : tiposEstoqueSel.join(', ')} 
               />
             </div>
 
@@ -1553,12 +1749,42 @@ useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, un
             </div>
 
             <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label>
+              <CyberMultiSelect 
+                options={escoposOpcoes} 
+                selected={escoposSel} 
+                onChange={(val) => dispatch({ type: 'SET_ESCOPOS', payload: val })} 
+                placeholder={escoposSel.length === 0 || escoposSel.length === escoposOpcoes.length ? 'Todas' : escoposSel.join(', ')} 
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Região</label>
+              <CyberMultiSelect 
+                options={regioesOpcoes} 
+                selected={regioesSel} 
+                onChange={(val) => dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: val })} 
+                placeholder={regioesSel.length === 0 || regioesSel.length === regioesOpcoes.length ? 'Todas' : (regioesSel.length === 1 ? regioesSel[0] : `${regioesSel.length} Sel.`)} 
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Usina</label>
+              <CyberMultiSelect 
+                options={opcoesUnid} 
+                selected={unidadesSel} 
+                onChange={(val) => dispatch({ type: 'SET_UNIDADES', payload: val })} 
+                placeholder={unidadesSel.length === 0 || unidadesSel.length === opcoesUnid.length ? 'Todas as Usinas' : (unidadesSel.length === 1 ? unidadesSel[0] : `${unidadesSel.length} Selecionadas`)} 
+              />
+            </div>
+
+            <div>
               <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label>
               <CyberMultiSelect 
-                options={anoOpcoes} 
+                options={anoOpcoesCascata} 
                 selected={anosSel} 
                 onChange={(val) => dispatch({ type: 'SET_ANOS', payload: val })} 
-                placeholder={anosSel.length === 0 || anosSel.length === anoOpcoes.length ? 'Todos os Anos' : anosSel.join(', ')} 
+                placeholder={anosSel.length === 0 || anosSel.length === anoOpcoesCascata.length ? 'Todos os Anos' : anosSel.join(', ')} 
               />
             </div>
           </div>
