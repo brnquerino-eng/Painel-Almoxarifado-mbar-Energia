@@ -131,33 +131,27 @@ function normKeyName(k) {
     .trim()
 }
 
-/**
- * Busca valor em um registro por nomes candidatos de coluna.
- * Aceita variação de acento, case e espaços (ex.: "Região", "REGIAO", "regiao ").
- */
-function pickField(r, candidates) {
-  if (!r || typeof r !== 'object') return ''
+const CAND_REGIAO = ['Região', 'Regiao', 'regiao', 'REGIAO', 'REGIÃO', 'region', 'Region', 'nm_regiao', 'nome_regiao']
+const CAND_SEGMENTO = ['Segmento', 'segmento', 'SEGMENTO', 'segment', 'Segment', 'nm_segmento', 'nome_segmento', 'ds_segmento']
+
+/** Acha a coluna real uma única vez (acento/case/espaço). */
+function resolverChave(sample, candidates) {
+  if (!sample || typeof sample !== 'object') return null
+  for (let i = 0; i < candidates.length; i++) {
+    if (sample[candidates[i]] != null && String(sample[candidates[i]]).trim() !== '') return candidates[i]
+  }
   const wanted = new Set(candidates.map(normKeyName))
-  // 1) tentativa direta (rápida)
-  for (const c of candidates) {
-    if (r[c] != null && String(r[c]).trim() !== '') return String(r[c]).trim()
+  const keys = Object.keys(sample)
+  for (let i = 0; i < keys.length; i++) {
+    if (wanted.has(normKeyName(keys[i]))) return keys[i]
   }
-  // 2) varre chaves normalizando
-  for (const k of Object.keys(r)) {
-    if (wanted.has(normKeyName(k))) {
-      const v = r[k]
-      if (v != null && String(v).trim() !== '') return String(v).trim()
-    }
-  }
-  return ''
+  return null
 }
 
-function getRegiaoFromRow(r) {
-  return pickField(r, ['Região', 'Regiao', 'regiao', 'REGIAO', 'REGIÃO', 'region', 'Region', 'nm_regiao', 'nome_regiao'])
-}
-
-function getSegmentoFromRow(r) {
-  return pickField(r, ['Segmento', 'segmento', 'SEGMENTO', 'segment', 'Segment', 'nm_segmento', 'nome_segmento', 'ds_segmento'])
+function valorColuna(r, key) {
+  if (!key || !r) return ''
+  const v = r[key]
+  return v == null ? '' : String(v).trim()
 }
 
 
@@ -306,11 +300,23 @@ const {
 
   const dadosSanitizados = useMemo(() => {
     if (!data || !Array.isArray(data)) return []
-    return data.map(r => {
+    let chaveRegiao = null
+    let chaveSegmento = null
+    for (let i = 0; i < data.length && (!chaveRegiao || !chaveSegmento); i++) {
+      if (!chaveRegiao) chaveRegiao = resolverChave(data[i], CAND_REGIAO)
+      if (!chaveSegmento) chaveSegmento = resolverChave(data[i], CAND_SEGMENTO)
+    }
+    const out = new Array(data.length)
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i]
       let unidadeLimpa = r.unidade_almoxarifado
       if (unidadeLimpa) unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
-      return aplicarLentesIndependentes({ ...r, unidade_almoxarifado: unidadeLimpa })
-    })
+      const base = aplicarLentesIndependentes({ ...r, unidade_almoxarifado: unidadeLimpa })
+      base._regiao = valorColuna(r, chaveRegiao)
+      base._segmento = valorColuna(r, chaveSegmento)
+      out[i] = base
+    }
+    return out
   }, [data])
 
   // Catálogo completo (fonte bruta — não cascateia)
@@ -328,8 +334,17 @@ const {
     const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
     const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
     const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
-    const regioes = [...new Set(dadosSanitizados.map((r) => getRegiaoFromRow(r)).filter(Boolean))].sort()
-    const segmentos = [...new Set(dadosSanitizados.map((r) => getSegmentoFromRow(r)).filter(Boolean))].sort()
+    const regioes = []
+    const segmentos = []
+    const seenR = new Set()
+    const seenS = new Set()
+    for (let i = 0; i < dadosSanitizados.length; i++) {
+      const r = dadosSanitizados[i]
+      if (r._regiao && !seenR.has(r._regiao)) { seenR.add(r._regiao); regioes.push(r._regiao) }
+      if (r._segmento && !seenS.has(r._segmento)) { seenS.add(r._segmento); segmentos.push(r._segmento) }
+    }
+    regioes.sort()
+    segmentos.sort()
     return {
       unidadesOpcoes: uniques,
       unidadesAtivas: ativas,
@@ -358,207 +373,162 @@ const {
     return [...new Set(allowed)].sort()
   }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
-  // Helpers de campo (robustos a acento/case/espaços — ver getRegiaoFromRow / getSegmentoFromRow)
-  const getRegiaoRow = getRegiaoFromRow
-  const getSegmentoRow = getSegmentoFromRow
-
   /**
-   * Aplica todos os filtros mestres, opcionalmente ignorando uma dimensão.
-   * Usado para montar as opções cascateadas de cada dropdown.
-   * exclude: 'escopo' | 'unidade' | 'ano' | 'tipo' | 'regiao' | 'segmento'
+   * Uma única passada na base monta o dataset filtrado E as opções
+   * cascateadas de cada dropdown (em vez de filtrar a base 7 vezes).
    */
-  const aplicarFiltrosMestre = useCallback((exclude = null) => {
-    let df = dadosSanitizados || []
-
-    // Escopo (Ativa / Gerencial)
-    if (exclude !== 'escopo' && escoposSel.length > 0) {
-      const allowed = new Set(getUnidadesPermitidas(escoposSel))
-      df = df.filter((r) => allowed.has(r.unidade_almoxarifado))
+  const {
+    dfFiltrado,
+    opcoesUnid,
+    regioesOpcoes,
+    segmentosOpcoes,
+    anoOpcoesCascata,
+    tiposEstoqueOpcoes,
+    escoposOpcoes,
+  } = useMemo(() => {
+    const rows = dadosSanitizados || []
+    const empty = {
+      dfFiltrado: [],
+      opcoesUnid: [],
+      regioesOpcoes: regioesOpcoesAll,
+      segmentosOpcoes: segmentosOpcoesAll,
+      anoOpcoesCascata: anoOpcoesAll,
+      tiposEstoqueOpcoes: ['Operacional', 'Crítico', 'Obsoleto', 'Obra', 'Insumo'],
+      escoposOpcoes: ['Ativa', 'Gerencial'],
     }
+    if (!rows.length) return empty
 
-    // Usina
-    if (exclude !== 'unidade' && unidadesSel.length > 0) {
-      const setU = new Set(unidadesSel)
-      df = df.filter((r) => setU.has(r.unidade_almoxarifado))
-    }
+    const escopoAllowed = escoposSel.length > 0 ? new Set(getUnidadesPermitidas(escoposSel)) : null
+    const setU = unidadesSel.length > 0 ? new Set(unidadesSel) : null
+    const filtraAno = anosSel.length > 0 && anoOpcoesAll.length > 0 && anosSel.length < anoOpcoesAll.length
+    const setA = filtraAno ? new Set(anosSel.map(String)) : null
+    const setR = regioesSel.length > 0 ? new Set(regioesSel) : null
+    const setS = segmentosSel.length > 0 ? new Set(segmentosSel) : null
+    const temTipo = tiposEstoqueSel.length > 0
+    const querCritico = temTipo && tiposEstoqueSel.includes('Crítico')
+    const querObsoleto = temTipo && tiposEstoqueSel.includes('Obsoleto')
+    const querObra = temTipo && tiposEstoqueSel.includes('Obra')
+    const querInsumo = temTipo && tiposEstoqueSel.includes('Insumo')
+    const querOp = temTipo && tiposEstoqueSel.includes('Operacional')
 
-    // Ano (só restringe se não estiver "todos" do catálogo completo)
-    if (exclude !== 'ano' && anosSel.length > 0 && anoOpcoesAll.length > 0 && anosSel.length < anoOpcoesAll.length) {
-      const setA = new Set(anosSel)
-      df = df.filter((r) => setA.has(String(r.ano_referencia)))
-    }
+    const df = []
+    const setUnid = new Set()
+    const setReg = new Set()
+    const setSeg = new Set()
+    const setAno = new Set()
+    let tOp = false, tCrit = false, tObs = false, tObra = false, tIns = false
+    let hasAtiva = false, hasGer = false
+    let temColunaRegiao = false
+    let temColunaSegmento = false
 
-    // Categoria / lentes
-    if (exclude !== 'tipo' && tiposEstoqueSel.length > 0) {
-      const querCritico = tiposEstoqueSel.includes('Crítico')
-      const querObsoleto = tiposEstoqueSel.includes('Obsoleto')
-      const querObra = tiposEstoqueSel.includes('Obra')
-      const querInsumo = tiposEstoqueSel.includes('Insumo')
-      const querOp = tiposEstoqueSel.includes('Operacional')
-      df = df.filter((r) =>
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]
+      const u = r.unidade_almoxarifado
+      const reg = r._regiao || ''
+      const seg = r._segmento || ''
+      if (reg) temColunaRegiao = true
+      if (seg) temColunaSegmento = true
+
+      const passEscopo = !escopoAllowed || escopoAllowed.has(u)
+      const passUnidade = !setU || setU.has(u)
+      const passAno = !setA || setA.has(String(r.ano_referencia))
+      const passTipo = !temTipo || (
         (querCritico && r._isCritico) ||
         (querObsoleto && r._isObsoleto) ||
         (querObra && r._isObra) ||
         (querInsumo && r._isInsumo) ||
         (querOp && r._isOperacional)
       )
+      const passReg = !setR || (reg && setR.has(reg))
+      const passSeg = !setS || (seg && setS.has(seg))
+
+      if (passEscopo && passUnidade && passAno && passTipo && passReg && passSeg) df.push(r)
+
+      if (passEscopo && passAno && passTipo && passReg && passSeg && u) setUnid.add(u)
+      if (passEscopo && passUnidade && passAno && passTipo && passSeg && reg) setReg.add(reg)
+      if (passEscopo && passUnidade && passAno && passTipo && passReg && seg) setSeg.add(seg)
+      if (passEscopo && passUnidade && passTipo && passReg && passSeg && r.ano_referencia != null && r.ano_referencia !== '') {
+        setAno.add(String(r.ano_referencia))
+      }
+
+      if (passEscopo && passUnidade && passAno && passReg && passSeg) {
+        if (!tOp && r._isOperacional) tOp = true
+        if (!tCrit && r._isCritico) tCrit = true
+        if (!tObs && r._isObsoleto) tObs = true
+        if (!tObra && r._isObra) tObra = true
+        if (!tIns && r._isInsumo) tIns = true
+      }
+
+      if (passUnidade && passAno && passTipo && passReg && passSeg && u) {
+        if (String(u).includes('GERENCIAL')) hasGer = true
+        else hasAtiva = true
+      }
     }
 
-    // Região
-    if (exclude !== 'regiao' && regioesSel.length > 0) {
-      const setR = new Set(regioesSel)
-      df = df.filter((r) => setR.has(getRegiaoRow(r)))
-    }
+    const tipos = []
+    if (tOp) tipos.push('Operacional')
+    if (tCrit) tipos.push('Crítico')
+    if (tObs) tipos.push('Obsoleto')
+    if (tObra) tipos.push('Obra')
+    if (tIns) tipos.push('Insumo')
 
-    // Segmento
-    if (exclude !== 'segmento' && segmentosSel.length > 0) {
-      const setS = new Set(segmentosSel)
-      df = df.filter((r) => setS.has(getSegmentoRow(r)))
-    }
+    const escopos = []
+    if (hasAtiva) escopos.push('Ativa')
+    if (hasGer) escopos.push('Gerencial')
 
-    return df
+    const sortStr = (s) => [...s].sort()
+
+    return {
+      dfFiltrado: df,
+      opcoesUnid: sortStr(setUnid),
+      regioesOpcoes: setReg.size ? sortStr(setReg) : (temColunaRegiao ? [] : regioesOpcoesAll),
+      segmentosOpcoes: setSeg.size ? sortStr(setSeg) : (temColunaSegmento ? [] : segmentosOpcoesAll),
+      anoOpcoesCascata: sortStr(setAno).sort((a, b) => Number(a) - Number(b)),
+      tiposEstoqueOpcoes: tipos.length ? tipos : empty.tiposEstoqueOpcoes,
+      escoposOpcoes: escopos.length ? escopos : empty.escoposOpcoes,
+    }
   }, [
     dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
     regioesSel, segmentosSel, getUnidadesPermitidas, anoOpcoesAll,
+    regioesOpcoesAll, segmentosOpcoesAll,
   ])
 
-  // ---- Opções CASCATEADAS (cada lista vê o resultado dos OUTROS filtros) ----
-
-  // Usinas disponíveis (respeita escopo + demais filtros, ignora a própria seleção de usina)
-  const opcoesUnid = useMemo(() => {
-    const df = aplicarFiltrosMestre('unidade')
-    // Ainda aplica o recorte de escopo Ativa/Gerencial sobre o catálogo de unidades
-    const baseEscopo = new Set(getUnidadesPermitidas(escoposSel))
-    const set = new Set()
-    for (const r of df) {
-      const u = r.unidade_almoxarifado
-      if (u && baseEscopo.has(u)) set.add(u)
-    }
-    return [...set].sort()
-  }, [aplicarFiltrosMestre, getUnidadesPermitidas, escoposSel])
-
-  // Regiões disponíveis
-  const regioesOpcoes = useMemo(() => {
-    const df = aplicarFiltrosMestre('regiao')
-    const opts = [...new Set(df.map(getRegiaoFromRow).filter(Boolean))].sort()
-    // fallback: se o recorte não trouxe (campo ausente em parte dos rows), usa catálogo completo
-    return opts.length ? opts : regioesOpcoesAll
-  }, [aplicarFiltrosMestre, regioesOpcoesAll])
-
-  // Segmentos disponíveis
-  const segmentosOpcoes = useMemo(() => {
-    const df = aplicarFiltrosMestre('segmento')
-    const opts = [...new Set(df.map(getSegmentoFromRow).filter(Boolean))].sort()
-    return opts.length ? opts : segmentosOpcoesAll
-  }, [aplicarFiltrosMestre, segmentosOpcoesAll])
-
-  // Anos disponíveis
-  const anoOpcoesCascata = useMemo(() => {
-    const df = aplicarFiltrosMestre('ano')
-    return [...new Set(df.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
-  }, [aplicarFiltrosMestre])
-
-  // Categorias disponíveis (só mostra lentes que existem no recorte atual)
-  const tiposEstoqueOpcoes = useMemo(() => {
-    const df = aplicarFiltrosMestre('tipo')
-    const opts = []
-    let hasOp = false, hasCrit = false, hasObs = false, hasObra = false, hasIns = false
-    for (const r of df) {
-      if (r._isOperacional) hasOp = true
-      if (r._isCritico) hasCrit = true
-      if (r._isObsoleto) hasObs = true
-      if (r._isObra) hasObra = true
-      if (r._isInsumo) hasIns = true
-      if (hasOp && hasCrit && hasObs && hasObra && hasIns) break
-    }
-    if (hasOp) opts.push('Operacional')
-    if (hasCrit) opts.push('Crítico')
-    if (hasObs) opts.push('Obsoleto')
-    if (hasObra) opts.push('Obra')
-    if (hasIns) opts.push('Insumo')
-    return opts
-  }, [aplicarFiltrosMestre])
-
-  // Escopos disponíveis (Ativa/Gerencial) conforme dados no recorte
-  const escoposOpcoes = useMemo(() => {
-    const df = aplicarFiltrosMestre('escopo')
-    const opts = []
-    let hasAtiva = false, hasGer = false
-    for (const r of df) {
-      const u = String(r.unidade_almoxarifado || '')
-      if (!u) continue
-      if (u.includes('GERENCIAL')) hasGer = true
-      else hasAtiva = true
-      if (hasAtiva && hasGer) break
-    }
-    if (hasAtiva) opts.push('Ativa')
-    if (hasGer) opts.push('Gerencial')
-    return opts
-  }, [aplicarFiltrosMestre])
-
-  // Dataset final já com todos os filtros
-  const dfFiltrado = useMemo(() => aplicarFiltrosMestre(null), [aplicarFiltrosMestre])
-
-  // Limpa seleções que ficaram inválidas após o cascade (ex.: usina de outra região)
+  // Uma limpeza só (evita 6 renders em cadeia quando o cascade invalida seleção)
   useEffect(() => {
     if (unidadesSel.length > 0) {
       const set = new Set(opcoesUnid)
       const next = unidadesSel.filter((u) => set.has(u))
-      if (next.length !== unidadesSel.length) {
-        dispatch({ type: 'SET_UNIDADES', payload: next })
-      }
+      if (next.length !== unidadesSel.length) dispatch({ type: 'SET_UNIDADES', payload: next })
     }
-  }, [opcoesUnid]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     if (regioesSel.length > 0) {
       const set = new Set(regioesOpcoes)
       const next = regioesSel.filter((v) => set.has(v))
-      if (next.length !== regioesSel.length) {
-        dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: next })
-      }
+      if (next.length !== regioesSel.length) dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: next })
     }
-  }, [regioesOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     if (segmentosSel.length > 0) {
       const set = new Set(segmentosOpcoes)
       const next = segmentosSel.filter((v) => set.has(v))
-      if (next.length !== segmentosSel.length) {
-        dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: next })
-      }
+      if (next.length !== segmentosSel.length) dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: next })
     }
-  }, [segmentosOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (anosSel.length > 0) {
+    if (anosSel.length > 0 && anoOpcoesCascata.length > 0) {
       const set = new Set(anoOpcoesCascata)
       const next = anosSel.filter((v) => set.has(String(v))).map(String)
       if (next.length !== anosSel.length) {
-        dispatch({ type: 'SET_ANOS', payload: next.length ? next : (anoOpcoesCascata.length ? [anoOpcoesCascata[anoOpcoesCascata.length - 1]] : []) })
+        dispatch({ type: 'SET_ANOS', payload: next.length ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]] })
       }
     }
-  }, [anoOpcoesCascata]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     if (tiposEstoqueSel.length > 0) {
       const set = new Set(tiposEstoqueOpcoes)
       const next = tiposEstoqueSel.filter((v) => set.has(v))
-      if (next.length !== tiposEstoqueSel.length) {
-        dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: next })
-      }
+      if (next.length !== tiposEstoqueSel.length) dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: next })
     }
-  }, [tiposEstoqueOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     if (escoposSel.length > 0) {
       const set = new Set(escoposOpcoes)
       const next = escoposSel.filter((v) => set.has(v))
-      if (next.length !== escoposSel.length) {
-        dispatch({ type: 'SET_ESCOPOS', payload: next })
-      }
+      if (next.length !== escoposSel.length) dispatch({ type: 'SET_ESCOPOS', payload: next })
     }
-  }, [escoposOpcoes]) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opcoesUnid, regioesOpcoes, segmentosOpcoes, anoOpcoesCascata, tiposEstoqueOpcoes, escoposOpcoes])
 
   useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
 
