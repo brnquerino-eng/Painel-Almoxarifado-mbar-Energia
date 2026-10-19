@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react'
+import React, { useMemo, useState, useCallback, useEffect, useDeferredValue } from 'react'
 import Plot from 'react-plotly.js'
 import pptxgen from 'pptxgenjs'
 import {
@@ -120,7 +120,6 @@ function normalizeSelectedUnidades(raw) {
   return out
 }
 
-
 /** Normaliza nome de coluna: minúsculo, sem acento, sem espaços extras */
 function normKeyName(k) {
   return String(k || '')
@@ -153,7 +152,6 @@ function valorColuna(r, key) {
   const v = r[key]
   return v == null ? '' : String(v).trim()
 }
-
 
 function filtrarListaFS(lista, { texto, unidades, camposTexto = ['nome', 'codigo'], maxItems = 1000, matchUnidade }) {
   if (!lista || lista.length === 0) {
@@ -229,10 +227,10 @@ export default function VisaoGeral({ data }) {
   const { state, dispatch } = useInventoryState()
   const [initialLoad, setInitialLoad] = useState(true)
 
-const {
-  escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
-  regioesSel = [], segmentosSel = [],
-  periodoAtivo, activeCard, selectedBarraRanking,
+  const {
+    escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
+    regioesSel = [], segmentosSel = [],
+    periodoAtivo, activeCard, selectedBarraRanking,
     selectedBarraExposicao, selectedBarraCritico,
     selectedBarraObsoleto, selectedBarraObra,
     selectedBarraCompraConsumo, selectedBarraVariacao,
@@ -243,6 +241,14 @@ const {
     listaDuplicadosAberta, tabelaDuplicadosExpandida,
     granularidade = 'mensal'
   } = state
+
+  // --- DEFERRED VALUES (UI continua fluida enquanto calcula) ---
+  const deferredEscoposSel = useDeferredValue(escoposSel)
+  const deferredUnidadesSel = useDeferredValue(unidadesSel)
+  const deferredAnosSel = useDeferredValue(anosSel)
+  const deferredTiposEstoqueSel = useDeferredValue(tiposEstoqueSel)
+  const deferredRegioesSel = useDeferredValue(regioesSel)
+  const deferredSegmentosSel = useDeferredValue(segmentosSel)
 
   const abaCompraConsumo = state.abaCompraConsumo || 'comparativo'
   const [abaRankingUnidade, setAbaRankingUnidade] = useState('total')
@@ -355,7 +361,6 @@ const {
     }
   }, [dadosSanitizados])
 
-  // Compat: anoOpcoes "completo" para lógica de "todos selecionados"
   const anoOpcoes = anoOpcoesAll
 
   useEffect(() => {
@@ -373,10 +378,9 @@ const {
     return [...new Set(allowed)].sort()
   }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
-  /**
-   * Uma única passada na base monta o dataset filtrado E as opções
-   * cascateadas de cada dropdown (em vez de filtrar a base 7 vezes).
-   */
+  // =========================================================================
+  // FILTRO PRINCIPAL + OPÇÕES CASCATEADAS (OTIMIZADO)
+  // =========================================================================
   const {
     dfFiltrado,
     opcoesUnid,
@@ -398,18 +402,25 @@ const {
     }
     if (!rows.length) return empty
 
-    const escopoAllowed = escoposSel.length > 0 ? new Set(getUnidadesPermitidas(escoposSel)) : null
-    const setU = unidadesSel.length > 0 ? new Set(unidadesSel) : null
-    const filtraAno = anosSel.length > 0 && anoOpcoesAll.length > 0 && anosSel.length < anoOpcoesAll.length
-    const setA = filtraAno ? new Set(anosSel.map(String)) : null
-    const setR = regioesSel.length > 0 ? new Set(regioesSel) : null
-    const setS = segmentosSel.length > 0 ? new Set(segmentosSel) : null
-    const temTipo = tiposEstoqueSel.length > 0
-    const querCritico = temTipo && tiposEstoqueSel.includes('Crítico')
-    const querObsoleto = temTipo && tiposEstoqueSel.includes('Obsoleto')
-    const querObra = temTipo && tiposEstoqueSel.includes('Obra')
-    const querInsumo = temTipo && tiposEstoqueSel.includes('Insumo')
-    const querOp = temTipo && tiposEstoqueSel.includes('Operacional')
+    const escopos = deferredEscoposSel
+    const unidades = deferredUnidadesSel
+    const anos = deferredAnosSel
+    const tipos = deferredTiposEstoqueSel
+    const regioes = deferredRegioesSel
+    const segmentos = deferredSegmentosSel
+
+    const escopoAllowed = escopos.length > 0 ? new Set(getUnidadesPermitidas(escopos)) : null
+    const setU = unidades.length > 0 ? new Set(unidades) : null
+    const filtraAno = anos.length > 0 && anoOpcoesAll.length > 0 && anos.length < anoOpcoesAll.length
+    const setA = filtraAno ? new Set(anos.map(String)) : null
+    const setR = regioes.length > 0 ? new Set(regioes) : null
+    const setS = segmentos.length > 0 ? new Set(segmentos) : null
+    const temTipo = tipos.length > 0
+    const querCritico = temTipo && tipos.includes('Crítico')
+    const querObsoleto = temTipo && tipos.includes('Obsoleto')
+    const querObra = temTipo && tipos.includes('Obra')
+    const querInsumo = temTipo && tipos.includes('Insumo')
+    const querOp = temTipo && tipos.includes('Operacional')
 
     const df = []
     const setUnid = new Set()
@@ -442,7 +453,9 @@ const {
       const passReg = !setR || (reg && setR.has(reg))
       const passSeg = !setS || (seg && setS.has(seg))
 
-      if (passEscopo && passUnidade && passAno && passTipo && passReg && passSeg) df.push(r)
+      if (passEscopo && passUnidade && passAno && passTipo && passReg && passSeg) {
+        df.push(r)
+      }
 
       if (passEscopo && passAno && passTipo && passReg && passSeg && u) setUnid.add(u)
       if (passEscopo && passUnidade && passAno && passTipo && passSeg && reg) setReg.add(reg)
@@ -465,16 +478,16 @@ const {
       }
     }
 
-    const tipos = []
-    if (tOp) tipos.push('Operacional')
-    if (tCrit) tipos.push('Crítico')
-    if (tObs) tipos.push('Obsoleto')
-    if (tObra) tipos.push('Obra')
-    if (tIns) tipos.push('Insumo')
+    const tiposArr = []
+    if (tOp) tiposArr.push('Operacional')
+    if (tCrit) tiposArr.push('Crítico')
+    if (tObs) tiposArr.push('Obsoleto')
+    if (tObra) tiposArr.push('Obra')
+    if (tIns) tiposArr.push('Insumo')
 
-    const escopos = []
-    if (hasAtiva) escopos.push('Ativa')
-    if (hasGer) escopos.push('Gerencial')
+    const escoposArr = []
+    if (hasAtiva) escoposArr.push('Ativa')
+    if (hasGer) escoposArr.push('Gerencial')
 
     const sortStr = (s) => [...s].sort()
 
@@ -484,53 +497,91 @@ const {
       regioesOpcoes: setReg.size ? sortStr(setReg) : (temColunaRegiao ? [] : regioesOpcoesAll),
       segmentosOpcoes: setSeg.size ? sortStr(setSeg) : (temColunaSegmento ? [] : segmentosOpcoesAll),
       anoOpcoesCascata: sortStr(setAno).sort((a, b) => Number(a) - Number(b)),
-      tiposEstoqueOpcoes: tipos.length ? tipos : empty.tiposEstoqueOpcoes,
-      escoposOpcoes: escopos.length ? escopos : empty.escoposOpcoes,
+      tiposEstoqueOpcoes: tiposArr.length ? tiposArr : empty.tiposEstoqueOpcoes,
+      escoposOpcoes: escoposArr.length ? escoposArr : empty.escoposOpcoes,
     }
   }, [
-    dadosSanitizados, escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
-    regioesSel, segmentosSel, getUnidadesPermitidas, anoOpcoesAll,
-    regioesOpcoesAll, segmentosOpcoesAll,
+    dadosSanitizados,
+    deferredEscoposSel,
+    deferredUnidadesSel,
+    deferredAnosSel,
+    deferredTiposEstoqueSel,
+    deferredRegioesSel,
+    deferredSegmentosSel,
+    getUnidadesPermitidas,
+    anoOpcoesAll,
+    regioesOpcoesAll,
+    segmentosOpcoesAll,
   ])
 
-  // Uma limpeza só (evita 6 renders em cadeia quando o cascade invalida seleção)
+  // Limpeza de seleções inválidas (só despacha quando realmente precisa)
   useEffect(() => {
+    let hasChanges = false
+    const updates = {}
+
     if (unidadesSel.length > 0) {
       const set = new Set(opcoesUnid)
       const next = unidadesSel.filter((u) => set.has(u))
-      if (next.length !== unidadesSel.length) dispatch({ type: 'SET_UNIDADES', payload: next })
+      if (next.length !== unidadesSel.length) {
+        updates.unidades = next
+        hasChanges = true
+      }
     }
     if (regioesSel.length > 0) {
       const set = new Set(regioesOpcoes)
       const next = regioesSel.filter((v) => set.has(v))
-      if (next.length !== regioesSel.length) dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: next })
+      if (next.length !== regioesSel.length) {
+        updates.regioes = next
+        hasChanges = true
+      }
     }
     if (segmentosSel.length > 0) {
       const set = new Set(segmentosOpcoes)
       const next = segmentosSel.filter((v) => set.has(v))
-      if (next.length !== segmentosSel.length) dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: next })
+      if (next.length !== segmentosSel.length) {
+        updates.segmentos = next
+        hasChanges = true
+      }
     }
     if (anosSel.length > 0 && anoOpcoesCascata.length > 0) {
       const set = new Set(anoOpcoesCascata)
       const next = anosSel.filter((v) => set.has(String(v))).map(String)
       if (next.length !== anosSel.length) {
-        dispatch({ type: 'SET_ANOS', payload: next.length ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]] })
+        updates.anos = next.length ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]]
+        hasChanges = true
       }
     }
     if (tiposEstoqueSel.length > 0) {
       const set = new Set(tiposEstoqueOpcoes)
       const next = tiposEstoqueSel.filter((v) => set.has(v))
-      if (next.length !== tiposEstoqueSel.length) dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: next })
+      if (next.length !== tiposEstoqueSel.length) {
+        updates.tipos = next
+        hasChanges = true
+      }
     }
     if (escoposSel.length > 0) {
       const set = new Set(escoposOpcoes)
       const next = escoposSel.filter((v) => set.has(v))
-      if (next.length !== escoposSel.length) dispatch({ type: 'SET_ESCOPOS', payload: next })
+      if (next.length !== escoposSel.length) {
+        updates.escopos = next
+        hasChanges = true
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (!hasChanges) return
+
+    if (updates.unidades) dispatch({ type: 'SET_UNIDADES', payload: updates.unidades })
+    if (updates.regioes) dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: updates.regioes })
+    if (updates.segmentos) dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: updates.segmentos })
+    if (updates.anos) dispatch({ type: 'SET_ANOS', payload: updates.anos })
+    if (updates.tipos) dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: updates.tipos })
+    if (updates.escopos) dispatch({ type: 'SET_ESCOPOS', payload: updates.escopos })
   }, [opcoesUnid, regioesOpcoes, segmentosOpcoes, anoOpcoesCascata, tiposEstoqueOpcoes, escoposOpcoes])
 
-  useEffect(() => { dispatch({ type: 'RESET_SELECOES_FILTRO' }) }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
+  // Reset de seleções de gráfico quando filtros principais mudam
+  useEffect(() => {
+    dispatch({ type: 'RESET_SELECOES_FILTRO' })
+  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
