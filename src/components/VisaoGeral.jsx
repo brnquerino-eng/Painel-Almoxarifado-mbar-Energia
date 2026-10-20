@@ -379,7 +379,7 @@ export default function VisaoGeral({ data }) {
   }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
   // =========================================================================
-  // FILTRO PRINCIPAL + OPÇÕES CASCATEADAS (OTIMIZADO)
+  // FILTRO PRINCIPAL + OPÇÕES CASCATEADAS (OTIMIZADO + ANO CORRIGIDO)
   // =========================================================================
   const {
     dfFiltrado,
@@ -411,8 +411,8 @@ export default function VisaoGeral({ data }) {
 
     const escopoAllowed = escopos.length > 0 ? new Set(getUnidadesPermitidas(escopos)) : null
     const setU = unidades.length > 0 ? new Set(unidades) : null
-    const filtraAno = anos.length > 0 && anoOpcoesAll.length > 0 && anos.length < anoOpcoesAll.length
-    const setA = filtraAno ? new Set(anos.map(String)) : null
+    // CORREÇÃO: sempre filtra pelo ano se o usuário selecionou algum
+    const setA = anos.length > 0 ? new Set(anos.map(String)) : null
     const setR = regioes.length > 0 ? new Set(regioes) : null
     const setS = segmentos.length > 0 ? new Set(segmentos) : null
     const temTipo = tipos.length > 0
@@ -547,7 +547,7 @@ export default function VisaoGeral({ data }) {
       const set = new Set(anoOpcoesCascata)
       const next = anosSel.filter((v) => set.has(String(v))).map(String)
       if (next.length !== anosSel.length) {
-        updates.anos = next.length ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]]
+        updates.anos = next.length > 0 ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]]
         hasChanges = true
       }
     }
@@ -578,10 +578,11 @@ export default function VisaoGeral({ data }) {
     if (updates.escopos) dispatch({ type: 'SET_ESCOPOS', payload: updates.escopos })
   }, [opcoesUnid, regioesOpcoes, segmentosOpcoes, anoOpcoesCascata, tiposEstoqueOpcoes, escoposOpcoes])
 
-  // Reset de seleções de gráfico quando filtros principais mudam
+  // Reset de seleções de gráfico — só quando filtros de alto nível mudam
+  // (não zera ao mudar apenas Região/Segmento → highlight das barras volta a funcionar)
   useEffect(() => {
     dispatch({ type: 'RESET_SELECOES_FILTRO' })
-  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, regioesSel, segmentosSel, dispatch])
+  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
 
   const periodoMaximo = useMemo(() => {
     const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
@@ -714,11 +715,12 @@ export default function VisaoGeral({ data }) {
     }
   }, [dfFiltrado, periodoEfetivo, periodMonths, granularidade])
 
+  // Resize effect otimizado (leve)
   useEffect(() => {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
-    const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
-    return () => { cancelAnimationFrame(id); clearTimeout(t) }
-  }, [snapshot.length, periodoEfetivo, dfFiltrado.length, abaCompraConsumo, abaRankingUnidade])
+    return () => cancelAnimationFrame(id)
+  }, [granularidade, abaCompraConsumo, abaRankingUnidade])
+
   const {
     metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra, rankOperacional, rankInsumo,
     compraConsumoUnidade, variacaoUnidade, skusUnidade, exposicaoCategorias,
@@ -819,8 +821,6 @@ export default function VisaoGeral({ data }) {
     }
 
     // ========== PERÍODO ANTERIOR ==========
-    // Estoques / categorias → FECHAMENTO (snapshotPrev)
-    // Compras / Consumo / SKUs → PERÍODO INTEIRO (snapshotPeriodoPrev)
     let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
     let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
     const skusPrevSet = new Set()
