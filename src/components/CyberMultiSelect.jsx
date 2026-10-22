@@ -27,16 +27,29 @@ export function CyberMultiSelect({ options = [], selected = [], onChange, placeh
     return (options || []).filter((o) => String(o).toLowerCase().includes(busca.toLowerCase()))
   }, [options, busca])
 
-  const isAllSelected =
-    selected.length === 0 || (options.length > 0 && selected.length === options.length)
-
+  // LÓGICA ATUALIZADA: Rótulo 100% Dinâmico
   const labelText = useMemo(() => {
-    if (isAllSelected) return placeholder
-    if (selected.length === 1) return selected[0]
-    return `${selected.length} selecionadas`
-  }, [selected, options, placeholder, isAllSelected])
+    // 1. Se nada estiver selecionado, exibe o placeholder genérico (ex: "Todos os Anos")
+    if (selected.length === 0) return placeholder
 
-  const hasActiveSelection = !isAllSelected
+    // 2. Se há 1 ou 2 itens selecionados, mostramos os nomes exatos.
+    // Isso garante que se apenas "2026" existir e estiver marcado, ele mostre "2026" e não "Todos".
+    if (selected.length <= 2) {
+      return selected.join(', ')
+    }
+
+    // 3. Se todos os itens possíveis (3 ou mais) estiverem selecionados, 
+    // voltamos ao placeholder genérico para manter o visual limpo.
+    if (options.length > 0 && selected.length === options.length) {
+      return placeholder
+    }
+
+    // 4. Caso contrário (3 ou mais selecionados, mas não todos), mostra a quantidade.
+    return `${selected.length} selecionados(as)`
+  }, [selected, options, placeholder])
+
+  // O filtro ganha o destaque visual (ativo/laranja) APENAS se o rótulo atual for diferente do placeholder
+  const hasActiveSelection = selected.length > 0 && labelText !== placeholder
 
   const toggleOption = useCallback(
     (opt) => {
