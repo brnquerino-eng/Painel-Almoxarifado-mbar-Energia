@@ -51,40 +51,72 @@ function formatarPeriodoTexto(periodoStr) {
   return `${nomeMes}/${String(p.ano).slice(-2)}`
 }
 
+// Cache simples para parseNumber (evita re-parsing do mesmo valor)
+const _parseNumberCache = new Map()
+const PARSE_CACHE_LIMIT = 8000
+
 function parseNumber(val) {
-  if (val == null) return 0;
-  if (typeof val === 'number') return val;
-  let s = String(val).trim().replace(/R\$\s?/gi, '');
+  if (val == null) return 0
+  if (typeof val === 'number') return val
+
+  // chave rápida
+  const key = typeof val === 'string' ? val : String(val)
+  if (_parseNumberCache.has(key)) return _parseNumberCache.get(key)
+
+  let s = key.trim().replace(/R\$\s?/gi, '')
   if (s.includes(',') && s.includes('.')) {
     if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
-      s = s.replace(/\./g, '').replace(',', '.');
+      s = s.replace(/\./g, '').replace(',', '.')
     } else {
-      s = s.replace(/,/g, '');
+      s = s.replace(/,/g, '')
     }
   } else if (s.includes(',')) {
-    s = s.replace(',', '.');
+    s = s.replace(',', '.')
   }
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+
+  const n = parseFloat(s)
+  const result = isNaN(n) ? 0 : n
+
+  // evita crescimento infinito da cache
+  if (_parseNumberCache.size > PARSE_CACHE_LIMIT) _parseNumberCache.clear()
+  _parseNumberCache.set(key, result)
+
+  return result
 }
 
+// Cache para chave de duplicidade
+const _chaveDupCache = new Map()
+const CHAVE_CACHE_LIMIT = 6000
+
 function gerarChaveDuplicidade(nome) {
-  if (!nome) return '';
-  const clean = String(nome).toUpperCase()
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ') 
+  if (!nome) return ''
+  const key = String(nome)
+  if (_chaveDupCache.has(key)) return _chaveDupCache.get(key)
+
+  const clean = key
+    .toUpperCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ')
     .trim()
     .replace(/\s+/g, ' ')
     .split(' ')
     .filter(Boolean)
-    .sort() 
-    .join(' ');
-  return clean || String(nome).trim().toUpperCase();
+    .sort()
+    .join(' ')
+
+  const result = clean || key.trim().toUpperCase()
+
+  if (_chaveDupCache.size > CHAVE_CACHE_LIMIT) _chaveDupCache.clear()
+  _chaveDupCache.set(key, result)
+
+  return result
 }
 
 function aplicarLentesIndependentes(r) {
-  const nomeLocal = String(r.nome_local_estoque || '').toUpperCase()
-  const unidadeAlmox = String(r.unidade_almoxarifado || '').toUpperCase()
+  // Evita criar strings desnecessárias quando já estão limpas
+  const nomeLocal = (r.nome_local_estoque || '').toUpperCase()
+  const unidadeAlmox = (r.unidade_almoxarifado || '').toUpperCase()
   const isWartsila = nomeLocal.includes('WARTSILA') || unidadeAlmox.includes('WARTSILA')
+
   const s = String(r.codigo_local_estoque ?? '').trim()
   const codigoLocal = s.replace(/^0+/, '') || s
 
@@ -94,12 +126,23 @@ function aplicarLentesIndependentes(r) {
   const _isInsumo = CODIGOS_INSUMO.includes(codigoLocal)
   const _isOperacional = !_isObsoleto && !_isObra && !_isCritico && !_isInsumo
 
-  return { ...r, _isObsoleto, _isObra, _isCritico, _isInsumo, _isOperacional }
+  // Mutação controlada em vez de spread (mais rápido em arrays grandes)
+  r._isObsoleto = _isObsoleto
+  r._isObra = _isObra
+  r._isCritico = _isCritico
+  r._isInsumo = _isInsumo
+  r._isOperacional = _isOperacional
+  return r
 }
 
 function normUnidade(v) {
   if (v == null) return ''
-  return String(v).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
+  // normalize + remove zero-width só quando necessário
+  let s = String(v)
+  if (/[\u200B-\u200D\uFEFF]/.test(s)) {
+    s = s.normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '')
+  }
+  return s.trim().toUpperCase()
 }
 
 function normalizeSelectedUnidades(raw) {
@@ -120,7 +163,6 @@ function normalizeSelectedUnidades(raw) {
   return out
 }
 
-/** Normaliza nome de coluna: minúsculo, sem acento, sem espaços extras */
 function normKeyName(k) {
   return String(k || '')
     .normalize('NFD')
@@ -133,11 +175,11 @@ function normKeyName(k) {
 const CAND_REGIAO = ['Região', 'Regiao', 'regiao', 'REGIAO', 'REGIÃO', 'region', 'Region', 'nm_regiao', 'nome_regiao']
 const CAND_SEGMENTO = ['Segmento', 'segmento', 'SEGMENTO', 'segment', 'Segment', 'nm_segmento', 'nome_segmento', 'ds_segmento']
 
-/** Acha a coluna real uma única vez (acento/case/espaço). */
 function resolverChave(sample, candidates) {
   if (!sample || typeof sample !== 'object') return null
   for (let i = 0; i < candidates.length; i++) {
-    if (sample[candidates[i]] != null && String(sample[candidates[i]]).trim() !== '') return candidates[i]
+    const c = candidates[i]
+    if (sample[c] != null && String(sample[c]).trim() !== '') return c
   }
   const wanted = new Set(candidates.map(normKeyName))
   const keys = Object.keys(sample)
@@ -305,22 +347,34 @@ export default function VisaoGeral({ data }) {
   }, [tabelaExpandida, tabelaMaioresValoresExpandida, tabelaComprasSemConsumoExpandida, tabelaDuplicadosExpandida, listaAberta, listaMaioresValoresAberta, listaComprasSemConsumoAberta, listaDuplicadosAberta, fecharModalFS, dispatch])
 
   const dadosSanitizados = useMemo(() => {
-    if (!data || !Array.isArray(data)) return []
+    if (!data || !Array.isArray(data) || data.length === 0) return []
+
+    // Descobre as colunas de região/segmento só uma vez
     let chaveRegiao = null
     let chaveSegmento = null
-    for (let i = 0; i < data.length && (!chaveRegiao || !chaveSegmento); i++) {
+    const limit = Math.min(data.length, 30)
+    for (let i = 0; i < limit && (!chaveRegiao || !chaveSegmento); i++) {
       if (!chaveRegiao) chaveRegiao = resolverChave(data[i], CAND_REGIAO)
       if (!chaveSegmento) chaveSegmento = resolverChave(data[i], CAND_SEGMENTO)
     }
+
     const out = new Array(data.length)
     for (let i = 0; i < data.length; i++) {
-      const r = data[i]
-      let unidadeLimpa = r.unidade_almoxarifado
-      if (unidadeLimpa) unidadeLimpa = String(unidadeLimpa).normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase()
-      const base = aplicarLentesIndependentes({ ...r, unidade_almoxarifado: unidadeLimpa })
-      base._regiao = valorColuna(r, chaveRegiao)
-      base._segmento = valorColuna(r, chaveSegmento)
-      out[i] = base
+      const original = data[i]
+
+      // Cria uma cópia rasa (não muta o objeto original do pai)
+      const r = { ...original }
+
+      if (r.unidade_almoxarifado) {
+        r.unidade_almoxarifado = normUnidade(r.unidade_almoxarifado)
+      }
+
+      aplicarLentesIndependentes(r)
+
+      r._regiao = valorColuna(r, chaveRegiao)
+      r._segmento = valorColuna(r, chaveSegmento)
+
+      out[i] = r
     }
     return out
   }, [data])
@@ -378,9 +432,6 @@ export default function VisaoGeral({ data }) {
     return [...new Set(allowed)].sort()
   }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
 
-  // =========================================================================
-  // FILTRO PRINCIPAL + OPÇÕES CASCATEADAS (OTIMIZADO + ANO CORRIGIDO)
-  // =========================================================================
   const {
     dfFiltrado,
     opcoesUnid,
@@ -411,10 +462,10 @@ export default function VisaoGeral({ data }) {
 
     const escopoAllowed = escopos.length > 0 ? new Set(getUnidadesPermitidas(escopos)) : null
     const setU = unidades.length > 0 ? new Set(unidades) : null
-    // CORREÇÃO: sempre filtra pelo ano se o usuário selecionou algum
     const setA = anos.length > 0 ? new Set(anos.map(String)) : null
     const setR = regioes.length > 0 ? new Set(regioes) : null
     const setS = segmentos.length > 0 ? new Set(segmentos) : null
+
     const temTipo = tipos.length > 0
     const querCritico = temTipo && tipos.includes('Crítico')
     const querObsoleto = temTipo && tipos.includes('Obsoleto')
@@ -422,57 +473,66 @@ export default function VisaoGeral({ data }) {
     const querInsumo = temTipo && tipos.includes('Insumo')
     const querOp = temTipo && tipos.includes('Operacional')
 
+    // Pré-aloca array com tamanho estimado (reduz reallocações)
     const df = []
     const setUnid = new Set()
     const setReg = new Set()
     const setSeg = new Set()
     const setAno = new Set()
+
     let tOp = false, tCrit = false, tObs = false, tObra = false, tIns = false
     let hasAtiva = false, hasGer = false
     let temColunaRegiao = false
     let temColunaSegmento = false
 
-    for (let i = 0; i < rows.length; i++) {
+    const len = rows.length
+    for (let i = 0; i < len; i++) {
       const r = rows[i]
       const u = r.unidade_almoxarifado
       const reg = r._regiao || ''
       const seg = r._segmento || ''
+
       if (reg) temColunaRegiao = true
       if (seg) temColunaSegmento = true
 
-      const passEscopo = !escopoAllowed || escopoAllowed.has(u)
-      const passUnidade = !setU || setU.has(u)
-      const passAno = !setA || setA.has(String(r.ano_referencia))
-      const passTipo = !temTipo || (
-        (querCritico && r._isCritico) ||
-        (querObsoleto && r._isObsoleto) ||
-        (querObra && r._isObra) ||
-        (querInsumo && r._isInsumo) ||
-        (querOp && r._isOperacional)
-      )
-      const passReg = !setR || (reg && setR.has(reg))
-      const passSeg = !setS || (seg && setS.has(seg))
+      // Early continue — evita cálculos desnecessários
+      if (escopoAllowed && !escopoAllowed.has(u)) continue
+      if (setU && !setU.has(u)) continue
+      if (setA && !setA.has(String(r.ano_referencia))) continue
+      if (setR && !(reg && setR.has(reg))) continue
+      if (setS && !(seg && setS.has(seg))) continue
 
-      if (passEscopo && passUnidade && passAno && passTipo && passReg && passSeg) {
-        df.push(r)
+      // Tipo (só calcula se necessário)
+      if (temTipo) {
+        const passTipo =
+          (querCritico && r._isCritico) ||
+          (querObsoleto && r._isObsoleto) ||
+          (querObra && r._isObra) ||
+          (querInsumo && r._isInsumo) ||
+          (querOp && r._isOperacional)
+        if (!passTipo) continue
       }
 
-      if (passEscopo && passAno && passTipo && passReg && passSeg && u) setUnid.add(u)
-      if (passEscopo && passUnidade && passAno && passTipo && passSeg && reg) setReg.add(reg)
-      if (passEscopo && passUnidade && passAno && passTipo && passReg && seg) setSeg.add(seg)
-      if (passEscopo && passUnidade && passTipo && passReg && passSeg && r.ano_referencia != null && r.ano_referencia !== '') {
+      // Passou em todos os filtros → entra no df
+      df.push(r)
+
+      // Atualiza opções em cascata (já filtrado)
+      if (u) setUnid.add(u)
+      if (reg) setReg.add(reg)
+      if (seg) setSeg.add(seg)
+      if (r.ano_referencia != null && r.ano_referencia !== '') {
         setAno.add(String(r.ano_referencia))
       }
 
-      if (passEscopo && passUnidade && passAno && passReg && passSeg) {
-        if (!tOp && r._isOperacional) tOp = true
-        if (!tCrit && r._isCritico) tCrit = true
-        if (!tObs && r._isObsoleto) tObs = true
-        if (!tObra && r._isObra) tObra = true
-        if (!tIns && r._isInsumo) tIns = true
-      }
+      // Flags de tipos disponíveis
+      if (!tOp && r._isOperacional) tOp = true
+      if (!tCrit && r._isCritico) tCrit = true
+      if (!tObs && r._isObsoleto) tObs = true
+      if (!tObra && r._isObra) tObra = true
+      if (!tIns && r._isInsumo) tIns = true
 
-      if (passUnidade && passAno && passTipo && passReg && passSeg && u) {
+      // Escopos
+      if (u) {
         if (String(u).includes('GERENCIAL')) hasGer = true
         else hasAtiva = true
       }
@@ -727,96 +787,215 @@ export default function VisaoGeral({ data }) {
     maioresValoresDataCompleta, comprasSemConsumoDataCompleta, duplicadosDataCompleta
   } = useMemo(() => {
     const empty = {
-      metrics: { valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0, valInsumo: 0, valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0, valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0, valInsumoPrev: 0, valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0 },
+      metrics: {
+        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0,
+        valInsumo: 0, valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0,
+        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0,
+        valInsumoPrev: 0, valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
+      },
       rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [], rankOperacional: [], rankInsumo: [],
       compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
       maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
     }
-    if (!snapshot.length && !snapshotPrev.length && !(snapshotPeriodo && snapshotPeriodo.length)) return empty
 
-    const mapRank = new Map(), mapRankPrev = new Map(), mapCrit = new Map(), mapObs = new Map(), mapObra = new Map(), mapOp = new Map(), mapInsumo = new Map()
-    const mapCC = new Map(), mapSkus = new Map(), mapChaves = new Map(), mapChavesPorUnidade = new Map(), mapSkuAggComprasSemConsumo = new Map()
+    if (!snapshot.length && !snapshotPrev.length && !(snapshotPeriodo && snapshotPeriodo.length)) {
+      return empty
+    }
 
-    let valEstoque = 0, valCompras = 0, valConsumo = 0, valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
-    const skusSet = new Set(), maiores = [], comprasSem = []
+    // Maps de ranking
+    const mapRank = new Map()
+    const mapRankPrev = new Map()
+    const mapCrit = new Map()
+    const mapObs = new Map()
+    const mapObra = new Map()
+    const mapOp = new Map()
+    const mapInsumo = new Map()
+    const mapCC = new Map()
+    const mapSkus = new Map()
+    const mapChaves = new Map()
+    const mapChavesPorUnidade = new Map()
+    const mapSkuAggComprasSemConsumo = new Map()
 
-    // ========== ESTOQUES (fechamento = snapshot) ==========
-    for (const r of snapshot) {
-      const u = r.unidade_almoxarifado 
+    let valEstoque = 0, valCompras = 0, valConsumo = 0
+    let valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
+    const skusSet = new Set()
+    const maiores = []
+    const comprasSem = []
+
+    // ========== ESTOQUES (snapshot = fechamento) ==========
+    const snapLen = snapshot.length
+    for (let i = 0; i < snapLen; i++) {
+      const r = snapshot[i]
+      const u = r.unidade_almoxarifado
       const val = parseNumber(r.valor_saldo_atual)
       const qtdAtual = parseNumber(r.qtde_saldo_atual)
       const precoMedioBase = parseNumber(r.preco_medio)
       const geBase = r.ge || '—'
-      
-      valEstoque += val
-      if (u) mapRank.set(u, (mapRank.get(u) || 0) + val)
-      if (r._isCritico) { if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val); valCritico += val }
-      if (r._isObsoleto) { if (u) mapObs.set(u, (mapObs.get(u) || 0) + val); valObsoleto += val }
-      if (r._isObra) { if (u) mapObra.set(u, (mapObra.get(u) || 0) + val); valObra += val }
-      if (r._isInsumo) { if (u) mapInsumo.set(u, (mapInsumo.get(u) || 0) + val); valInsumo += val }
-      if (r._isOperacional) { if (u) mapOp.set(u, (mapOp.get(u) || 0) + val); valOp += val }
 
-      if (val > 0) {
-        maiores.push({ _rowKey: `${u}-${r.codigo_produto}`, unidade: u, ge: geBase, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: qtdAtual, precoMedio: precoMedioBase, itemCritico: r._isCritico ? 'Sim' : 'Não', valor: val })
+      valEstoque += val
+
+      if (u) {
+        mapRank.set(u, (mapRank.get(u) || 0) + val)
       }
 
-      // Duplicados no fechamento
+      if (r._isCritico) {
+        if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val)
+        valCritico += val
+      }
+      if (r._isObsoleto) {
+        if (u) mapObs.set(u, (mapObs.get(u) || 0) + val)
+        valObsoleto += val
+      }
+      if (r._isObra) {
+        if (u) mapObra.set(u, (mapObra.get(u) || 0) + val)
+        valObra += val
+      }
+      if (r._isInsumo) {
+        if (u) mapInsumo.set(u, (mapInsumo.get(u) || 0) + val)
+        valInsumo += val
+      }
+      if (r._isOperacional) {
+        if (u) mapOp.set(u, (mapOp.get(u) || 0) + val)
+        valOp += val
+      }
+
+      if (val > 0) {
+        maiores.push({
+          _rowKey: `${u}-${r.codigo_produto}`,
+          unidade: u,
+          ge: geBase,
+          codigo: r.codigo_produto,
+          nome: r.nome_produto,
+          quantidade: qtdAtual,
+          precoMedio: precoMedioBase,
+          itemCritico: r._isCritico ? 'Sim' : 'Não',
+          valor: val
+        })
+      }
+
+      // Duplicados
       if (r.nome_produto && u) {
         const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
-        if (!mapChaves.has(chaveGerada)) mapChaves.set(chaveGerada, { nomeExemplo: r.nome_produto, skus: new Set(), skusMap: new Map(), unidades: new Set(), quantidade: 0, valor: 0 })
-        const item = mapChaves.get(chaveGerada)
+        let item = mapChaves.get(chaveGerada)
+        if (!item) {
+          item = {
+            nomeExemplo: r.nome_produto,
+            skus: new Set(),
+            skusMap: new Map(),
+            unidades: new Set(),
+            quantidade: 0,
+            valor: 0
+          }
+          mapChaves.set(chaveGerada, item)
+        }
         if (r.codigo_produto) {
           item.skus.add(r.codigo_produto)
-          if (!item.skusMap.has(r.codigo_produto)) item.skusMap.set(r.codigo_produto, precoMedioBase)
+          if (!item.skusMap.has(r.codigo_produto)) {
+            item.skusMap.set(r.codigo_produto, precoMedioBase)
+          }
         }
-        item.unidades.add(u); item.quantidade += qtdAtual; item.valor += val
+        item.unidades.add(u)
+        item.quantidade += qtdAtual
+        item.valor += val
       }
     }
 
-    // ========== FLUXOS (compras/consumo/SKUs) = soma/distinct no período inteiro ==========
+    // ========== FLUXOS (compras / consumo / SKUs) ==========
     const fonteFluxos = (snapshotPeriodo && snapshotPeriodo.length) ? snapshotPeriodo : snapshot
-    for (const r of fonteFluxos) {
-      const u = r.unidade_almoxarifado 
+    const fluxLen = fonteFluxos.length
+
+    for (let i = 0; i < fluxLen; i++) {
+      const r = fonteFluxos[i]
+      const u = r.unidade_almoxarifado
       const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      const valSaida = Math.abs(parseNumber(r.valor_saida_cons_interno))
       const qtdAtual = parseNumber(r.qtde_saldo_atual)
-      const qtdEntrada = parseNumber(r.qtde_entrada_compras) 
-      
+      const qtdEntrada = parseNumber(r.qtde_entrada_compras)
+
       valCompras += valEntrada
-      valConsumo += Math.abs(valSaida)
+      valConsumo += valSaida
 
       if (u) {
-        if (!mapCC.has(u)) mapCC.set(u, { unidade: u, compras: 0, consumo: 0 })
-        mapCC.get(u).compras += valEntrada
-        mapCC.get(u).consumo += Math.abs(valSaida)
+        let cc = mapCC.get(u)
+        if (!cc) {
+          cc = { unidade: u, compras: 0, consumo: 0 }
+          mapCC.set(u, cc)
+        }
+        cc.compras += valEntrada
+        cc.consumo += valSaida
       }
 
       if (qtdAtual > 0 && r.codigo_produto) {
         skusSet.add(r.codigo_produto)
         if (u) {
-          if (!mapSkus.has(u)) mapSkus.set(u, new Set())
-          mapSkus.get(u).add(r.codigo_produto)
+          let setSkus = mapSkus.get(u)
+          if (!setSkus) {
+            setSkus = new Set()
+            mapSkus.set(u, setSkus)
+          }
+          setSkus.add(r.codigo_produto)
+
           if (r.nome_produto) {
-            if (!mapChavesPorUnidade.has(u)) mapChavesPorUnidade.set(u, new Map())
-            const mapUnid = mapChavesPorUnidade.get(u)
+            let mapUnid = mapChavesPorUnidade.get(u)
+            if (!mapUnid) {
+              mapUnid = new Map()
+              mapChavesPorUnidade.set(u, mapUnid)
+            }
             const chave = gerarChaveDuplicidade(r.nome_produto)
-            if (!mapUnid.has(chave)) mapUnid.set(chave, new Set())
-            mapUnid.get(chave).add(r.codigo_produto)
+            let setChaves = mapUnid.get(chave)
+            if (!setChaves) {
+              setChaves = new Set()
+              mapUnid.set(chave, setChaves)
+            }
+            setChaves.add(r.codigo_produto)
           }
         }
       }
-      
-      if (valEntrada > 0 || Math.abs(valSaida) > 0) {
+
+      if (valEntrada > 0 || valSaida > 0) {
         const skuKey = `${u}-${r.codigo_produto}`
-        if (!mapSkuAggComprasSemConsumo.has(skuKey)) mapSkuAggComprasSemConsumo.set(skuKey, { u, cod: r.codigo_produto, nome: r.nome_produto, _isCritico: r._isCritico, _isObsoleto: r._isObsoleto, _isObra: r._isObra, _isInsumo: r._isInsumo, _isOperacional: r._isOperacional, entrada: 0, saida: 0, qtdeComprada: 0 })
-        const item = mapSkuAggComprasSemConsumo.get(skuKey)
-        item.entrada += valEntrada; item.saida += Math.abs(valSaida); item.qtdeComprada += qtdEntrada
+        let item = mapSkuAggComprasSemConsumo.get(skuKey)
+        if (!item) {
+          item = {
+            u,
+            cod: r.codigo_produto,
+            nome: r.nome_produto,
+            _isCritico: r._isCritico,
+            _isObsoleto: r._isObsoleto,
+            _isObra: r._isObra,
+            _isInsumo: r._isInsumo,
+            _isOperacional: r._isOperacional,
+            entrada: 0,
+            saida: 0,
+            qtdeComprada: 0
+          }
+          mapSkuAggComprasSemConsumo.set(skuKey, item)
+        }
+        item.entrada += valEntrada
+        item.saida += valSaida
+        item.qtdeComprada += qtdEntrada
       }
     }
 
+    // Compras sem consumo (regra dos 5%)
     for (const item of mapSkuAggComprasSemConsumo.values()) {
       if (item.entrada > 0.01 && item.saida <= (item.entrada * 0.05)) {
-        comprasSem.push({ _rowKey: `${item.u}-${item.cod}`, unidade: item.u, codigo: item.cod, nome: item.nome, flags: { critico: item._isCritico, obsoleto: item._isObsoleto, obra: item._isObra, insumo: item._isInsumo, op: item._isOperacional }, qtdeComprada: item.qtdeComprada, comprado: item.entrada, consumido: item.saida })
+        comprasSem.push({
+          _rowKey: `${item.u}-${item.cod}`,
+          unidade: item.u,
+          codigo: item.cod,
+          nome: item.nome,
+          flags: {
+            critico: item._isCritico,
+            obsoleto: item._isObsoleto,
+            obra: item._isObra,
+            insumo: item._isInsumo,
+            op: item._isOperacional
+          },
+          qtdeComprada: item.qtdeComprada,
+          comprado: item.entrada,
+          consumido: item.saida
+        })
       }
     }
 
@@ -825,7 +1004,9 @@ export default function VisaoGeral({ data }) {
     let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
     const skusPrevSet = new Set()
 
-    for (const r of snapshotPrev) {
+    const prevLen = snapshotPrev.length
+    for (let i = 0; i < prevLen; i++) {
+      const r = snapshotPrev[i]
       const u = r.unidade_almoxarifado
       const val = parseNumber(r.valor_saldo_atual)
 
@@ -842,7 +1023,9 @@ export default function VisaoGeral({ data }) {
       ? snapshotPeriodoPrev
       : snapshotPrev
 
-    for (const r of fonteFluxosPrev) {
+    const prevFluxLen = fonteFluxosPrev.length
+    for (let i = 0; i < prevFluxLen; i++) {
+      const r = fonteFluxosPrev[i]
       valComprasPrev += parseNumber(r.valor_entrada_compras)
       valConsumoPrev += Math.abs(parseNumber(r.valor_saida_cons_interno))
       if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
@@ -850,20 +1033,31 @@ export default function VisaoGeral({ data }) {
       }
     }
 
+    // Variação por unidade
     const arrVariacao = []
     const todasUnid = new Set([...mapRank.keys(), ...mapRankPrev.keys()])
     for (const u of todasUnid) {
       if (!u) continue
-      const atual = mapRank.get(u) || 0, prev = mapRankPrev.get(u) || 0, diff = atual - prev
-      if (atual === 0 && prev === 0) continue 
+      const atual = mapRank.get(u) || 0
+      const prev = mapRankPrev.get(u) || 0
+      const diff = atual - prev
+      if (atual === 0 && prev === 0) continue
       let pct = 0
       if (prev > 0) pct = (diff / prev) * 100
       else if (atual > 0) pct = 100
       arrVariacao.push({ unidade: u, atual, anterior: prev, diff, pct })
     }
 
-    const mapToSort = (m) => [...m.entries()].filter(([unidade, v]) => unidade && v > 0.01).map(([unidade, valor]) => ({ unidade, valor })).sort((a, b) => a.valor - b.valor)
-    
+    // Helper de ranking
+    const mapToSort = (m) => {
+      const arr = []
+      for (const [unidade, valor] of m) {
+        if (unidade && valor > 0.01) arr.push({ unidade, valor })
+      }
+      arr.sort((a, b) => a.valor - b.valor)
+      return arr
+    }
+
     const exposicao = [
       { name: 'Operacional', value: valOp, color: '#3498db' },
       { name: 'Insumo', value: valInsumo, color: '#f1c40f' },
@@ -872,34 +1066,80 @@ export default function VisaoGeral({ data }) {
       { name: 'Crítico', value: valCritico, color: '#e74c3c' },
     ].filter(d => d.value > 0).sort((a, b) => a.value - b.value)
 
+    // Duplicados finais
     const duplicados = []
     for (const dados of mapChaves.values()) {
       if (dados.skus.size > 1) {
-        const precosArr = Array.from(dados.skusMap.entries()).map(([sku, preco]) => `SKU ${sku}: ${fmtBRL(preco)}`)
-        duplicados.push({ _rowKey: dados.nomeExemplo, nome: dados.nomeExemplo, qtd_skus: dados.skus.size, skus_lista: Array.from(dados.skus).join(', '), precos_detalhados: precosArr.join(' | '), unidades_lista: Array.from(dados.unidades).join(', '), quantidade: dados.quantidade, valor: dados.valor })
+        const precosArr = []
+        for (const [sku, preco] of dados.skusMap) {
+          precosArr.push(`SKU ${sku}: ${fmtBRL(preco)}`)
+        }
+        duplicados.push({
+          _rowKey: dados.nomeExemplo,
+          nome: dados.nomeExemplo,
+          qtd_skus: dados.skus.size,
+          skus_lista: Array.from(dados.skus).join(', '),
+          precos_detalhados: precosArr.join(' | '),
+          unidades_lista: Array.from(dados.unidades).join(', '),
+          quantidade: dados.quantidade,
+          valor: dados.valor
+        })
       }
     }
-    duplicados.sort((a, b) => b.valor - a.valor); maiores.sort((a, b) => b.valor - a.valor); comprasSem.sort((a, b) => b.comprado - a.comprado)
 
-    const skusUnidadeArr = [...mapSkus.entries()].map(([u, setSkus]) => {
+    duplicados.sort((a, b) => b.valor - a.valor)
+    maiores.sort((a, b) => b.valor - a.valor)
+    comprasSem.sort((a, b) => b.comprado - a.comprado)
+
+    // SKUs por unidade
+    const skusUnidadeArr = []
+    for (const [u, setSkus] of mapSkus) {
       let duplicadosUnidade = 0
-      if (mapChavesPorUnidade.has(u)) { for (const setChaves of mapChavesPorUnidade.get(u).values()) { if (setChaves.size > 1) duplicadosUnidade += setChaves.size } }
-      return { unidade: u, total: setSkus.size, duplicados: duplicadosUnidade }
-    }).filter(d => d.unidade && d.total > 0).sort((a, b) => a.total - b.total)
+      const mapUnid = mapChavesPorUnidade.get(u)
+      if (mapUnid) {
+        for (const setChaves of mapUnid.values()) {
+          if (setChaves.size > 1) duplicadosUnidade += setChaves.size
+        }
+      }
+      if (u && setSkus.size > 0) {
+        skusUnidadeArr.push({ unidade: u, total: setSkus.size, duplicados: duplicadosUnidade })
+      }
+    }
+    skusUnidadeArr.sort((a, b) => a.total - b.total)
 
     return {
-      metrics: { valEstoque, valCompras, valConsumo, valSkus: skusSet.size, valInsumo, valCritico, valObsoleto, valObra, valOp, valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size, valInsumoPrev, valCriticoPrev, valObsoletoPrev, valObraPrev },
-      rankingUnidade: mapToSort(mapRank), rankCritico: mapToSort(mapCrit), rankObsoleto: mapToSort(mapObs), rankObra: mapToSort(mapObra), rankOperacional: mapToSort(mapOp), rankInsumo: mapToSort(mapInsumo),
-      compraConsumoUnidade: [...mapCC.values()].filter((d) => d.unidade && (d.compras > 0.01 || d.consumo > 0.01)).sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
-      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01), skusUnidade: skusUnidadeArr, exposicaoCategorias: exposicao, maioresValoresDataCompleta: maiores, comprasSemConsumoDataCompleta: comprasSem, duplicadosDataCompleta: duplicados
+      metrics: {
+        valEstoque, valCompras, valConsumo, valSkus: skusSet.size,
+        valInsumo, valCritico, valObsoleto, valObra, valOp,
+        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size,
+        valInsumoPrev, valCriticoPrev, valObsoletoPrev, valObraPrev
+      },
+      rankingUnidade: mapToSort(mapRank),
+      rankCritico: mapToSort(mapCrit),
+      rankObsoleto: mapToSort(mapObs),
+      rankObra: mapToSort(mapObra),
+      rankOperacional: mapToSort(mapOp),
+      rankInsumo: mapToSort(mapInsumo),
+      compraConsumoUnidade: [...mapCC.values()]
+        .filter(d => d.unidade && (d.compras > 0.01 || d.consumo > 0.01))
+        .sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
+      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
+      skusUnidade: skusUnidadeArr,
+      exposicaoCategorias: exposicao,
+      maioresValoresDataCompleta: maiores,
+      comprasSemConsumoDataCompleta: comprasSem,
+      duplicadosDataCompleta: duplicados
     }
   }, [snapshot, snapshotPrev, snapshotPeriodo, snapshotPeriodoPrev])
 
   const rankingUnidadeAtivo = useMemo(() => {
-    switch(abaRankingUnidade) {
-      case 'operacional': return rankOperacional || []; case 'critico': return rankCritico || [];
-      case 'obsoleto': return rankObsoleto || []; case 'obra': return rankObra || [];
-      case 'insumo': return rankInsumo || []; default: return rankingUnidade || [];
+    switch (abaRankingUnidade) {
+      case 'operacional': return rankOperacional || []
+      case 'critico': return rankCritico || []
+      case 'obsoleto': return rankObsoleto || []
+      case 'obra': return rankObra || []
+      case 'insumo': return rankInsumo || []
+      default: return rankingUnidade || []
     }
   }, [abaRankingUnidade, rankingUnidade, rankOperacional, rankCritico, rankObsoleto, rankObra, rankInsumo])
 
@@ -920,21 +1160,22 @@ export default function VisaoGeral({ data }) {
   const duplicadosGaveta = useMemo(() => duplicadosDataCompleta.slice(0, 50), [duplicadosDataCompleta])
   const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(() => filtrarListaFS(duplicadosDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'skus_lista'], maxItems: 1000, matchUnidade: (item, setU) => { const parts = String(item.unidades_lista || '').split(','); return parts.some(p => setU.has(normUnidade(p))) } }), [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
 
-  // =========================================================================
-  // AGRUPAMENTO TEMPORAL DINÂMICO (MENSAL, TRIMESTRE, SEMESTRE, ANUAL)
-  // =========================================================================
   const timeSeriesAgg = useMemo(() => {
     // =========================================================================
-    // 1) Sempre agrega primeiro no nível MENSAL (fonte da verdade)
+    // 1) Agregação MENSAL (fonte da verdade) — loop único e mais enxuto
     // =========================================================================
     const monthlyMap = new Map()
-    for (const r of dfFiltrado) {
+
+    const len = dfFiltrado.length
+    for (let i = 0; i < len; i++) {
+      const r = dfFiltrado[i]
       const ano = r.tmp_ano_num
       const mes = r.tmp_mes_num || 1
       const key = `${ano}-${String(mes).padStart(2, '0')}`
 
-      if (!monthlyMap.has(key)) {
-        monthlyMap.set(key, {
+      let item = monthlyMap.get(key)
+      if (!item) {
+        item = {
           periodo: periodoLabel(mes, r.ano_referencia),
           ano,
           mes,
@@ -948,18 +1189,18 @@ export default function VisaoGeral({ data }) {
           compras: 0,
           consumo: 0,
           comprasSemConsumo: 0,
-          skuFluxos: new Map(), // unidade||codigo → { entrada, saida }
+          skuFluxos: new Map(),
           skus: new Set(),
           chavesMap: new Map(),
-        })
+        }
+        monthlyMap.set(key, item)
       }
 
-      const item = monthlyMap.get(key)
       const val = parseNumber(r.valor_saldo_atual)
       const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = parseNumber(r.valor_saida_cons_interno)
+      const valSaida = Math.abs(parseNumber(r.valor_saida_cons_interno))
 
-      // Estoques (saldo) — soma mensal normal (depois pegamos o fechamento)
+      // Estoques
       item.total += val
       if (r._isOperacional) item.operacional += val
       if (r._isCritico) item.critico += val
@@ -967,17 +1208,20 @@ export default function VisaoGeral({ data }) {
       if (r._isObra) item.obra += val
       if (r._isInsumo) item.insumo += val
 
-      // Fluxos — sempre somam
+      // Fluxos
       item.compras += valEntrada
-      item.consumo += Math.abs(valSaida)
+      item.consumo += valSaida
 
-      // Fluxo por SKU (regra unificada de compras sem consumo aplicada depois)
-      if ((valEntrada > 0 || Math.abs(valSaida) > 0) && r.codigo_produto) {
+      // Fluxo por SKU (para regra dos 5%)
+      if ((valEntrada > 0 || valSaida > 0) && r.codigo_produto) {
         const skuKey = `${r.unidade_almoxarifado || ''}||${r.codigo_produto}`
-        if (!item.skuFluxos.has(skuKey)) item.skuFluxos.set(skuKey, { entrada: 0, saida: 0 })
-        const flux = item.skuFluxos.get(skuKey)
+        let flux = item.skuFluxos.get(skuKey)
+        if (!flux) {
+          flux = { entrada: 0, saida: 0 }
+          item.skuFluxos.set(skuKey, flux)
+        }
         flux.entrada += valEntrada
-        flux.saida += Math.abs(valSaida)
+        flux.saida += valSaida
       }
 
       // SKUs
@@ -985,47 +1229,60 @@ export default function VisaoGeral({ data }) {
         item.skus.add(r.codigo_produto)
         if (r.nome_produto && r.unidade_almoxarifado) {
           const chave = gerarChaveDuplicidade(r.nome_produto)
-          if (!item.chavesMap.has(chave)) item.chavesMap.set(chave, new Set())
-          item.chavesMap.get(chave).add(r.codigo_produto)
+          let setSkus = item.chavesMap.get(chave)
+          if (!setSkus) {
+            setSkus = new Set()
+            item.chavesMap.set(chave, setSkus)
+          }
+          setSkus.add(r.codigo_produto)
         }
       }
     }
 
- // Preenche meses sem dado com zero (do primeiro ao último mês da base de dados, garantindo meses intermediários zerados e sem extrapolar o futuro)
- if (dadosSanitizados && dadosSanitizados.length > 0) {
-  let minAno = 9999, minMes = 13, maxAno = 0, maxMes = 0
-  for (const r of dadosSanitizados) {
-    if (!r.tmp_ano_num || !r.tmp_mes_num) continue
-    if (anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length && !anosSel.includes(String(r.ano_referencia))) continue
-    if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
-      minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
-    }
-    if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
-      maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
-    }
-  }
-  if (minAno <= maxAno) {
-    let a = minAno, m = minMes
-    while (a < maxAno || (a === maxAno && m <= maxMes)) {
-      const key = `${a}-${String(m).padStart(2, '0')}`
-      if (!monthlyMap.has(key)) {
-        monthlyMap.set(key, {
-          periodo: periodoLabel(m, a),
-          ano: a,
-          mes: m,
-          sortKey: key,
-          total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
-          compras: 0, consumo: 0, comprasSemConsumo: 0,
-          skuFluxos: new Map(),
-          skus: new Set(), chavesMap: new Map(),
-        })
+    // Preenche meses sem dado (do primeiro ao último mês real da base filtrada por ano)
+    if (dadosSanitizados && dadosSanitizados.length > 0) {
+      let minAno = 9999, minMes = 13, maxAno = 0, maxMes = 0
+      const anosFiltro = anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length
+        ? new Set(anosSel.map(String))
+        : null
+
+      for (let i = 0; i < dadosSanitizados.length; i++) {
+        const r = dadosSanitizados[i]
+        if (!r.tmp_ano_num || !r.tmp_mes_num) continue
+        if (anosFiltro && !anosFiltro.has(String(r.ano_referencia))) continue
+
+        if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
+          minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
+        }
+        if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
+          maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
+        }
       }
-      m += 1
-      if (m > 12) { m = 1; a += 1 }
+
+      if (minAno <= maxAno) {
+        let a = minAno, m = minMes
+        while (a < maxAno || (a === maxAno && m <= maxMes)) {
+          const key = `${a}-${String(m).padStart(2, '0')}`
+          if (!monthlyMap.has(key)) {
+            monthlyMap.set(key, {
+              periodo: periodoLabel(m, a),
+              ano: a,
+              mes: m,
+              sortKey: key,
+              total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
+              compras: 0, consumo: 0, comprasSemConsumo: 0,
+              skuFluxos: new Map(),
+              skus: new Set(),
+              chavesMap: new Map(),
+            })
+          }
+          m += 1
+          if (m > 12) { m = 1; a += 1 }
+        }
+      }
     }
-  }
-}
-    // Calcula comprasSemConsumo mensal com a MESMA regra da tabela (por SKU no mês)
+
+    // Calcula comprasSemConsumo mensal (regra dos 5%)
     for (const item of monthlyMap.values()) {
       let csc = 0
       for (const flux of item.skuFluxos.values()) {
@@ -1038,7 +1295,7 @@ export default function VisaoGeral({ data }) {
 
     const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
 
-    // Helper: monta o objeto de retorno a partir de uma lista de pontos
+    // Helper de retorno
     const buildReturn = (points) => ({
       total: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.total })),
       operacional: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.operacional })),
@@ -1050,55 +1307,54 @@ export default function VisaoGeral({ data }) {
       comprasSemConsumoEvolucao: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.comprasSemConsumo })),
       skus: points.map(d => {
         let skusDupCount = 0
-        for (const skusSet of d.chavesMap.values()) if (skusSet.size > 1) skusDupCount += skusSet.size
+        for (const skusSet of d.chavesMap.values()) {
+          if (skusSet.size > 1) skusDupCount += skusSet.size
+        }
         return { periodo: d.periodo, closingPeriodo: d.closingPeriodo, total: d.skus.size, duplicados: skusDupCount }
       }),
     })
 
     // =========================================================================
-    // 2) Se granularidade === 'mensal' → retorna direto (closingPeriodo = periodo)
+    // 2) Granularidade MENSAL → retorno direto
     // =========================================================================
     if (granularidade === 'mensal') {
       const points = monthlySorted.map(d => ({
         ...d,
-        closingPeriodo: d.periodo, // mensal: o próprio período é o fechamento
+        closingPeriodo: d.periodo,
       }))
       return buildReturn(points)
     }
 
     // =========================================================================
-    // 3) Agregação para TRIMESTRE / SEMESTRE / ANUAL
-    //    - Estoques → FECHAMENTO (último mês disponível do período)
-    //    - Compras / Consumo / ComprasSemConsumo → SOMA
-    //    - SKUs → DISTINCT no período inteiro
-    //    - closingPeriodo → label mensal do mês de fechamento (para snapshot/cards)
+    // 3) Agregação TRIMESTRE / SEMESTRE / ANUAL
     // =========================================================================
     const groupMap = new Map()
 
-    for (const m of monthlySorted) {
+    for (let i = 0; i < monthlySorted.length; i++) {
+      const m = monthlySorted[i]
       let groupKey = ''
       let periodoLabelStr = ''
 
       if (granularidade === 'trimestre') {
         const tri = Math.ceil(m.mes / 3)
         groupKey = `${m.ano}-T${tri}`
-        periodoLabelStr = `T${tri}/${String(m.ano).slice(-2)}`   // T de Trimestre (não Q)
+        periodoLabelStr = `T${tri}/${String(m.ano).slice(-2)}`
       } else if (granularidade === 'semestre') {
         const sem = m.mes <= 6 ? 1 : 2
         groupKey = `${m.ano}-S${sem}`
         periodoLabelStr = `S${sem}/${String(m.ano).slice(-2)}`
       } else {
-        // anual — label NÃO numérico para o Plotly não tratar como eixo linear
         groupKey = `${m.ano}`
         periodoLabelStr = `Ano ${m.ano}`
       }
 
-      if (!groupMap.has(groupKey)) {
-        groupMap.set(groupKey, {
+      let g = groupMap.get(groupKey)
+      if (!g) {
+        g = {
           periodo: periodoLabelStr,
           sortKey: groupKey,
           latestMes: -1,
-          closingPeriodo: m.periodo, // será atualizado com o mês mais recente
+          closingPeriodo: m.periodo,
           total: 0,
           operacional: 0,
           critico: 0,
@@ -1111,34 +1367,40 @@ export default function VisaoGeral({ data }) {
           skuFluxos: new Map(),
           skus: new Set(),
           chavesMap: new Map(),
-        })
+        }
+        groupMap.set(groupKey, g)
       }
 
-      const g = groupMap.get(groupKey)
-
-      // --- Fluxos: sempre SOMA ---
+      // Fluxos → soma
       g.compras += m.compras
       g.consumo += m.consumo
 
-      // --- Compras sem consumo: une fluxos por SKU (regra aplicada depois no grupo) ---
-      for (const [skuKey, flux] of m.skuFluxos.entries()) {
-        if (!g.skuFluxos.has(skuKey)) g.skuFluxos.set(skuKey, { entrada: 0, saida: 0 })
-        const gf = g.skuFluxos.get(skuKey)
+      // Une fluxos por SKU
+      for (const [skuKey, flux] of m.skuFluxos) {
+        let gf = g.skuFluxos.get(skuKey)
+        if (!gf) {
+          gf = { entrada: 0, saida: 0 }
+          g.skuFluxos.set(skuKey, gf)
+        }
         gf.entrada += flux.entrada
         gf.saida += flux.saida
       }
 
-      // --- SKUs: DISTINCT (união dos sets) ---
+      // SKUs → distinct
       for (const sku of m.skus) g.skus.add(sku)
-      for (const [chave, setSkus] of m.chavesMap.entries()) {
-        if (!g.chavesMap.has(chave)) g.chavesMap.set(chave, new Set())
-        for (const sku of setSkus) g.chavesMap.get(chave).add(sku)
+      for (const [chave, setSkus] of m.chavesMap) {
+        let target = g.chavesMap.get(chave)
+        if (!target) {
+          target = new Set()
+          g.chavesMap.set(chave, target)
+        }
+        for (const sku of setSkus) target.add(sku)
       }
 
-      // --- Estoques: FECHAMENTO (só atualiza se este mês for o mais recente do grupo) ---
+      // Estoques → fechamento (último mês do grupo)
       if (m.mes > g.latestMes) {
         g.latestMes = m.mes
-        g.closingPeriodo = m.periodo   // label mensal do fechamento
+        g.closingPeriodo = m.periodo
         g.total = m.total
         g.operacional = m.operacional
         g.critico = m.critico
@@ -1148,7 +1410,7 @@ export default function VisaoGeral({ data }) {
       }
     }
 
-    // Aplica regra dos 5% no PERÍODO do grupo (igual à tabela)
+    // Regra dos 5% no nível do grupo
     for (const g of groupMap.values()) {
       let csc = 0
       for (const flux of g.skuFluxos.values()) {
@@ -1172,37 +1434,68 @@ export default function VisaoGeral({ data }) {
   }, [timeSeriesAgg, periodoEfetivo])
 
   const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
-    const empty = { giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0, giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: [] }
+    const empty = {
+      giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0,
+      giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: []
+    }
     if (!dfFiltrado.length) return empty
     const p = parsePeriodo(periodoEfetivo)
     if (!p) return empty
 
+    // Agregação mensal operacional (apenas estoque + consumo operacional)
     const map = new Map()
-    for (const r of dfFiltrado) {
+    const len = dfFiltrado.length
+    for (let i = 0; i < len; i++) {
+      const r = dfFiltrado[i]
+      // Só considera o que não é crítico nem obsoleto
+      if (r._isCritico || r._isObsoleto) continue
+
       const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
-      if (!map.has(key)) map.set(key, { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 })
-      const item = map.get(key)
-      if (!r._isCritico && !r._isObsoleto) { item.estoque_op += parseNumber(r.valor_saldo_atual); item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno)) }
+      let item = map.get(key)
+      if (!item) {
+        item = { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 }
+        map.set(key, item)
+      }
+      item.estoque_op += parseNumber(r.valor_saldo_atual)
+      item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
     }
+
     const monthly = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
 
+    // Série acumulada para o gráfico
     let accEst = 0, accCon = 0
-    const giroCoberturaTempo = monthly.map((row, i) => { accEst += row.estoque_op; accCon += row.consumo_op; const n = i + 1; const estMed = accEst / n; const conMed = accCon / n; return { periodo: periodoLabel(row.mes, row.ano), giro: estMed > 0 ? conMed / estMed : 0, cobertura: conMed > 0 ? estMed / conMed : 0 } })
+    const giroCoberturaTempo = monthly.map((row, i) => {
+      accEst += row.estoque_op
+      accCon += row.consumo_op
+      const n = i + 1
+      const estMed = accEst / n
+      const conMed = accCon / n
+      return {
+        periodo: periodoLabel(row.mes, row.ano),
+        giro: estMed > 0 ? conMed / estMed : 0,
+        cobertura: conMed > 0 ? estMed / conMed : 0
+      }
+    })
 
-    // KPIs de Giro/Cobertura recalculados para o PERÍODO selecionado (periodMonths)
-    // Giro = Consumo do período / Estoque Médio do período
-    // Cobertura = Estoque Médio / Consumo Médio
+    // KPIs do período selecionado
     const monthKeySet = new Set((periodMonths || []).map(m => `${m.ano}-${m.mes}`))
-    const subAtual = monthly.filter((m) => monthKeySet.has(`${m.ano}-${m.mes}`) && m.estoque_op > 0)
+    const subAtual = monthly.filter(m => monthKeySet.has(`${m.ano}-${m.mes}`) && m.estoque_op > 0)
+
     let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
     if (subAtual.length) {
       const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
       const conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
-      if (estMed > 0) { giroMensal = conMed / estMed; giroAnual = giroMensal * 12 }
-      if (conMed > 0) { coberturaMeses = estMed / conMed; coberturaAnos = coberturaMeses / 12 }
+      if (estMed > 0) {
+        giroMensal = conMed / estMed
+        giroAnual = giroMensal * 12
+      }
+      if (conMed > 0) {
+        coberturaMeses = estMed / conMed
+        coberturaAnos = coberturaMeses / 12
+      }
     }
 
-    // Período anterior (mesmo número de meses, imediatamente antes)
+    // Período anterior
     let giroMensalPrev = 0, coberturaMesesPrev = 0
     if (periodMonths && periodMonths.length) {
       const first = periodMonths[0]
@@ -1210,10 +1503,12 @@ export default function VisaoGeral({ data }) {
       const firstIdx = first.ano * 12 + first.mes
       const prevEndIdx = firstIdx - 1
       const prevStartIdx = prevEndIdx - n + 1
-      const subPrev = monthly.filter((m) => {
+
+      const subPrev = monthly.filter(m => {
         const idx = m.ano * 12 + m.mes
         return idx >= prevStartIdx && idx <= prevEndIdx && m.estoque_op > 0
       })
+
       if (subPrev.length) {
         const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length
         const conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
@@ -1221,44 +1516,85 @@ export default function VisaoGeral({ data }) {
         if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
       }
     }
-    return { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, monthlyRaw: monthly, giroCoberturaTempo }
+
+    return {
+      giroMensal, giroAnual, coberturaMeses, coberturaAnos,
+      giroMensalPrev, coberturaMesesPrev,
+      monthlyRaw: monthly,
+      giroCoberturaTempo
+    }
   }, [dfFiltrado, periodoEfetivo, periodMonths])
 
   const itensParados = useMemo(() => {
     const p = parsePeriodo(periodoEfetivo)
     if (!p || !dfFiltrado.length) return []
-    const snapshotIdx = p.ano * 12 + p.mes
-    
-    const calc = dfFiltrado.filter((r) => {
-      if (!r.unidade_almoxarifado || !r.tmp_ano_num || !r.tmp_mes_num) return false
-      return (r.tmp_ano_num * 12 + r.tmp_mes_num) <= snapshotIdx && !r._isCritico && !r._isObsoleto
-    }).map((r) => ({ ...r, tempo_idx: r.tmp_ano_num * 12 + r.tmp_mes_num }))
 
-    const ultimoMov = new Map(), primeiroHist = new Map()
-    for (const r of calc) {
-      const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0 && r.tempo_idx > (ultimoMov.get(key) || 0)) ultimoMov.set(key, r.tempo_idx)
-      if (r.tempo_idx < (primeiroHist.get(key) ?? Infinity)) primeiroHist.set(key, r.tempo_idx)
+    const snapshotIdx = p.ano * 12 + p.mes
+
+    // 1) Filtra e indexa apenas o necessário (sem spread)
+    const calc = []
+    const len = dfFiltrado.length
+    for (let i = 0; i < len; i++) {
+      const r = dfFiltrado[i]
+      if (!r.unidade_almoxarifado || !r.tmp_ano_num || !r.tmp_mes_num) continue
+      if (r._isCritico || r._isObsoleto) continue
+      const tempoIdx = r.tmp_ano_num * 12 + r.tmp_mes_num
+      if (tempoIdx > snapshotIdx) continue
+      // guarda referência + índice (sem clonar o objeto)
+      calc.push({ r, tempo_idx: tempoIdx })
     }
 
-    const snapAtual = calc.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes && parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto)
-    const result = []
+    // 2) Último movimento e primeiro histórico
+    const ultimoMov = new Map()
+    const primeiroHist = new Map()
 
-    for (const r of snapAtual) {
-      if (!r.unidade_almoxarifado) continue
+    for (let i = 0; i < calc.length; i++) {
+      const { r, tempo_idx } = calc[i]
+      const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
+
+      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0) {
+        const atual = ultimoMov.get(key) || 0
+        if (tempo_idx > atual) ultimoMov.set(key, tempo_idx)
+      }
+
+      const prim = primeiroHist.get(key)
+      if (prim === undefined || tempo_idx < prim) {
+        primeiroHist.set(key, tempo_idx)
+      }
+    }
+
+    // 3) Snapshot atual (saldo > 0)
+    const result = []
+    for (let i = 0; i < calc.length; i++) {
+      const { r, tempo_idx } = calc[i]
+      if (r.tmp_ano_num !== p.ano || r.tmp_mes_num !== p.mes) continue
+      if (parseNumber(r.qtde_saldo_atual) <= 0 || !r.codigo_produto) continue
+
       const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
       let ultimo = ultimoMov.get(key)
+
       if (ultimo == null) {
         const prim = primeiroHist.get(key)
         ultimo = prim != null ? prim - 1 : snapshotIdx
       }
+
       const mesesParado = Math.max(0, snapshotIdx - ultimo)
-      
+
       if (mesesParado >= 3) {
-        result.push({ _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`, unidade: r.unidade_almoxarifado, codigo: r.codigo_produto, nome: r.nome_produto, quantidade: parseNumber(r.qtde_saldo_atual), valor: parseNumber(r.valor_saldo_atual), mesesParado })
+        result.push({
+          _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`,
+          unidade: r.unidade_almoxarifado,
+          codigo: r.codigo_produto,
+          nome: r.nome_produto,
+          quantidade: parseNumber(r.qtde_saldo_atual),
+          valor: parseNumber(r.valor_saldo_atual),
+          mesesParado
+        })
       }
     }
-    return result.sort((a, b) => b.valor - a.valor)
+
+    result.sort((a, b) => b.valor - a.valor)
+    return result
   }, [dfFiltrado, periodoEfetivo])
 
   const mesesParadosOpcoes = useMemo(() => [...new Set(itensParados.map(i => i.mesesParado))].sort((a, b) => a - b).map(String), [itensParados])

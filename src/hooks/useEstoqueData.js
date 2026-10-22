@@ -48,6 +48,7 @@ async function setCache(key, data) {
 // -----------------------------------------------------------
 
 const COLS = [
+  'id',
   'valor_saldo_atual',
   'valor_entrada_compras',
   'valor_saida_cons_interno',
@@ -115,11 +116,8 @@ export function useEstoqueData() {
     setError(null)
     setProgress(0)
 
-    // 1. Verifica o cache se não for forceReload
     if (!forceReload) {
       const cachedData = await getCache(CACHE_KEY)
-      
-      // Valida se o cache existe e se contém todas as colunas estruturais necessárias
       const isValidCache = cachedData && 
                            cachedData.length > 0 && 
                            'ge' in cachedData[0] && 
@@ -136,32 +134,19 @@ export function useEstoqueData() {
       }
     }
 
-    // 2. Busca do Supabase caso seja forceReload ou o cache esteja desatualizado/vazio
     try {
-      const { count, error: countErr } = await supabase
-        .from(TABLE_ESTOQUE)
-        .select('*', { count: 'exact', head: true })
-
-      if (countErr) throw countErr
-
-      const totalRows = count || 0
-      if (totalRows === 0) {
-        setData([])
-        setLoading(false)
-        return
-      }
-
-      const batchSize = 1000
-      const batches = Math.ceil(totalRows / batchSize)
+      // 1. Contagem removida completamente para evitar timeout inicial
+      const batchSize = 500 // 2. Lote reduzido para aliviar a carga no servidor
       const all = []
+      
+      let lastId = 0
+      let hasMore = true
 
-      for (let i = 0; i < batches; i++) {
-        const from = i * batchSize
-        const to = Math.min(from + batchSize - 1, totalRows - 1)
-
+      while (hasMore) {
         let attempt = 0
         let success = false
         let lastError = null
+        let currentBatch = []
 
         while (attempt < 3 && !success) {
           try {
@@ -169,24 +154,40 @@ export function useEstoqueData() {
               .from(TABLE_ESTOQUE)
               .select(COLS)
               .order('id')
-              .range(from, to)
+              .gt('id', lastId)
+              .limit(batchSize)
 
             if (fetchErr) throw fetchErr
-            if (rows?.length) all.push(...rows.map(normalizeRow))
+            
+            currentBatch = rows || []
             success = true
           } catch (e) {
             lastError = e
             attempt++
             if (attempt < 3) {
-              await new Promise((r) => setTimeout(r, 400 * attempt))
+              await new Promise((r) => setTimeout(r, 500 * attempt)) // Tempo de espera um pouquinho maior entre tentativas
             }
           }
         }
 
         if (!success && lastError) throw lastError
-        setProgress(Math.round(((i + 1) / batches) * 100))
+
+        if (currentBatch.length > 0) {
+          all.push(...currentBatch.map(normalizeRow))
+          lastId = currentBatch[currentBatch.length - 1].id
+          
+          // 3. Progresso simulado seguro que vai crescendo aos poucos até 95%
+          setProgress((prev) => Math.min(prev + (10000 / (all.length + 100)), 95))
+
+          if (currentBatch.length < batchSize) {
+            hasMore = false
+          }
+        } else {
+          hasMore = false
+        }
       }
 
+      setProgress(100)
       setData(all)
       await setCache(CACHE_KEY, all)
 
