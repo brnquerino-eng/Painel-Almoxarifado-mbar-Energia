@@ -473,7 +473,6 @@ export default function VisaoGeral({ data }) {
     const querInsumo = temTipo && tipos.includes('Insumo')
     const querOp = temTipo && tipos.includes('Operacional')
 
-    // Pré-aloca array com tamanho estimado (reduz reallocações)
     const df = []
     const setUnid = new Set()
     const setReg = new Set()
@@ -495,46 +494,67 @@ export default function VisaoGeral({ data }) {
       if (reg) temColunaRegiao = true
       if (seg) temColunaSegmento = true
 
-      // Early continue — evita cálculos desnecessários
-      if (escopoAllowed && !escopoAllowed.has(u)) continue
-      if (setU && !setU.has(u)) continue
-      if (setA && !setA.has(String(r.ano_referencia))) continue
-      if (setR && !(reg && setR.has(reg))) continue
-      if (setS && !(seg && setS.has(seg))) continue
-
-      // Tipo (só calcula se necessário)
+      // Avalia cada condição de filtro individualmente
+      const passEscopo = !escopoAllowed || escopoAllowed.has(u)
+      const passUnidade = !setU || setU.has(u)
+      const passAno = !setA || setA.has(String(r.ano_referencia))
+      const passRegiao = !setR || (reg && setR.has(reg))
+      const passSegmento = !setS || (seg && setS.has(seg))
+      
+      let passTipo = true
       if (temTipo) {
-        const passTipo =
-          (querCritico && r._isCritico) ||
-          (querObsoleto && r._isObsoleto) ||
-          (querObra && r._isObra) ||
-          (querInsumo && r._isInsumo) ||
-          (querOp && r._isOperacional)
-        if (!passTipo) continue
+        passTipo = (querCritico && r._isCritico) ||
+                   (querObsoleto && r._isObsoleto) ||
+                   (querObra && r._isObra) ||
+                   (querInsumo && r._isInsumo) ||
+                   (querOp && r._isOperacional)
       }
 
-      // Passou em todos os filtros → entra no df
-      df.push(r)
-
-      // Atualiza opções em cascata (já filtrado)
-      if (u) setUnid.add(u)
-      if (reg) setReg.add(reg)
-      if (seg) setSeg.add(seg)
-      if (r.ano_referencia != null && r.ano_referencia !== '') {
-        setAno.add(String(r.ano_referencia))
+      // Se passou em TODOS os filtros, a linha entra na base filtrada (gráfico/tabelas)
+      if (passEscopo && passUnidade && passAno && passRegiao && passSegmento && passTipo) {
+        df.push(r)
       }
 
-      // Flags de tipos disponíveis
-      if (!tOp && r._isOperacional) tOp = true
-      if (!tCrit && r._isCritico) tCrit = true
-      if (!tObs && r._isObsoleto) tObs = true
-      if (!tObra && r._isObra) tObra = true
-      if (!tIns && r._isInsumo) tIns = true
+      // A CASCATA: Cada filtro constrói suas opções checando a interseção 
+      // de TODOS OS OUTROS filtros ativos, ignorando sua própria seleção.
 
-      // Escopos
-      if (u) {
-        if (String(u).includes('GERENCIAL')) hasGer = true
-        else hasAtiva = true
+      // Opções de Escopo (ignora passEscopo)
+      if (passUnidade && passAno && passRegiao && passSegmento && passTipo) {
+        if (u) {
+          if (String(u).includes('GERENCIAL')) hasGer = true
+          else hasAtiva = true
+        }
+      }
+
+      // Opções de Unidade (ignora passUnidade)
+      if (passEscopo && passAno && passRegiao && passSegmento && passTipo) {
+        if (u) setUnid.add(u)
+      }
+
+      // Opções de Ano (ignora passAno)
+      if (passEscopo && passUnidade && passRegiao && passSegmento && passTipo) {
+        if (r.ano_referencia != null && r.ano_referencia !== '') {
+          setAno.add(String(r.ano_referencia))
+        }
+      }
+
+      // Opções de Região (ignora passRegiao)
+      if (passEscopo && passUnidade && passAno && passSegmento && passTipo) {
+        if (reg) setReg.add(reg)
+      }
+
+      // Opções de Segmento (ignora passSegmento)
+      if (passEscopo && passUnidade && passAno && passRegiao && passTipo) {
+        if (seg) setSeg.add(seg)
+      }
+
+      // Opções de Categoria/Tipo (ignora passTipo)
+      if (passEscopo && passUnidade && passAno && passRegiao && passSegmento) {
+        if (!tOp && r._isOperacional) tOp = true
+        if (!tCrit && r._isCritico) tCrit = true
+        if (!tObs && r._isObsoleto) tObs = true
+        if (!tObra && r._isObra) tObra = true
+        if (!tIns && r._isInsumo) tIns = true
       }
     }
 
