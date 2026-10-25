@@ -1,16 +1,10 @@
 import { useState, useEffect } from 'react'
 import Header from './components/Header'
-import Tabs from './components/Tabs'
 import LoadingScreen from './components/LoadingScreen'
 import VisaoGeral from './components/VisaoGeral'
 import PainelInventarios from './components/PainelInventarios'
 import { useEstoqueData } from './hooks/useEstoqueData'
 import { useInventarioData } from './hooks/useInventarioData'
-
-const TABS = [
-  { id: 'geral', label: 'VISÃO GERAL' },
-  { id: 'inventarios', label: 'PAINEL DE INVENTÁRIOS' },
-]
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('geral')
@@ -59,59 +53,95 @@ export default function App() {
     setBuscando(false)
   }
 
-  // Só mostra a tela preta de loading se você tiver CLICADO no botão
+  // Tela preta de loading se você tiver CLICADO no botão (mas mantendo a sidebar visível!)
   if (loading && buscando) {
     return (
-      <div className="min-h-screen bg-[#080808] p-6 text-white">
-        {/* Header recebendo as informações na tela de loading também! */}
+      <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
         <Header 
           ultimaAtualizacao={ultimaAtualizacao} 
           onAtualizar={handleAtualizarDados} 
-          loading={buscando} 
+          loading={buscando}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
         />
-        <LoadingScreen
-          progress={progress}
-          label="Sincronizando e atualizando base de dados..."
-        />
+        <div className="flex-1 flex flex-col relative">
+          <LoadingScreen
+            progress={progress}
+            label="Sincronizando e atualizando base de dados..."
+          />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#080808] p-4 md:p-6 text-white">
-      {/* 🚀 Header executivo com o nosso botão embutido lá no canto */}
+    <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
+      {/* 🚀 Sidebar Executiva e Controle de Navegação */}
       <Header 
         ultimaAtualizacao={ultimaAtualizacao} 
         onAtualizar={handleAtualizarDados} 
-        loading={buscando} 
+        loading={buscando}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
       />
 
-      {(errorEstoque || errorInventario) && (
-        <div className="bg-red-900/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200 mt-4">
-          <strong>Erro ao carregar dados:</strong>{' '}
-          {errorEstoque || errorInventario}
-        </div>
-      )}
+      {/* Área Principal com Scroll Independente */}
+      <div className="flex-1 flex flex-col h-screen overflow-y-auto relative">
+        <main className="flex-1 p-6 lg:p-8">
+          
+          {(errorEstoque || errorInventario) && (
+            <div className="bg-red-900/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
+              <strong>Erro ao carregar dados:</strong>{' '}
+              {errorEstoque || errorInventario}
+            </div>
+          )}
 
-      <div className="mt-4">
-        <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+          {/* Se não tem data salva e não tem dado nenhum, avisa para clicar */}
+          {!ultimaAtualizacao && estoqueData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
+              <div className="bg-[#111] p-8 rounded-2xl border border-[#222] max-w-md">
+                <svg className="w-12 h-12 text-[#f58220] mx-auto mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                </svg>
+                <h3 className="text-lg font-bold text-white mb-2">Base de Dados Vazia</h3>
+                <p className="text-sm text-gray-500">
+                  O cache está vazio. Clique no botão "Atualizar Dados" no menu lateral para puxar as informações do Supabase pela primeira vez.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="animate-fade-in">
+              {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
+              {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
+              
+              {/* Telas Futuras Preparadas */}
+              {activeTab === 'pergunte' && (
+                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                  <div className="bg-[#111] p-10 rounded-3xl border border-dashed border-[#2A2A2A] max-w-lg w-full">
+                    <span className="text-4xl mb-4 block">✨</span>
+                    <h2 className="text-xl font-bold text-white mb-2">Pergunte ao Estoque</h2>
+                    <p className="text-gray-500 text-sm">
+                      Módulo de inteligência artificial generativa em desenvolvimento. Em breve, você poderá consultar seu banco de dados em linguagem natural.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'resumo' && (
+                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                  <div className="bg-[#111] p-10 rounded-3xl border border-dashed border-[#2A2A2A] max-w-lg w-full">
+                    <span className="text-4xl mb-4 block">📊</span>
+                    <h2 className="text-xl font-bold text-white mb-2">Resumo Estoque</h2>
+                    <p className="text-gray-500 text-sm">
+                      Visão consolidada de indicadores em construção.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
       </div>
-
-      {/* Se não tem data salva e não tem dado nenhum, avisa para clicar */}
-      {!ultimaAtualizacao && estoqueData.length === 0 ? (
-        <div className="text-center py-20 text-gray-500 italic bg-[#111] rounded-xl border border-[#222] mt-4">
-          O cache está vazio. Clique no botão de atualizar lá no topo para puxar os dados do Supabase pela primeira vez.
-        </div>
-      ) : (
-        <div className="mt-4">
-          {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
-          {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
-        </div>
-      )}
-
-      <footer className="mt-10 pt-4 border-t border-[#2A2A2A] text-center text-[11px] text-gray-500">
-        Visão Executiva de Estoque · Âmbar Energia · React + Supabase
-      </footer>
     </div>
   )
 }
