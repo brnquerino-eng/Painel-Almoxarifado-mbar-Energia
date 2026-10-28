@@ -41,8 +41,6 @@ const MAPA_ABR_MESES = {
   '10': 'OUT', '11': 'NOV', '12': 'DEZ'
 }
 
-const CODIGOS_INSUMO = ['34854', '34769', '31774', '31776']
-
 function formatarPeriodoTexto(periodoStr) {
   if (!periodoStr) return ''
   const p = parsePeriodo(periodoStr)
@@ -112,21 +110,93 @@ function gerarChaveDuplicidade(nome) {
 }
 
 function aplicarLentesIndependentes(r) {
-  // Evita criar strings desnecessárias quando já estão limpas
   const nomeLocal = (r.nome_local_estoque || '').toUpperCase()
   const unidadeAlmox = (r.unidade_almoxarifado || '').toUpperCase()
   const isWartsila = nomeLocal.includes('WARTSILA') || unidadeAlmox.includes('WARTSILA')
 
   const s = String(r.codigo_local_estoque ?? '').trim()
   const codigoLocal = s.replace(/^0+/, '') || s
+  const codigoProduto = String(r.codigo_produto ?? '').trim()
+
+  // Normaliza nome da unidade (remove acentos, pontuação e espaços extras)
+  const unidadeNorm = unidadeAlmox
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')   // remove acentos
+    .replace(/[^\w\s]/g, ' ')         // troca pontuação por espaço
+    .replace(/\s+/g, ' ')
+    .trim()
 
   const _isObsoleto = isObsoleto(r.nome_local_estoque) || isWartsila
   const _isObra = isObra(r.nome_local_estoque)
   const _isCritico = isCritico(r.item_critico)
-  const _isInsumo = CODIGOS_INSUMO.includes(codigoLocal)
+
+  // ========== REGRA DE INSUMO ==========
+  let _isInsumo = false
+
+  // 1. Regra Geral (todas as usinas): nome_local_estoque contém "INSUMO"
+  if (nomeLocal.includes('INSUMO')) {
+    _isInsumo = true
+  }
+  // 2. Candiota → codigo_local = 34769
+  else if (unidadeNorm.includes('CANDIOTA') && codigoLocal === '34769') {
+    _isInsumo = true
+  }
+  // 3. Cruzeiro do Sul → codigo_local = 38490 E codigo_produto em [1381810, 1384761]
+  else if (
+    unidadeNorm.includes('CRUZEIRO DO SUL') &&
+    codigoLocal === '38490' &&
+    ['1381810', '1384761'].includes(codigoProduto)
+  ) {
+    _isInsumo = true
+  }
+  // 4. Feijó → codigo_local = 38494 E codigo_produto = 1381810
+  else if (
+    unidadeNorm.includes('FEIJO') &&
+    codigoLocal === '38494' &&
+    codigoProduto === '1381810'
+  ) {
+    _isInsumo = true
+  }
+  // 5. Goiânia II / Goiana II → codigo_local = 38480 E codigo_produto em [1381810, 1379746]
+  else if (
+    (unidadeNorm.includes('GOIANIA II') || unidadeNorm.includes('GOIANA II')) &&
+    codigoLocal === '38480' &&
+    ['1381810', '1379746'].includes(codigoProduto)
+  ) {
+    _isInsumo = true
+  }
+  // 6. Lages → codigo_local = 34854
+  else if (unidadeNorm.includes('LAGES') && codigoLocal === '34854') {
+    _isInsumo = true
+  }
+  // 7. Monte C. Sucuba → codigo_local = 38491 E codigo_produto = 189080
+  else if (
+    (unidadeNorm.includes('MONTE C SUCUBA') || unidadeNorm.includes('MONTE C. SUCUBA') || unidadeNorm.includes('MONTE SU CUBA') || unidadeNorm.includes('MONTE C SU CUBA')) &&
+    codigoLocal === '38491' &&
+    codigoProduto === '189080'
+  ) {
+    _isInsumo = true
+  }
+  // 8. Tarauacá → codigo_local = 38492 E codigo_produto = 1381810
+  else if (
+    unidadeNorm.includes('TARAUACA') &&
+    codigoLocal === '38492' &&
+    codigoProduto === '1381810'
+  ) {
+    _isInsumo = true
+  }
+  // 9. Tambaqui → codigo_local = 38487 E codigo_produto em [189080, 1341100]
+  else if (
+    unidadeNorm.includes('TAMBAQUI') &&
+    codigoLocal === '38487' &&
+    ['189080', '1341100'].includes(codigoProduto)
+  ) {
+    _isInsumo = true
+  }
+
   const _isOperacional = !_isObsoleto && !_isObra && !_isCritico && !_isInsumo
 
-  // Mutação controlada em vez de spread (mais rápido em arrays grandes)
+  // Mutação controlada
   r._isObsoleto = _isObsoleto
   r._isObra = _isObra
   r._isCritico = _isCritico
