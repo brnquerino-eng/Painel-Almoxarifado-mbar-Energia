@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect, useDeferredValue } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import Plot from 'react-plotly.js'
 import pptxgen from 'pptxgenjs'
 import {
@@ -7,22 +7,19 @@ import {
   fmtDec,
   fmtMes,
   fmtValorCurto,
-  isObsoleto,
-  isObra,
-  isCritico,
   periodoLabel,
   parsePeriodo,
 } from '../utils/format'
 import * as XLSX from 'xlsx'
 
-// COMPONENTES FILHOS E HOOK EXTERNO
 import { useInventoryState } from '../hooks/useInventoryState'
+import { useVisaoGeralData } from '../hooks/useVisaoGeralData'
 import { FullScreenPortal } from './FullScreenPortal.jsx'
 import { CyberMultiSelect } from './CyberMultiSelect.jsx'
 import { ExecutiveCard } from './ExecutiveCard.jsx'
 import { TabelaGenerica } from './TabelaGenerica.jsx'
 
-// --- CONSTANTES DE FORMATAÇÃO E REGRAS ---
+// --- CONSTANTES DE LAYOUT DOS GRÁFICOS ---
 const PLOT_LAYOUT = {
   paper_bgcolor: 'rgba(0,0,0,0)',
   plot_bgcolor: 'rgba(0,0,0,0)',
@@ -34,315 +31,82 @@ const PLOT_LAYOUT = {
   autosize: true,
 }
 
-const MAPA_ABR_MESES = {
-  '01': 'JAN', '1': 'JAN', '02': 'FEV', '2': 'FEV', '03': 'MAR', '3': 'MAR',
-  '04': 'ABR', '4': 'ABR', '05': 'MAI', '5': 'MAI', '06': 'JUN', '6': 'JUN',
-  '07': 'JUL', '7': 'JUL', '08': 'AGO', '8': 'AGO', '09': 'SET', '9': 'SET',
-  '10': 'OUT', '11': 'NOV', '12': 'DEZ'
-}
+// ============================================================================
+// COMPONENTE PRINCIPAL (APENAS VISUAL)
+// ============================================================================
 
-function formatarPeriodoTexto(periodoStr) {
-  if (!periodoStr) return ''
-  const p = parsePeriodo(periodoStr)
-  if (!p) return periodoStr
-  const nomeMes = MAPA_ABR_MESES[String(p.mes).padStart(2, '0')] || p.mes
-  return `${nomeMes}/${String(p.ano).slice(-2)}`
-}
-
-// Cache simples para parseNumber (evita re-parsing do mesmo valor)
-const _parseNumberCache = new Map()
-const PARSE_CACHE_LIMIT = 8000
-
-function parseNumber(val) {
-  if (val == null) return 0
-  if (typeof val === 'number') return val
-
-  // chave rápida
-  const key = typeof val === 'string' ? val : String(val)
-  if (_parseNumberCache.has(key)) return _parseNumberCache.get(key)
-
-  let s = key.trim().replace(/R\$\s?/gi, '')
-  if (s.includes(',') && s.includes('.')) {
-    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
-      s = s.replace(/\./g, '').replace(',', '.')
-    } else {
-      s = s.replace(/,/g, '')
-    }
-  } else if (s.includes(',')) {
-    s = s.replace(',', '.')
-  }
-
-  const n = parseFloat(s)
-  const result = isNaN(n) ? 0 : n
-
-  // evita crescimento infinito da cache
-  if (_parseNumberCache.size > PARSE_CACHE_LIMIT) _parseNumberCache.clear()
-  _parseNumberCache.set(key, result)
-
-  return result
-}
-
-// Cache para chave de duplicidade
-const _chaveDupCache = new Map()
-const CHAVE_CACHE_LIMIT = 6000
-
-function gerarChaveDuplicidade(nome) {
-  if (!nome) return ''
-  const key = String(nome)
-  if (_chaveDupCache.has(key)) return _chaveDupCache.get(key)
-
-  const clean = key
-    .toUpperCase()
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .sort()
-    .join(' ')
-
-  const result = clean || key.trim().toUpperCase()
-
-  if (_chaveDupCache.size > CHAVE_CACHE_LIMIT) _chaveDupCache.clear()
-  _chaveDupCache.set(key, result)
-
-  return result
-}
-
-function aplicarLentesIndependentes(r) {
-  const nomeLocal = (r.nome_local_estoque || '').toUpperCase()
-  const unidadeAlmox = (r.unidade_almoxarifado || '').toUpperCase()
-  const isWartsila = nomeLocal.includes('WARTSILA') || unidadeAlmox.includes('WARTSILA')
-
-  const s = String(r.codigo_local_estoque ?? '').trim()
-  const codigoLocal = s.replace(/^0+/, '') || s
-  const codigoProduto = String(r.codigo_produto ?? '').trim()
-
-  // Normaliza nome da unidade (remove acentos, pontuação e espaços extras)
-  const unidadeNorm = unidadeAlmox
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')   // remove acentos
-    .replace(/[^\w\s]/g, ' ')         // troca pontuação por espaço
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  const _isObsoleto = isObsoleto(r.nome_local_estoque) || isWartsila
-  const _isObra = isObra(r.nome_local_estoque)
-  const _isCritico = isCritico(r.item_critico)
-
-  // ========== REGRA DE INSUMO ==========
-  let _isInsumo = false
-
-  // 1. Regra Geral (todas as usinas): nome_local_estoque contém "INSUMO"
-  if (nomeLocal.includes('INSUMO')) {
-    _isInsumo = true
-  }
-  // 2. Candiota → codigo_local = 34769
-  else if (unidadeNorm.includes('CANDIOTA') && codigoLocal === '34769') {
-    _isInsumo = true
-  }
-  // 3. Cruzeiro do Sul → codigo_local = 38490 E codigo_produto em [1381810, 1384761]
-  else if (
-    unidadeNorm.includes('CRUZEIRO DO SUL') &&
-    codigoLocal === '38490' &&
-    ['1381810', '1384761'].includes(codigoProduto)
-  ) {
-    _isInsumo = true
-  }
-  // 4. Feijó → codigo_local = 38494 E codigo_produto = 1381810
-  else if (
-    unidadeNorm.includes('FEIJO') &&
-    codigoLocal === '38494' &&
-    codigoProduto === '1381810'
-  ) {
-    _isInsumo = true
-  }
-  // 5. Goiânia II / Goiana II → codigo_local = 38480 E codigo_produto em [1381810, 1379746]
-  else if (
-    (unidadeNorm.includes('GOIANIA II') || unidadeNorm.includes('GOIANA II')) &&
-    codigoLocal === '38480' &&
-    ['1381810', '1379746'].includes(codigoProduto)
-  ) {
-    _isInsumo = true
-  }
-  // 6. Lages → codigo_local = 34854
-  else if (unidadeNorm.includes('LAGES') && codigoLocal === '34854') {
-    _isInsumo = true
-  }
-  // 7. Monte C. Sucuba → codigo_local = 38491 E codigo_produto = 189080
-  else if (
-    (unidadeNorm.includes('MONTE C SUCUBA') || unidadeNorm.includes('MONTE C. SUCUBA') || unidadeNorm.includes('MONTE SU CUBA') || unidadeNorm.includes('MONTE C SU CUBA')) &&
-    codigoLocal === '38491' &&
-    codigoProduto === '189080'
-  ) {
-    _isInsumo = true
-  }
-  // 8. Tarauacá → codigo_local = 38492 E codigo_produto = 1381810
-  else if (
-    unidadeNorm.includes('TARAUACA') &&
-    codigoLocal === '38492' &&
-    codigoProduto === '1381810'
-  ) {
-    _isInsumo = true
-  }
-  // 9. Tambaqui → codigo_local = 38487 E codigo_produto em [189080, 1341100]
-  else if (
-    unidadeNorm.includes('TAMBAQUI') &&
-    codigoLocal === '38487' &&
-    ['189080', '1341100'].includes(codigoProduto)
-  ) {
-    _isInsumo = true
-  }
-
-  const _isOperacional = !_isObsoleto && !_isObra && !_isCritico && !_isInsumo
-
-  // Mutação controlada
-  r._isObsoleto = _isObsoleto
-  r._isObra = _isObra
-  r._isCritico = _isCritico
-  r._isInsumo = _isInsumo
-  r._isOperacional = _isOperacional
-  return r
-}
-
-function normUnidade(v) {
-  if (v == null) return ''
-  // normalize + remove zero-width só quando necessário
-  let s = String(v)
-  if (/[\u200B-\u200D\uFEFF]/.test(s)) {
-    s = s.normalize('NFC').replace(/[\u200B-\u200D\uFEFF]/g, '')
-  }
-  return s.trim().toUpperCase()
-}
-
-function normalizeSelectedUnidades(raw) {
-  if (raw == null || raw === '') return []
-  const arr = Array.isArray(raw) ? raw : [raw]
-  const out = []
-  for (let i = 0; i < arr.length; i++) {
-    const item = arr[i]
-    if (item == null || item === '') continue
-    if (typeof item === 'string' || typeof item === 'number') {
-      const n = normUnidade(item)
-      if (n) out.push(n)
-    } else if (typeof item === 'object') {
-      const n = normUnidade(item.value ?? item.label ?? item.id ?? item.nome ?? '')
-      if (n) out.push(n)
-    }
-  }
-  return out
-}
-
-function normKeyName(k) {
-  return String(k || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[\s_\-]+/g, '')
-    .trim()
-}
-
-const CAND_REGIAO = ['Região', 'Regiao', 'regiao', 'REGIAO', 'REGIÃO', 'region', 'Region', 'nm_regiao', 'nome_regiao']
-const CAND_SEGMENTO = ['Segmento', 'segmento', 'SEGMENTO', 'segment', 'Segment', 'nm_segmento', 'nome_segmento', 'ds_segmento']
-
-function resolverChave(sample, candidates) {
-  if (!sample || typeof sample !== 'object') return null
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i]
-    if (sample[c] != null && String(sample[c]).trim() !== '') return c
-  }
-  const wanted = new Set(candidates.map(normKeyName))
-  const keys = Object.keys(sample)
-  for (let i = 0; i < keys.length; i++) {
-    if (wanted.has(normKeyName(keys[i]))) return keys[i]
-  }
-  return null
-}
-
-function valorColuna(r, key) {
-  if (!key || !r) return ''
-  const v = r[key]
-  return v == null ? '' : String(v).trim()
-}
-
-function filtrarListaFS(lista, { texto, unidades, camposTexto = ['nome', 'codigo'], maxItems = 1000, matchUnidade }) {
-  if (!lista || lista.length === 0) {
-    return { dados: [], total: 0, unidadesOpcoes: [] }
-  }
-
-  const txt = texto ? String(texto).toLowerCase().trim() : ''
-  const unidadesNorm = normalizeSelectedUnidades(unidades)
-  const temUnidade = unidadesNorm.length > 0
-  const setUnidades = temUnidade ? new Set(unidadesNorm) : null
-
-  const matchUnid = matchUnidade || ((item, setU) => setU.has(normUnidade(item.unidade)))
-
-  let filtrada = lista
-  if (txt || temUnidade) {
-    filtrada = []
-    for (let i = 0; i < lista.length; i++) {
-      const item = lista[i]
-      if (temUnidade && !matchUnid(item, setUnidades)) continue
-      if (txt) {
-        let hit = false
-        for (let c = 0; c < camposTexto.length; c++) {
-          const v = item[camposTexto[c]]
-          if (v != null && String(v).toLowerCase().includes(txt)) { hit = true; break }
-        }
-        if (!hit) continue
-      }
-      filtrada.push(item)
-    }
-  }
-
-  const setOpts = new Set()
-  for (let i = 0; i < lista.length; i++) {
-    const item = lista[i]
-    if (txt) {
-      let hit = false
-      for (let c = 0; c < camposTexto.length; c++) {
-        const v = item[camposTexto[c]]
-        if (v != null && String(v).toLowerCase().includes(txt)) { hit = true; break }
-      }
-      if (!hit) continue
-    }
-    if (item.unidade) {
-      const n = normUnidade(item.unidade)
-      if (n) setOpts.add(n)
-    } else if (item.unidades_lista) {
-      String(item.unidades_lista).split(',').forEach((u) => {
-        const n = normUnidade(u)
-        if (n) setOpts.add(n)
-      })
-    }
-  }
-  const labelByNorm = new Map()
-  for (let i = 0; i < lista.length; i++) {
-    const item = lista[i]
-    if (item.unidade) {
-      const n = normUnidade(item.unidade)
-      if (n && setOpts.has(n) && !labelByNorm.has(n)) labelByNorm.set(n, String(item.unidade).trim())
-    } else if (item.unidades_lista) {
-      String(item.unidades_lista).split(',').forEach((u) => {
-        const n = normUnidade(u)
-        if (n && setOpts.has(n) && !labelByNorm.has(n)) labelByNorm.set(n, u.trim())
-      })
-    }
-  }
-  const unidadesOpcoes = [...setOpts].sort().map((n) => labelByNorm.get(n) || n)
-
-  return { dados: filtrada.length > maxItems ? filtrada.slice(0, maxItems) : filtrada, total: filtrada.length, unidadesOpcoes }
-}
-
-// --- COMPONENTE PRINCIPAL ---
 export default function VisaoGeral({ data }) {
   const { state, dispatch } = useInventoryState()
-  const [initialLoad, setInitialLoad] = useState(true)
 
+  // -------------------------------------------------------------------------
+  // TODOS OS CÁLCULOS VÊM DO HOOK
+  // -------------------------------------------------------------------------
+  const {
+    // opções de filtros
+    opcoesUnid,
+    regioesOpcoes,
+    segmentosOpcoes,
+    anoOpcoesCascata,
+    tiposEstoqueOpcoes,
+    escoposOpcoes,
+    anoOpcoes,
+
+    // período
+    periodoEfetivo,
+    periodoDisplay,
+
+    // métricas e rankings
+    metrics,
+    rankingUnidadeAtivo,
+    rankCritico,
+    rankObsoleto,
+    rankObra,
+    rankOperacional,
+    rankInsumo,
+    compraConsumoUnidade,
+    variacaoFiltrada,
+    skusUnidadeFiltrado,
+    exposicaoCategorias,
+
+    // listas detalhadas
+    maioresValoresDataCompleta,
+    comprasSemConsumoDataCompleta,
+    duplicadosDataCompleta,
+
+    // time series
+    timeSeriesAgg,
+
+    // giro / cobertura
+    giroMensal,
+    giroAnual,
+    coberturaMeses,
+    coberturaAnos,
+    giroMensalPrev,
+    coberturaMesesPrev,
+    giroCoberturaTempo,
+
+    // itens parados
+    itensParados,
+    mesesParadosOpcoes,
+    paradosChart,
+
+    // estado local do ranking
+    abaRankingUnidade,
+    setAbaRankingUnidade,
+
+    // helpers
+    filtrarListaFS,
+    formatarPeriodoTexto,
+    normalizeSelectedUnidades,
+  } = useVisaoGeralData(data, state, dispatch)
+
+  // -------------------------------------------------------------------------
+  // ESTADOS PURAMENTE DE UI
+  // -------------------------------------------------------------------------
   const {
     escoposSel, unidadesSel, anosSel, tiposEstoqueSel,
     regioesSel = [], segmentosSel = [],
-    periodoAtivo, activeCard, selectedBarraRanking,
+    activeCard, selectedBarraRanking,
     selectedBarraExposicao, selectedBarraCritico,
     selectedBarraObsoleto, selectedBarraObra,
     selectedBarraCompraConsumo, selectedBarraVariacao,
@@ -351,19 +115,10 @@ export default function VisaoGeral({ data }) {
     listaMaioresValoresAberta, tabelaMaioresValoresExpandida,
     listaComprasSemConsumoAberta, tabelaComprasSemConsumoExpandida,
     listaDuplicadosAberta, tabelaDuplicadosExpandida,
-    granularidade = 'mensal'
+    granularidade = 'mensal',
   } = state
 
-  // --- DEFERRED VALUES (UI continua fluida enquanto calcula) ---
-  const deferredEscoposSel = useDeferredValue(escoposSel)
-  const deferredUnidadesSel = useDeferredValue(unidadesSel)
-  const deferredAnosSel = useDeferredValue(anosSel)
-  const deferredTiposEstoqueSel = useDeferredValue(tiposEstoqueSel)
-  const deferredRegioesSel = useDeferredValue(regioesSel)
-  const deferredSegmentosSel = useDeferredValue(segmentosSel)
-
   const abaCompraConsumo = state.abaCompraConsumo || 'comparativo'
-  const [abaRankingUnidade, setAbaRankingUnidade] = useState('total')
 
   const [vis, setVis] = useState({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false })
   const [visComprasConsumo, setVisComprasConsumo] = useState({ compras: true, consumo: true })
@@ -374,15 +129,21 @@ export default function VisaoGeral({ data }) {
   const [filtroUnidadeFS, setFiltroUnidadeFS] = useState([])
   const [filtroMesParadoFS, setFiltroMesParadoFS] = useState([])
 
-  const onChangeUnidadeFS = useCallback((val) => setFiltroUnidadeFS(normalizeSelectedUnidades(val)), [])
+  // -------------------------------------------------------------------------
+  // HANDLERS DE UI
+  // -------------------------------------------------------------------------
+  const onChangeUnidadeFS = useCallback((val) => setFiltroUnidadeFS(normalizeSelectedUnidades(val)), [normalizeSelectedUnidades])
   const onChangeTextoFS = useCallback((e) => setFiltroTextoFS(e.target.value), [])
   const handleCardClick = useCallback((key) => dispatch({ type: 'TOGGLE_ACTIVE_CARD', payload: key }), [dispatch])
 
   const fecharModalFS = useCallback((field) => {
     dispatch({ type: 'SET_FIELD', field, payload: false })
-    setFiltroTextoFS(''); setFiltroUnidadeFS([]); setFiltroMesParadoFS([]);
+    setFiltroTextoFS('')
+    setFiltroUnidadeFS([])
+    setFiltroMesParadoFS([])
   }, [dispatch])
 
+  // Escape key para fechar modais
   useEffect(() => {
     const algumModalAberto = tabelaExpandida || tabelaMaioresValoresExpandida || tabelaComprasSemConsumoExpandida || tabelaDuplicadosExpandida
     const algumaGavetaAberta = listaAberta || listaMaioresValoresAberta || listaComprasSemConsumoAberta || listaDuplicadosAberta
@@ -414,1337 +175,80 @@ export default function VisaoGeral({ data }) {
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [tabelaExpandida, tabelaMaioresValoresExpandida, tabelaComprasSemConsumoExpandida, tabelaDuplicadosExpandida, listaAberta, listaMaioresValoresAberta, listaComprasSemConsumoAberta, listaDuplicadosAberta, fecharModalFS, dispatch])
-
-  const dadosSanitizados = useMemo(() => {
-    if (!data || !Array.isArray(data) || data.length === 0) return []
-
-    // Descobre as colunas de região/segmento só uma vez
-    let chaveRegiao = null
-    let chaveSegmento = null
-    const limit = Math.min(data.length, 30)
-    for (let i = 0; i < limit && (!chaveRegiao || !chaveSegmento); i++) {
-      if (!chaveRegiao) chaveRegiao = resolverChave(data[i], CAND_REGIAO)
-      if (!chaveSegmento) chaveSegmento = resolverChave(data[i], CAND_SEGMENTO)
-    }
-
-    const out = new Array(data.length)
-    for (let i = 0; i < data.length; i++) {
-      const original = data[i]
-
-      // Cria uma cópia rasa (não muta o objeto original do pai)
-      const r = { ...original }
-
-      if (r.unidade_almoxarifado) {
-        r.unidade_almoxarifado = normUnidade(r.unidade_almoxarifado)
-      }
-
-      aplicarLentesIndependentes(r)
-
-      r._regiao = valorColuna(r, chaveRegiao)
-      r._segmento = valorColuna(r, chaveSegmento)
-
-      out[i] = r
-    }
-    return out
-  }, [data])
-
-  // Catálogo completo (fonte bruta — não cascateia)
-  const {
-    unidadesOpcoes, unidadesAtivas, unidadesGerenciais,
-    anoOpcoesAll, regioesOpcoesAll, segmentosOpcoesAll,
-  } = useMemo(() => {
-    if (!dadosSanitizados || dadosSanitizados.length === 0) {
-      return {
-        unidadesOpcoes: [], unidadesAtivas: [], unidadesGerenciais: [],
-        anoOpcoesAll: [], regioesOpcoesAll: [], segmentosOpcoesAll: [],
-      }
-    }
-    const uniques = [...new Set(dadosSanitizados.map((r) => r.unidade_almoxarifado).filter(Boolean))].sort()
-    const ativas = uniques.filter((u) => !String(u).includes('GERENCIAL'))
-    const gerenciais = uniques.filter((u) => String(u).includes('GERENCIAL'))
-    const anos = [...new Set(dadosSanitizados.map((r) => String(r.ano_referencia)).filter(Boolean))].sort((a, b) => Number(a) - Number(b))
-    const regioes = []
-    const segmentos = []
-    const seenR = new Set()
-    const seenS = new Set()
-    for (let i = 0; i < dadosSanitizados.length; i++) {
-      const r = dadosSanitizados[i]
-      if (r._regiao && !seenR.has(r._regiao)) { seenR.add(r._regiao); regioes.push(r._regiao) }
-      if (r._segmento && !seenS.has(r._segmento)) { seenS.add(r._segmento); segmentos.push(r._segmento) }
-    }
-    regioes.sort()
-    segmentos.sort()
-    return {
-      unidadesOpcoes: uniques,
-      unidadesAtivas: ativas,
-      unidadesGerenciais: gerenciais,
-      anoOpcoesAll: anos,
-      regioesOpcoesAll: regioes,
-      segmentosOpcoesAll: segmentos,
-    }
-  }, [dadosSanitizados])
-
-  const anoOpcoes = anoOpcoesAll
-
-  useEffect(() => {
-    if (anoOpcoesAll && anoOpcoesAll.length > 0 && initialLoad) {
-      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoesAll[anoOpcoesAll.length - 1])] })
-      setInitialLoad(false)
-    }
-  }, [anoOpcoesAll, initialLoad, dispatch])
-
-  const getUnidadesPermitidas = useCallback((escopos) => {
-    if (!escopos || escopos.length === 0) return unidadesOpcoes
-    let allowed = []
-    if (escopos.includes('Ativa')) allowed = [...allowed, ...unidadesAtivas]
-    if (escopos.includes('Gerencial')) allowed = [...allowed, ...unidadesGerenciais]
-    return [...new Set(allowed)].sort()
-  }, [unidadesOpcoes, unidadesAtivas, unidadesGerenciais])
-
-  const {
-    dfFiltrado,
-    opcoesUnid,
-    regioesOpcoes,
-    segmentosOpcoes,
-    anoOpcoesCascata,
-    tiposEstoqueOpcoes,
-    escoposOpcoes,
-  } = useMemo(() => {
-    const rows = dadosSanitizados || []
-    const empty = {
-      dfFiltrado: [],
-      opcoesUnid: [],
-      regioesOpcoes: regioesOpcoesAll,
-      segmentosOpcoes: segmentosOpcoesAll,
-      anoOpcoesCascata: anoOpcoesAll,
-      tiposEstoqueOpcoes: ['Operacional', 'Crítico', 'Obsoleto', 'Obra', 'Insumo'],
-      escoposOpcoes: ['Ativa', 'Gerencial'],
-    }
-    if (!rows.length) return empty
-
-    const escopos = deferredEscoposSel
-    const unidades = deferredUnidadesSel
-    const anos = deferredAnosSel
-    const tipos = deferredTiposEstoqueSel
-    const regioes = deferredRegioesSel
-    const segmentos = deferredSegmentosSel
-
-    const escopoAllowed = escopos.length > 0 ? new Set(getUnidadesPermitidas(escopos)) : null
-    const setU = unidades.length > 0 ? new Set(unidades) : null
-    const setA = anos.length > 0 ? new Set(anos.map(String)) : null
-    const setR = regioes.length > 0 ? new Set(regioes) : null
-    const setS = segmentos.length > 0 ? new Set(segmentos) : null
-
-    const temTipo = tipos.length > 0
-    const querCritico = temTipo && tipos.includes('Crítico')
-    const querObsoleto = temTipo && tipos.includes('Obsoleto')
-    const querObra = temTipo && tipos.includes('Obra')
-    const querInsumo = temTipo && tipos.includes('Insumo')
-    const querOp = temTipo && tipos.includes('Operacional')
-
-    const df = []
-    const setUnid = new Set()
-    const setReg = new Set()
-    const setSeg = new Set()
-    const setAno = new Set()
-
-    let tOp = false, tCrit = false, tObs = false, tObra = false, tIns = false
-    let hasAtiva = false, hasGer = false
-    let temColunaRegiao = false
-    let temColunaSegmento = false
-
-    const len = rows.length
-    for (let i = 0; i < len; i++) {
-      const r = rows[i]
-      const u = r.unidade_almoxarifado
-      const reg = r._regiao || ''
-      const seg = r._segmento || ''
-
-      if (reg) temColunaRegiao = true
-      if (seg) temColunaSegmento = true
-
-      // Avalia cada condição de filtro individualmente
-      const passEscopo = !escopoAllowed || escopoAllowed.has(u)
-      const passUnidade = !setU || setU.has(u)
-      const passAno = !setA || setA.has(String(r.ano_referencia))
-      const passRegiao = !setR || (reg && setR.has(reg))
-      const passSegmento = !setS || (seg && setS.has(seg))
-      
-      let passTipo = true
-      if (temTipo) {
-        passTipo = (querCritico && r._isCritico) ||
-                   (querObsoleto && r._isObsoleto) ||
-                   (querObra && r._isObra) ||
-                   (querInsumo && r._isInsumo) ||
-                   (querOp && r._isOperacional)
-      }
-
-      // Se passou em TODOS os filtros, a linha entra na base filtrada (gráfico/tabelas)
-      if (passEscopo && passUnidade && passAno && passRegiao && passSegmento && passTipo) {
-        df.push(r)
-      }
-
-      // A CASCATA: Cada filtro constrói suas opções checando a interseção 
-      // de TODOS OS OUTROS filtros ativos, ignorando sua própria seleção.
-
-      // Opções de Escopo (ignora passEscopo)
-      if (passUnidade && passAno && passRegiao && passSegmento && passTipo) {
-        if (u) {
-          if (String(u).includes('GERENCIAL')) hasGer = true
-          else hasAtiva = true
-        }
-      }
-
-      // Opções de Unidade (ignora passUnidade)
-      if (passEscopo && passAno && passRegiao && passSegmento && passTipo) {
-        if (u) setUnid.add(u)
-      }
-
-      // Opções de Ano (ignora passAno)
-      if (passEscopo && passUnidade && passRegiao && passSegmento && passTipo) {
-        if (r.ano_referencia != null && r.ano_referencia !== '') {
-          setAno.add(String(r.ano_referencia))
-        }
-      }
-
-      // Opções de Região (ignora passRegiao)
-      if (passEscopo && passUnidade && passAno && passSegmento && passTipo) {
-        if (reg) setReg.add(reg)
-      }
-
-      // Opções de Segmento (ignora passSegmento)
-      if (passEscopo && passUnidade && passAno && passRegiao && passTipo) {
-        if (seg) setSeg.add(seg)
-      }
-
-      // Opções de Categoria/Tipo (ignora passTipo)
-      if (passEscopo && passUnidade && passAno && passRegiao && passSegmento) {
-        if (!tOp && r._isOperacional) tOp = true
-        if (!tCrit && r._isCritico) tCrit = true
-        if (!tObs && r._isObsoleto) tObs = true
-        if (!tObra && r._isObra) tObra = true
-        if (!tIns && r._isInsumo) tIns = true
-      }
-    }
-
-    const tiposArr = []
-    if (tOp) tiposArr.push('Operacional')
-    if (tCrit) tiposArr.push('Crítico')
-    if (tObs) tiposArr.push('Obsoleto')
-    if (tObra) tiposArr.push('Obra')
-    if (tIns) tiposArr.push('Insumo')
-
-    const escoposArr = []
-    if (hasAtiva) escoposArr.push('Ativa')
-    if (hasGer) escoposArr.push('Gerencial')
-
-    const sortStr = (s) => [...s].sort()
-
-    return {
-      dfFiltrado: df,
-      opcoesUnid: sortStr(setUnid),
-      regioesOpcoes: setReg.size ? sortStr(setReg) : (temColunaRegiao ? [] : regioesOpcoesAll),
-      segmentosOpcoes: setSeg.size ? sortStr(setSeg) : (temColunaSegmento ? [] : segmentosOpcoesAll),
-      anoOpcoesCascata: sortStr(setAno).sort((a, b) => Number(a) - Number(b)),
-      tiposEstoqueOpcoes: tiposArr.length ? tiposArr : empty.tiposEstoqueOpcoes,
-      escoposOpcoes: escoposArr.length ? escoposArr : empty.escoposOpcoes,
-    }
   }, [
-    dadosSanitizados,
-    deferredEscoposSel,
-    deferredUnidadesSel,
-    deferredAnosSel,
-    deferredTiposEstoqueSel,
-    deferredRegioesSel,
-    deferredSegmentosSel,
-    getUnidadesPermitidas,
-    anoOpcoesAll,
-    regioesOpcoesAll,
-    segmentosOpcoesAll,
+    tabelaExpandida, tabelaMaioresValoresExpandida, tabelaComprasSemConsumoExpandida, tabelaDuplicadosExpandida,
+    listaAberta, listaMaioresValoresAberta, listaComprasSemConsumoAberta, listaDuplicadosAberta,
+    fecharModalFS, dispatch
   ])
 
-  // Limpeza de seleções inválidas (só despacha quando realmente precisa)
-  useEffect(() => {
-    let hasChanges = false
-    const updates = {}
-
-    if (unidadesSel.length > 0) {
-      const set = new Set(opcoesUnid)
-      const next = unidadesSel.filter((u) => set.has(u))
-      if (next.length !== unidadesSel.length) {
-        updates.unidades = next
-        hasChanges = true
-      }
-    }
-    if (regioesSel.length > 0) {
-      const set = new Set(regioesOpcoes)
-      const next = regioesSel.filter((v) => set.has(v))
-      if (next.length !== regioesSel.length) {
-        updates.regioes = next
-        hasChanges = true
-      }
-    }
-    if (segmentosSel.length > 0) {
-      const set = new Set(segmentosOpcoes)
-      const next = segmentosSel.filter((v) => set.has(v))
-      if (next.length !== segmentosSel.length) {
-        updates.segmentos = next
-        hasChanges = true
-      }
-    }
-    if (anosSel.length > 0 && anoOpcoesCascata.length > 0) {
-      const set = new Set(anoOpcoesCascata)
-      const next = anosSel.filter((v) => set.has(String(v))).map(String)
-      if (next.length !== anosSel.length) {
-        updates.anos = next.length > 0 ? next : [anoOpcoesCascata[anoOpcoesCascata.length - 1]]
-        hasChanges = true
-      }
-    }
-    if (tiposEstoqueSel.length > 0) {
-      const set = new Set(tiposEstoqueOpcoes)
-      const next = tiposEstoqueSel.filter((v) => set.has(v))
-      if (next.length !== tiposEstoqueSel.length) {
-        updates.tipos = next
-        hasChanges = true
-      }
-    }
-    if (escoposSel.length > 0) {
-      const set = new Set(escoposOpcoes)
-      const next = escoposSel.filter((v) => set.has(v))
-      if (next.length !== escoposSel.length) {
-        updates.escopos = next
-        hasChanges = true
-      }
-    }
-
-    if (!hasChanges) return
-
-    if (updates.unidades) dispatch({ type: 'SET_UNIDADES', payload: updates.unidades })
-    if (updates.regioes) dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: updates.regioes })
-    if (updates.segmentos) dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: updates.segmentos })
-    if (updates.anos) dispatch({ type: 'SET_ANOS', payload: updates.anos })
-    if (updates.tipos) dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: updates.tipos })
-    if (updates.escopos) dispatch({ type: 'SET_ESCOPOS', payload: updates.escopos })
-  }, [opcoesUnid, regioesOpcoes, segmentosOpcoes, anoOpcoesCascata, tiposEstoqueOpcoes, escoposOpcoes])
-
-  // Reset de seleções de gráfico — só quando filtros de alto nível mudam
-  // (não zera ao mudar apenas Região/Segmento → highlight das barras volta a funcionar)
-  useEffect(() => {
-    dispatch({ type: 'RESET_SELECOES_FILTRO' })
-  }, [escoposSel, unidadesSel, anosSel, tiposEstoqueSel, dispatch])
-
-  const periodoMaximo = useMemo(() => {
-    const source = dfFiltrado.length ? dfFiltrado : (dadosSanitizados || [])
-    if (!source.length) return '01/2026'
-    let maxAno = 0, maxMes = 0
-    for (const r of source) { if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) { maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num } }
-    if (!maxAno) return '01/2026'
-    return periodoLabel(maxMes, maxAno)
-  }, [dfFiltrado, dadosSanitizados])
-
-  const periodoEfetivo = periodoAtivo || periodoMaximo
-
-  // Lista de meses {ano, mes} que pertencem ao período selecionado (para soma de fluxos / distinct / giro)
-  const periodMonths = useMemo(() => {
-    const p = parsePeriodo(periodoEfetivo)
-    if (!p) return []
-
-    // Descobre o range real de dados filtrados (não inventa futuro)
-    let maxAno = 0, maxMes = 0, minAno = 9999, minMes = 13
-    for (const r of dfFiltrado) {
-      if (!r.tmp_ano_num || !r.tmp_mes_num) continue
-      if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
-        maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
-      }
-      if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
-        minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
-      }
-    }
-    if (!maxAno) return [{ ano: p.ano, mes: p.mes }]
-
-    const maxIdx = maxAno * 12 + maxMes
-    const minIdx = minAno * 12 + minMes
-
-    let startMes, startAno, endMes, endAno
-
-    if (granularidade === 'trimestre') {
-      const tri = Math.ceil(p.mes / 3)
-      startMes = (tri - 1) * 3 + 1
-      startAno = p.ano
-      endMes = tri * 3
-      endAno = p.ano
-    } else if (granularidade === 'semestre') {
-      const sem = p.mes <= 6 ? 1 : 2
-      startMes = sem === 1 ? 1 : 7
-      startAno = p.ano
-      endMes = sem === 1 ? 6 : 12
-      endAno = p.ano
-    } else if (granularidade === 'anual') {
-      startMes = 1
-      startAno = p.ano
-      endMes = 12
-      endAno = p.ano
-    } else {
-      // mensal
-      return [{ ano: p.ano, mes: p.mes }]
-    }
-
-    // Clip ao range real de dados (não inventa meses futuros nem anteriores à base)
-    let startIdx = startAno * 12 + startMes
-    let endIdx = endAno * 12 + endMes
-    startIdx = Math.max(startIdx, minIdx)
-    endIdx = Math.min(endIdx, maxIdx)
-
-    const months = []
-    for (let idx = startIdx; idx <= endIdx; idx++) {
-      const ano = Math.floor((idx - 1) / 12)
-      const mes = ((idx - 1) % 12) + 1
-      months.push({ ano, mes })
-    }
-    return months.length ? months : [{ ano: p.ano, mes: p.mes }]
-  }, [periodoEfetivo, granularidade, dfFiltrado])
-
-  // snapshot = fechamento (último mês do período) → estoques, rankings de saldo, maiores valores, parados
-  // snapshotPeriodo = todos os meses do período → compras, consumo, SKUs, compras sem consumo
-  // snapshotPrev = fechamento do período anterior (para variação de estoque)
-  const { snapshot, snapshotPeriodo, snapshotPrev, snapshotPeriodoPrev } = useMemo(() => {
-    const p = parsePeriodo(periodoEfetivo)
-    if (!p || !dfFiltrado.length) {
-      return { snapshot: [], snapshotPeriodo: [], snapshotPrev: [], snapshotPeriodoPrev: [] }
-    }
-
-    const snap = dfFiltrado.filter((r) => r.tmp_ano_num === p.ano && r.tmp_mes_num === p.mes)
-
-    const monthSet = new Set(periodMonths.map(m => `${m.ano}-${m.mes}`))
-    const snapPeriodo = periodMonths.length > 1
-      ? dfFiltrado.filter((r) => monthSet.has(`${r.tmp_ano_num}-${r.tmp_mes_num}`))
-      : snap
-
-    // Período anterior (mesmo tamanho, imediatamente antes)
-    let prevMonths = []
-    if (granularidade === 'mensal') {
-      let mPrev = p.mes - 1, aPrev = p.ano
-      if (mPrev === 0) { mPrev = 12; aPrev -= 1 }
-      prevMonths = [{ ano: aPrev, mes: mPrev }]
-    } else if (granularidade === 'trimestre') {
-      const tri = Math.ceil(p.mes / 3)
-      let prevTri = tri - 1, prevAno = p.ano
-      if (prevTri === 0) { prevTri = 4; prevAno -= 1 }
-      const startM = (prevTri - 1) * 3 + 1
-      for (let m = startM; m <= startM + 2; m++) prevMonths.push({ ano: prevAno, mes: m })
-    } else if (granularidade === 'semestre') {
-      const sem = p.mes <= 6 ? 1 : 2
-      if (sem === 2) {
-        for (let m = 1; m <= 6; m++) prevMonths.push({ ano: p.ano, mes: m })
-      } else {
-        for (let m = 7; m <= 12; m++) prevMonths.push({ ano: p.ano - 1, mes: m })
-      }
-    } else {
-      // anual
-      for (let m = 1; m <= 12; m++) prevMonths.push({ ano: p.ano - 1, mes: m })
-    }
-
-    // Fechamento do período anterior = último mês do prevMonths (para ESTOQUE)
-    const lastPrev = prevMonths[prevMonths.length - 1]
-    const snapPrev = lastPrev
-      ? dfFiltrado.filter((r) => r.tmp_ano_num === lastPrev.ano && r.tmp_mes_num === lastPrev.mes)
-      : []
-
-    // Período anterior COMPLETO (para COMPRAS / CONSUMO / SKUs)
-    const prevMonthSet = new Set(prevMonths.map(m => `${m.ano}-${m.mes}`))
-    const snapPeriodoPrev = prevMonths.length > 1
-      ? dfFiltrado.filter((r) => prevMonthSet.has(`${r.tmp_ano_num}-${r.tmp_mes_num}`))
-      : snapPrev
-
-    return {
-      snapshot: snap,
-      snapshotPeriodo: snapPeriodo,
-      snapshotPrev: snapPrev,
-      snapshotPeriodoPrev: snapPeriodoPrev,
-    }
-  }, [dfFiltrado, periodoEfetivo, periodMonths, granularidade])
-
-  // Resize effect otimizado (leve)
+  // Resize effect
   useEffect(() => {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
     return () => cancelAnimationFrame(id)
   }, [granularidade, abaCompraConsumo, abaRankingUnidade])
 
-  const {
-    metrics, rankingUnidade, rankCritico, rankObsoleto, rankObra, rankOperacional, rankInsumo,
-    compraConsumoUnidade, variacaoUnidade, skusUnidade, exposicaoCategorias,
-    maioresValoresDataCompleta, comprasSemConsumoDataCompleta, duplicadosDataCompleta
-  } = useMemo(() => {
-    const empty = {
-      metrics: {
-        valEstoque: 0, valCompras: 0, valConsumo: 0, valSkus: 0,
-        valInsumo: 0, valCritico: 0, valObsoleto: 0, valObra: 0, valOp: 0,
-        valEstoquePrev: 0, valComprasPrev: 0, valConsumoPrev: 0, valSkusPrev: 0,
-        valInsumoPrev: 0, valCriticoPrev: 0, valObsoletoPrev: 0, valObraPrev: 0
-      },
-      rankingUnidade: [], rankCritico: [], rankObsoleto: [], rankObra: [], rankOperacional: [], rankInsumo: [],
-      compraConsumoUnidade: [], variacaoUnidade: [], skusUnidade: [], exposicaoCategorias: [],
-      maioresValoresDataCompleta: [], comprasSemConsumoDataCompleta: [], duplicadosDataCompleta: []
-    }
-
-    if (!snapshot.length && !snapshotPrev.length && !(snapshotPeriodo && snapshotPeriodo.length)) {
-      return empty
-    }
-
-    // Maps de ranking
-    const mapRank = new Map()
-    const mapRankPrev = new Map()
-    const mapCrit = new Map()
-    const mapObs = new Map()
-    const mapObra = new Map()
-    const mapOp = new Map()
-    const mapInsumo = new Map()
-    const mapCC = new Map()
-    const mapSkus = new Map()
-    const mapChaves = new Map()
-    const mapChavesPorUnidade = new Map()
-    const mapSkuAggComprasSemConsumo = new Map()
-
-    let valEstoque = 0, valCompras = 0, valConsumo = 0
-    let valCritico = 0, valObsoleto = 0, valObra = 0, valInsumo = 0, valOp = 0
-    const skusSet = new Set()
-    const maiores = []
-    const comprasSem = []
-
-    // ========== ESTOQUES (snapshot = fechamento) ==========
-    const snapLen = snapshot.length
-    for (let i = 0; i < snapLen; i++) {
-      const r = snapshot[i]
-      const u = r.unidade_almoxarifado
-      const val = parseNumber(r.valor_saldo_atual)
-      const qtdAtual = parseNumber(r.qtde_saldo_atual)
-      const precoMedioBase = parseNumber(r.preco_medio)
-      const geBase = r.ge || '—'
-
-      valEstoque += val
-
-      if (u) {
-        mapRank.set(u, (mapRank.get(u) || 0) + val)
-      }
-
-      if (r._isCritico) {
-        if (u) mapCrit.set(u, (mapCrit.get(u) || 0) + val)
-        valCritico += val
-      }
-      if (r._isObsoleto) {
-        if (u) mapObs.set(u, (mapObs.get(u) || 0) + val)
-        valObsoleto += val
-      }
-      if (r._isObra) {
-        if (u) mapObra.set(u, (mapObra.get(u) || 0) + val)
-        valObra += val
-      }
-      if (r._isInsumo) {
-        if (u) mapInsumo.set(u, (mapInsumo.get(u) || 0) + val)
-        valInsumo += val
-      }
-      if (r._isOperacional) {
-        if (u) mapOp.set(u, (mapOp.get(u) || 0) + val)
-        valOp += val
-      }
-
-      if (val > 0) {
-        maiores.push({
-          _rowKey: `${u}-${r.codigo_produto}`,
-          unidade: u,
-          ge: geBase,
-          codigo: r.codigo_produto,
-          nome: r.nome_produto,
-          quantidade: qtdAtual,
-          precoMedio: precoMedioBase,
-          itemCritico: r._isCritico ? 'Sim' : 'Não',
-          valor: val
-        })
-      }
-
-      // Duplicados
-      if (r.nome_produto && u) {
-        const chaveGerada = gerarChaveDuplicidade(r.nome_produto)
-        let item = mapChaves.get(chaveGerada)
-        if (!item) {
-          item = {
-            nomeExemplo: r.nome_produto,
-            skus: new Set(),
-            skusMap: new Map(),
-            unidades: new Set(),
-            quantidade: 0,
-            valor: 0
-          }
-          mapChaves.set(chaveGerada, item)
-        }
-        if (r.codigo_produto) {
-          item.skus.add(r.codigo_produto)
-          if (!item.skusMap.has(r.codigo_produto)) {
-            item.skusMap.set(r.codigo_produto, precoMedioBase)
-          }
-        }
-        item.unidades.add(u)
-        item.quantidade += qtdAtual
-        item.valor += val
-      }
-    }
-
-    // ========== FLUXOS (compras / consumo / SKUs) ==========
-    const fonteFluxos = (snapshotPeriodo && snapshotPeriodo.length) ? snapshotPeriodo : snapshot
-    const fluxLen = fonteFluxos.length
-
-    for (let i = 0; i < fluxLen; i++) {
-      const r = fonteFluxos[i]
-      const u = r.unidade_almoxarifado
-      const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = Math.abs(parseNumber(r.valor_saida_cons_interno))
-      const qtdAtual = parseNumber(r.qtde_saldo_atual)
-      const qtdEntrada = parseNumber(r.qtde_entrada_compras)
-
-      valCompras += valEntrada
-      valConsumo += valSaida
-
-      if (u) {
-        let cc = mapCC.get(u)
-        if (!cc) {
-          cc = { unidade: u, compras: 0, consumo: 0 }
-          mapCC.set(u, cc)
-        }
-        cc.compras += valEntrada
-        cc.consumo += valSaida
-      }
-
-      if (qtdAtual > 0 && r.codigo_produto) {
-        skusSet.add(r.codigo_produto)
-        if (u) {
-          let setSkus = mapSkus.get(u)
-          if (!setSkus) {
-            setSkus = new Set()
-            mapSkus.set(u, setSkus)
-          }
-          setSkus.add(r.codigo_produto)
-
-          if (r.nome_produto) {
-            let mapUnid = mapChavesPorUnidade.get(u)
-            if (!mapUnid) {
-              mapUnid = new Map()
-              mapChavesPorUnidade.set(u, mapUnid)
-            }
-            const chave = gerarChaveDuplicidade(r.nome_produto)
-            let setChaves = mapUnid.get(chave)
-            if (!setChaves) {
-              setChaves = new Set()
-              mapUnid.set(chave, setChaves)
-            }
-            setChaves.add(r.codigo_produto)
-          }
-        }
-      }
-
-      if (valEntrada > 0 || valSaida > 0) {
-        const skuKey = `${u}-${r.codigo_produto}`
-        let item = mapSkuAggComprasSemConsumo.get(skuKey)
-        if (!item) {
-          item = {
-            u,
-            cod: r.codigo_produto,
-            nome: r.nome_produto,
-            _isCritico: r._isCritico,
-            _isObsoleto: r._isObsoleto,
-            _isObra: r._isObra,
-            _isInsumo: r._isInsumo,
-            _isOperacional: r._isOperacional,
-            entrada: 0,
-            saida: 0,
-            qtdeComprada: 0
-          }
-          mapSkuAggComprasSemConsumo.set(skuKey, item)
-        }
-        item.entrada += valEntrada
-        item.saida += valSaida
-        item.qtdeComprada += qtdEntrada
-      }
-    }
-
-    // Compras sem consumo (regra dos 5%)
-    for (const item of mapSkuAggComprasSemConsumo.values()) {
-      if (item.entrada > 0.01 && item.saida <= (item.entrada * 0.05)) {
-        comprasSem.push({
-          _rowKey: `${item.u}-${item.cod}`,
-          unidade: item.u,
-          codigo: item.cod,
-          nome: item.nome,
-          flags: {
-            critico: item._isCritico,
-            obsoleto: item._isObsoleto,
-            obra: item._isObra,
-            insumo: item._isInsumo,
-            op: item._isOperacional
-          },
-          qtdeComprada: item.qtdeComprada,
-          comprado: item.entrada,
-          consumido: item.saida
-        })
-      }
-    }
-
-    // ========== PERÍODO ANTERIOR ==========
-    let valEstoquePrev = 0, valComprasPrev = 0, valConsumoPrev = 0
-    let valCriticoPrev = 0, valObsoletoPrev = 0, valObraPrev = 0, valInsumoPrev = 0
-    const skusPrevSet = new Set()
-
-    const prevLen = snapshotPrev.length
-    for (let i = 0; i < prevLen; i++) {
-      const r = snapshotPrev[i]
-      const u = r.unidade_almoxarifado
-      const val = parseNumber(r.valor_saldo_atual)
-
-      valEstoquePrev += val
-      if (u) mapRankPrev.set(u, (mapRankPrev.get(u) || 0) + val)
-
-      if (r._isCritico) valCriticoPrev += val
-      if (r._isObsoleto) valObsoletoPrev += val
-      if (r._isObra) valObraPrev += val
-      if (r._isInsumo) valInsumoPrev += val
-    }
-
-    const fonteFluxosPrev = (snapshotPeriodoPrev && snapshotPeriodoPrev.length)
-      ? snapshotPeriodoPrev
-      : snapshotPrev
-
-    const prevFluxLen = fonteFluxosPrev.length
-    for (let i = 0; i < prevFluxLen; i++) {
-      const r = fonteFluxosPrev[i]
-      valComprasPrev += parseNumber(r.valor_entrada_compras)
-      valConsumoPrev += Math.abs(parseNumber(r.valor_saida_cons_interno))
-      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
-        skusPrevSet.add(r.codigo_produto)
-      }
-    }
-
-    // Variação por unidade
-    const arrVariacao = []
-    const todasUnid = new Set([...mapRank.keys(), ...mapRankPrev.keys()])
-    for (const u of todasUnid) {
-      if (!u) continue
-      const atual = mapRank.get(u) || 0
-      const prev = mapRankPrev.get(u) || 0
-      const diff = atual - prev
-      if (atual === 0 && prev === 0) continue
-      let pct = 0
-      if (prev > 0) pct = (diff / prev) * 100
-      else if (atual > 0) pct = 100
-      arrVariacao.push({ unidade: u, atual, anterior: prev, diff, pct })
-    }
-
-    // Helper de ranking
-    const mapToSort = (m) => {
-      const arr = []
-      for (const [unidade, valor] of m) {
-        if (unidade && valor > 0.01) arr.push({ unidade, valor })
-      }
-      arr.sort((a, b) => a.valor - b.valor)
-      return arr
-    }
-
-    const exposicao = [
-      { name: 'Operacional', value: valOp, color: '#3498db' },
-      { name: 'Insumo', value: valInsumo, color: '#f1c40f' },
-      { name: 'Obra', value: valObra, color: '#1abc9c' },
-      { name: 'Obsoleto', value: valObsoleto, color: '#9b59b6' },
-      { name: 'Crítico', value: valCritico, color: '#e74c3c' },
-    ].filter(d => d.value > 0).sort((a, b) => a.value - b.value)
-
-    // Duplicados finais
-    const duplicados = []
-    for (const dados of mapChaves.values()) {
-      if (dados.skus.size > 1) {
-        const precosArr = []
-        for (const [sku, preco] of dados.skusMap) {
-          precosArr.push(`SKU ${sku}: ${fmtBRL(preco)}`)
-        }
-        duplicados.push({
-          _rowKey: dados.nomeExemplo,
-          nome: dados.nomeExemplo,
-          qtd_skus: dados.skus.size,
-          skus_lista: Array.from(dados.skus).join(', '),
-          precos_detalhados: precosArr.join(' | '),
-          unidades_lista: Array.from(dados.unidades).join(', '),
-          quantidade: dados.quantidade,
-          valor: dados.valor
-        })
-      }
-    }
-
-    duplicados.sort((a, b) => b.valor - a.valor)
-    maiores.sort((a, b) => b.valor - a.valor)
-    comprasSem.sort((a, b) => b.comprado - a.comprado)
-
-    // SKUs por unidade
-    const skusUnidadeArr = []
-    for (const [u, setSkus] of mapSkus) {
-      let duplicadosUnidade = 0
-      const mapUnid = mapChavesPorUnidade.get(u)
-      if (mapUnid) {
-        for (const setChaves of mapUnid.values()) {
-          if (setChaves.size > 1) duplicadosUnidade += setChaves.size
-        }
-      }
-      if (u && setSkus.size > 0) {
-        skusUnidadeArr.push({ unidade: u, total: setSkus.size, duplicados: duplicadosUnidade })
-      }
-    }
-    skusUnidadeArr.sort((a, b) => a.total - b.total)
-
-    return {
-      metrics: {
-        valEstoque, valCompras, valConsumo, valSkus: skusSet.size,
-        valInsumo, valCritico, valObsoleto, valObra, valOp,
-        valEstoquePrev, valComprasPrev, valConsumoPrev, valSkusPrev: skusPrevSet.size,
-        valInsumoPrev, valCriticoPrev, valObsoletoPrev, valObraPrev
-      },
-      rankingUnidade: mapToSort(mapRank),
-      rankCritico: mapToSort(mapCrit),
-      rankObsoleto: mapToSort(mapObs),
-      rankObra: mapToSort(mapObra),
-      rankOperacional: mapToSort(mapOp),
-      rankInsumo: mapToSort(mapInsumo),
-      compraConsumoUnidade: [...mapCC.values()]
-        .filter(d => d.unidade && (d.compras > 0.01 || d.consumo > 0.01))
-        .sort((a, b) => (a.compras + a.consumo) - (b.compras + b.consumo)),
-      variacaoUnidade: arrVariacao.filter(d => Math.abs(d.diff) > 0.01),
-      skusUnidade: skusUnidadeArr,
-      exposicaoCategorias: exposicao,
-      maioresValoresDataCompleta: maiores,
-      comprasSemConsumoDataCompleta: comprasSem,
-      duplicadosDataCompleta: duplicados
-    }
-  }, [snapshot, snapshotPrev, snapshotPeriodo, snapshotPeriodoPrev])
-
-  const rankingUnidadeAtivo = useMemo(() => {
-    switch (abaRankingUnidade) {
-      case 'operacional': return rankOperacional || []
-      case 'critico': return rankCritico || []
-      case 'obsoleto': return rankObsoleto || []
-      case 'obra': return rankObra || []
-      case 'insumo': return rankInsumo || []
-      default: return rankingUnidade || []
-    }
-  }, [abaRankingUnidade, rankingUnidade, rankOperacional, rankCritico, rankObsoleto, rankObra, rankInsumo])
-
-  const variacaoFiltrada = useMemo(() => {
-    if (abaVariacao === 'aumento') return variacaoUnidade.filter(d => d.diff > 0).sort((a, b) => a.diff - b.diff)
-    return variacaoUnidade.filter(d => d.diff <= 0).sort((a, b) => b.diff - a.diff)
-  }, [variacaoUnidade, abaVariacao])
-
-  const skusUnidadeFiltrado = useMemo(() => skusUnidade.map(d => ({ unidade: d.unidade, total: abaSkusUnidade === 'duplicados' ? d.duplicados : d.total })).filter(d => d.total > 0).sort((a, b) => a.total - b.total), [skusUnidade, abaSkusUnidade])
+  // -------------------------------------------------------------------------
+  // LISTAS FILTRADAS PARA TELA CHEIA / GAVETAS
+  // -------------------------------------------------------------------------
+  const filtroUnidadeFSKey = filtroUnidadeFS.join('\0')
 
   const maioresValoresGaveta = useMemo(() => maioresValoresDataCompleta.slice(0, 50), [maioresValoresDataCompleta])
-  const filtroUnidadeFSKey = filtroUnidadeFS.join('\0')
-  const { dados: maioresValoresFS, total: maioresValoresFSTotal, unidadesOpcoes: unidadesFSMaioresValores } = useMemo(() => filtrarListaFS(maioresValoresDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
+  const { dados: maioresValoresFS, total: maioresValoresFSTotal, unidadesOpcoes: unidadesFSMaioresValores } = useMemo(
+    () => filtrarListaFS(maioresValoresDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }),
+    [maioresValoresDataCompleta, filtroTextoFS, filtroUnidadeFSKey, filtrarListaFS]
+  )
 
   const comprasSemConsumoGaveta = useMemo(() => comprasSemConsumoDataCompleta.slice(0, 50), [comprasSemConsumoDataCompleta])
-  const { dados: comprasSemConsumoFS, total: comprasSemConsumoFSTotal, unidadesOpcoes: unidadesFSComprasSemConsumo } = useMemo(() => filtrarListaFS(comprasSemConsumoDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [comprasSemConsumoDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
+  const { dados: comprasSemConsumoFS, total: comprasSemConsumoFSTotal, unidadesOpcoes: unidadesFSComprasSemConsumo } = useMemo(
+    () => filtrarListaFS(comprasSemConsumoDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }),
+    [comprasSemConsumoDataCompleta, filtroTextoFS, filtroUnidadeFSKey, filtrarListaFS]
+  )
 
   const duplicadosGaveta = useMemo(() => duplicadosDataCompleta.slice(0, 50), [duplicadosDataCompleta])
-  const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(() => filtrarListaFS(duplicadosDataCompleta, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'skus_lista'], maxItems: 1000, matchUnidade: (item, setU) => { const parts = String(item.unidades_lista || '').split(','); return parts.some(p => setU.has(normUnidade(p))) } }), [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey])
-
-  const timeSeriesAgg = useMemo(() => {
-    // =========================================================================
-    // 1) Agregação MENSAL (fonte da verdade) — loop único e mais enxuto
-    // =========================================================================
-    const monthlyMap = new Map()
-
-    const len = dfFiltrado.length
-    for (let i = 0; i < len; i++) {
-      const r = dfFiltrado[i]
-      const ano = r.tmp_ano_num
-      const mes = r.tmp_mes_num || 1
-      const key = `${ano}-${String(mes).padStart(2, '0')}`
-
-      let item = monthlyMap.get(key)
-      if (!item) {
-        item = {
-          periodo: periodoLabel(mes, r.ano_referencia),
-          ano,
-          mes,
-          sortKey: key,
-          total: 0,
-          operacional: 0,
-          critico: 0,
-          obsoleto: 0,
-          obra: 0,
-          insumo: 0,
-          compras: 0,
-          consumo: 0,
-          comprasSemConsumo: 0,
-          skuFluxos: new Map(),
-          skus: new Set(),
-          chavesMap: new Map(),
-        }
-        monthlyMap.set(key, item)
+  const { dados: duplicadosFS, total: duplicadosFSTotal, unidadesOpcoes: unidadesFSDuplicados } = useMemo(
+    () => filtrarListaFS(duplicadosDataCompleta, {
+      texto: filtroTextoFS,
+      unidades: filtroUnidadeFS,
+      camposTexto: ['nome', 'skus_lista'],
+      maxItems: 1000,
+      matchUnidade: (item, setU) => {
+        const parts = String(item.unidades_lista || '').split(',')
+        return parts.some(p => setU.has(normalizeSelectedUnidades([p])[0] || ''))
       }
-
-      const val = parseNumber(r.valor_saldo_atual)
-      const valEntrada = parseNumber(r.valor_entrada_compras)
-      const valSaida = Math.abs(parseNumber(r.valor_saida_cons_interno))
-
-      // Estoques
-      item.total += val
-      if (r._isOperacional) item.operacional += val
-      if (r._isCritico) item.critico += val
-      if (r._isObsoleto) item.obsoleto += val
-      if (r._isObra) item.obra += val
-      if (r._isInsumo) item.insumo += val
-
-      // Fluxos
-      item.compras += valEntrada
-      item.consumo += valSaida
-
-      // Fluxo por SKU (para regra dos 5%)
-      if ((valEntrada > 0 || valSaida > 0) && r.codigo_produto) {
-        const skuKey = `${r.unidade_almoxarifado || ''}||${r.codigo_produto}`
-        let flux = item.skuFluxos.get(skuKey)
-        if (!flux) {
-          flux = { entrada: 0, saida: 0 }
-          item.skuFluxos.set(skuKey, flux)
-        }
-        flux.entrada += valEntrada
-        flux.saida += valSaida
-      }
-
-      // SKUs
-      if (parseNumber(r.qtde_saldo_atual) > 0 && r.codigo_produto) {
-        item.skus.add(r.codigo_produto)
-        if (r.nome_produto && r.unidade_almoxarifado) {
-          const chave = gerarChaveDuplicidade(r.nome_produto)
-          let setSkus = item.chavesMap.get(chave)
-          if (!setSkus) {
-            setSkus = new Set()
-            item.chavesMap.set(chave, setSkus)
-          }
-          setSkus.add(r.codigo_produto)
-        }
-      }
-    }
-
-    // Preenche meses sem dado (do primeiro ao último mês real da base filtrada por ano)
-    if (dadosSanitizados && dadosSanitizados.length > 0) {
-      let minAno = 9999, minMes = 13, maxAno = 0, maxMes = 0
-      const anosFiltro = anosSel.length > 0 && anoOpcoes && anosSel.length < anoOpcoes.length
-        ? new Set(anosSel.map(String))
-        : null
-
-      for (let i = 0; i < dadosSanitizados.length; i++) {
-        const r = dadosSanitizados[i]
-        if (!r.tmp_ano_num || !r.tmp_mes_num) continue
-        if (anosFiltro && !anosFiltro.has(String(r.ano_referencia))) continue
-
-        if (r.tmp_ano_num < minAno || (r.tmp_ano_num === minAno && r.tmp_mes_num < minMes)) {
-          minAno = r.tmp_ano_num; minMes = r.tmp_mes_num
-        }
-        if (r.tmp_ano_num > maxAno || (r.tmp_ano_num === maxAno && r.tmp_mes_num > maxMes)) {
-          maxAno = r.tmp_ano_num; maxMes = r.tmp_mes_num
-        }
-      }
-
-      if (minAno <= maxAno) {
-        let a = minAno, m = minMes
-        while (a < maxAno || (a === maxAno && m <= maxMes)) {
-          const key = `${a}-${String(m).padStart(2, '0')}`
-          if (!monthlyMap.has(key)) {
-            monthlyMap.set(key, {
-              periodo: periodoLabel(m, a),
-              ano: a,
-              mes: m,
-              sortKey: key,
-              total: 0, operacional: 0, critico: 0, obsoleto: 0, obra: 0, insumo: 0,
-              compras: 0, consumo: 0, comprasSemConsumo: 0,
-              skuFluxos: new Map(),
-              skus: new Set(),
-              chavesMap: new Map(),
-            })
-          }
-          m += 1
-          if (m > 12) { m = 1; a += 1 }
-        }
-      }
-    }
-
-    // Calcula comprasSemConsumo mensal (regra dos 5%)
-    for (const item of monthlyMap.values()) {
-      let csc = 0
-      for (const flux of item.skuFluxos.values()) {
-        if (flux.entrada > 0.01 && flux.saida <= flux.entrada * 0.05) {
-          csc += flux.entrada
-        }
-      }
-      item.comprasSemConsumo = csc
-    }
-
-    const monthlySorted = [...monthlyMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-
-    // Helper de retorno
-    const buildReturn = (points) => ({
-      total: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.total })),
-      operacional: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.operacional })),
-      critico: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.critico })),
-      obsoleto: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.obsoleto })),
-      obra: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.obra })),
-      insumo: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.insumo })),
-      comprasConsumo: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, compras: d.compras, consumo: d.consumo })),
-      comprasSemConsumoEvolucao: points.map(d => ({ periodo: d.periodo, closingPeriodo: d.closingPeriodo, valor: d.comprasSemConsumo })),
-      skus: points.map(d => {
-        let skusDupCount = 0
-        for (const skusSet of d.chavesMap.values()) {
-          if (skusSet.size > 1) skusDupCount += skusSet.size
-        }
-        return { periodo: d.periodo, closingPeriodo: d.closingPeriodo, total: d.skus.size, duplicados: skusDupCount }
-      }),
-    })
-
-    // =========================================================================
-    // 2) Granularidade MENSAL → retorno direto
-    // =========================================================================
-    if (granularidade === 'mensal') {
-      const points = monthlySorted.map(d => ({
-        ...d,
-        closingPeriodo: d.periodo,
-      }))
-      return buildReturn(points)
-    }
-
-    // =========================================================================
-    // 3) Agregação TRIMESTRE / SEMESTRE / ANUAL
-    // =========================================================================
-    const groupMap = new Map()
-
-    for (let i = 0; i < monthlySorted.length; i++) {
-      const m = monthlySorted[i]
-      let groupKey = ''
-      let periodoLabelStr = ''
-
-      if (granularidade === 'trimestre') {
-        const tri = Math.ceil(m.mes / 3)
-        groupKey = `${m.ano}-T${tri}`
-        periodoLabelStr = `T${tri}/${String(m.ano).slice(-2)}`
-      } else if (granularidade === 'semestre') {
-        const sem = m.mes <= 6 ? 1 : 2
-        groupKey = `${m.ano}-S${sem}`
-        periodoLabelStr = `S${sem}/${String(m.ano).slice(-2)}`
-      } else {
-        groupKey = `${m.ano}`
-        periodoLabelStr = `Ano ${m.ano}`
-      }
-
-      let g = groupMap.get(groupKey)
-      if (!g) {
-        g = {
-          periodo: periodoLabelStr,
-          sortKey: groupKey,
-          latestMes: -1,
-          closingPeriodo: m.periodo,
-          total: 0,
-          operacional: 0,
-          critico: 0,
-          obsoleto: 0,
-          obra: 0,
-          insumo: 0,
-          compras: 0,
-          consumo: 0,
-          comprasSemConsumo: 0,
-          skuFluxos: new Map(),
-          skus: new Set(),
-          chavesMap: new Map(),
-        }
-        groupMap.set(groupKey, g)
-      }
-
-      // Fluxos → soma
-      g.compras += m.compras
-      g.consumo += m.consumo
-
-      // Une fluxos por SKU
-      for (const [skuKey, flux] of m.skuFluxos) {
-        let gf = g.skuFluxos.get(skuKey)
-        if (!gf) {
-          gf = { entrada: 0, saida: 0 }
-          g.skuFluxos.set(skuKey, gf)
-        }
-        gf.entrada += flux.entrada
-        gf.saida += flux.saida
-      }
-
-      // SKUs → distinct
-      for (const sku of m.skus) g.skus.add(sku)
-      for (const [chave, setSkus] of m.chavesMap) {
-        let target = g.chavesMap.get(chave)
-        if (!target) {
-          target = new Set()
-          g.chavesMap.set(chave, target)
-        }
-        for (const sku of setSkus) target.add(sku)
-      }
-
-      // Estoques → fechamento (último mês do grupo)
-      if (m.mes > g.latestMes) {
-        g.latestMes = m.mes
-        g.closingPeriodo = m.periodo
-        g.total = m.total
-        g.operacional = m.operacional
-        g.critico = m.critico
-        g.obsoleto = m.obsoleto
-        g.obra = m.obra
-        g.insumo = m.insumo
-      }
-    }
-
-    // Regra dos 5% no nível do grupo
-    for (const g of groupMap.values()) {
-      let csc = 0
-      for (const flux of g.skuFluxos.values()) {
-        if (flux.entrada > 0.01 && flux.saida <= flux.entrada * 0.05) {
-          csc += flux.entrada
-        }
-      }
-      g.comprasSemConsumo = csc
-    }
-
-    const sorted = [...groupMap.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-    return buildReturn(sorted)
-  }, [dfFiltrado, dadosSanitizados, anosSel, anoOpcoes, granularidade])
-
-  // Label de exibição (T3/26, S2/26, 2026 ou AGO/26) — o que o usuário vê no banner
-  const periodoDisplay = useMemo(() => {
-    const series = timeSeriesAgg?.total || []
-    const point = series.find(d => d.closingPeriodo === periodoEfetivo || d.periodo === periodoEfetivo)
-    if (point?.periodo) return point.periodo
-    return formatarPeriodoTexto(periodoEfetivo)
-  }, [timeSeriesAgg, periodoEfetivo])
-
-  const { giroMensal, giroAnual, coberturaMeses, coberturaAnos, giroMensalPrev, coberturaMesesPrev, giroCoberturaTempo } = useMemo(() => {
-    const empty = {
-      giroMensal: 0, giroAnual: 0, coberturaMeses: 0, coberturaAnos: 0,
-      giroMensalPrev: 0, coberturaMesesPrev: 0, monthlyRaw: [], giroCoberturaTempo: []
-    }
-    if (!dfFiltrado.length) return empty
-    const p = parsePeriodo(periodoEfetivo)
-    if (!p) return empty
-
-    // Agregação mensal operacional (apenas estoque + consumo operacional)
-    const map = new Map()
-    const len = dfFiltrado.length
-    for (let i = 0; i < len; i++) {
-      const r = dfFiltrado[i]
-      // Só considera o que não é crítico nem obsoleto
-      if (r._isCritico || r._isObsoleto) continue
-
-      const key = `${r.tmp_ano_num}-${r.tmp_mes_num}`
-      let item = map.get(key)
-      if (!item) {
-        item = { ano: r.tmp_ano_num, mes: r.tmp_mes_num, estoque_op: 0, consumo_op: 0 }
-        map.set(key, item)
-      }
-      item.estoque_op += parseNumber(r.valor_saldo_atual)
-      item.consumo_op += Math.abs(parseNumber(r.valor_saida_cons_interno))
-    }
-
-    const monthly = [...map.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes)
-
-    // Série acumulada para o gráfico
-    let accEst = 0, accCon = 0
-    const giroCoberturaTempo = monthly.map((row, i) => {
-      accEst += row.estoque_op
-      accCon += row.consumo_op
-      const n = i + 1
-      const estMed = accEst / n
-      const conMed = accCon / n
-      return {
-        periodo: periodoLabel(row.mes, row.ano),
-        giro: estMed > 0 ? conMed / estMed : 0,
-        cobertura: conMed > 0 ? estMed / conMed : 0
-      }
-    })
-
-    // KPIs do período selecionado
-    const monthKeySet = new Set((periodMonths || []).map(m => `${m.ano}-${m.mes}`))
-    const subAtual = monthly.filter(m => monthKeySet.has(`${m.ano}-${m.mes}`) && m.estoque_op > 0)
-
-    let giroMensal = 0, giroAnual = 0, coberturaMeses = 0, coberturaAnos = 0
-    if (subAtual.length) {
-      const estMed = subAtual.reduce((s, m) => s + m.estoque_op, 0) / subAtual.length
-      const conMed = subAtual.reduce((s, m) => s + m.consumo_op, 0) / subAtual.length
-      if (estMed > 0) {
-        giroMensal = conMed / estMed
-        giroAnual = giroMensal * 12
-      }
-      if (conMed > 0) {
-        coberturaMeses = estMed / conMed
-        coberturaAnos = coberturaMeses / 12
-      }
-    }
-
-    // Período anterior
-    let giroMensalPrev = 0, coberturaMesesPrev = 0
-    if (periodMonths && periodMonths.length) {
-      const first = periodMonths[0]
-      const n = periodMonths.length
-      const firstIdx = first.ano * 12 + first.mes
-      const prevEndIdx = firstIdx - 1
-      const prevStartIdx = prevEndIdx - n + 1
-
-      const subPrev = monthly.filter(m => {
-        const idx = m.ano * 12 + m.mes
-        return idx >= prevStartIdx && idx <= prevEndIdx && m.estoque_op > 0
-      })
-
-      if (subPrev.length) {
-        const estMedP = subPrev.reduce((s, m) => s + m.estoque_op, 0) / subPrev.length
-        const conMedP = subPrev.reduce((s, m) => s + m.consumo_op, 0) / subPrev.length
-        if (estMedP > 0) giroMensalPrev = conMedP / estMedP
-        if (conMedP > 0) coberturaMesesPrev = estMedP / conMedP
-      }
-    }
-
-    return {
-      giroMensal, giroAnual, coberturaMeses, coberturaAnos,
-      giroMensalPrev, coberturaMesesPrev,
-      monthlyRaw: monthly,
-      giroCoberturaTempo
-    }
-  }, [dfFiltrado, periodoEfetivo, periodMonths])
-
-  const itensParados = useMemo(() => {
-    const p = parsePeriodo(periodoEfetivo)
-    if (!p || !dfFiltrado.length) return []
-
-    const snapshotIdx = p.ano * 12 + p.mes
-
-    // 1) Filtra e indexa apenas o necessário (sem spread)
-    const calc = []
-    const len = dfFiltrado.length
-    for (let i = 0; i < len; i++) {
-      const r = dfFiltrado[i]
-      if (!r.unidade_almoxarifado || !r.tmp_ano_num || !r.tmp_mes_num) continue
-      if (r._isCritico || r._isObsoleto) continue
-      const tempoIdx = r.tmp_ano_num * 12 + r.tmp_mes_num
-      if (tempoIdx > snapshotIdx) continue
-      // guarda referência + índice (sem clonar o objeto)
-      calc.push({ r, tempo_idx: tempoIdx })
-    }
-
-    // 2) Último movimento e primeiro histórico
-    const ultimoMov = new Map()
-    const primeiroHist = new Map()
-
-    for (let i = 0; i < calc.length; i++) {
-      const { r, tempo_idx } = calc[i]
-      const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-
-      if (Math.abs(parseNumber(r.valor_saida_cons_interno)) > 0) {
-        const atual = ultimoMov.get(key) || 0
-        if (tempo_idx > atual) ultimoMov.set(key, tempo_idx)
-      }
-
-      const prim = primeiroHist.get(key)
-      if (prim === undefined || tempo_idx < prim) {
-        primeiroHist.set(key, tempo_idx)
-      }
-    }
-
-    // 3) Snapshot atual (saldo > 0)
-    const result = []
-    for (let i = 0; i < calc.length; i++) {
-      const { r, tempo_idx } = calc[i]
-      if (r.tmp_ano_num !== p.ano || r.tmp_mes_num !== p.mes) continue
-      if (parseNumber(r.qtde_saldo_atual) <= 0 || !r.codigo_produto) continue
-
-      const key = `${r.unidade_almoxarifado}||${r.codigo_produto}`
-      let ultimo = ultimoMov.get(key)
-
-      if (ultimo == null) {
-        const prim = primeiroHist.get(key)
-        ultimo = prim != null ? prim - 1 : snapshotIdx
-      }
-
-      const mesesParado = Math.max(0, snapshotIdx - ultimo)
-
-      if (mesesParado >= 3) {
-        result.push({
-          _rowKey: `${r.unidade_almoxarifado}-${r.codigo_produto}-${mesesParado}`,
-          unidade: r.unidade_almoxarifado,
-          codigo: r.codigo_produto,
-          nome: r.nome_produto,
-          quantidade: parseNumber(r.qtde_saldo_atual),
-          valor: parseNumber(r.valor_saldo_atual),
-          mesesParado
-        })
-      }
-    }
-
-    result.sort((a, b) => b.valor - a.valor)
-    return result
-  }, [dfFiltrado, periodoEfetivo])
-
-  const mesesParadosOpcoes = useMemo(() => [...new Set(itensParados.map(i => i.mesesParado))].sort((a, b) => a - b).map(String), [itensParados])
-  const paradosChart = useMemo(() => {
-    const map = new Map()
-    for (const item of itensParados) {
-      const m = item.mesesParado
-      if (!map.has(m)) map.set(m, { meses: m, label: `${m} Meses`, valor: 0, skus: 0 })
-      const obj = map.get(m); obj.valor += item.valor; obj.skus += 1
-    }
-    return [...map.values()].sort((a, b) => a.meses - b.meses)
-  }, [itensParados])
+    }),
+    [duplicadosDataCompleta, filtroTextoFS, filtroUnidadeFSKey, filtrarListaFS, normalizeSelectedUnidades]
+  )
 
   const itensParadosParaExportar = useMemo(() => {
-    let lista = itensParados; if (filtroMesParado) lista = itensParados.filter(item => item.mesesParado === filtroMesParado)
+    let lista = itensParados
+    if (filtroMesParado) lista = itensParados.filter(item => item.mesesParado === filtroMesParado)
     return [...lista]
   }, [itensParados, filtroMesParado])
 
   const itensParadosGaveta = useMemo(() => itensParadosParaExportar.slice(0, 50), [itensParadosParaExportar])
+
   const itensParadosPreFS = useMemo(() => {
     let lista = itensParados
     if (filtroMesParado) lista = lista.filter(item => item.mesesParado === filtroMesParado)
-    if (filtroMesParadoFS && filtroMesParadoFS.length > 0) { const setM = new Set(filtroMesParadoFS.map(String)); lista = lista.filter(item => setM.has(String(item.mesesParado))) }
-    return lista;
-  }, [itensParados, filtroMesParado, filtroMesParadoFS]);
-
-  const { dados: itensParadosFS, total: itensParadosFSTotal, unidadesOpcoes: unidadesFSParados } = useMemo(() => filtrarListaFS(itensParadosPreFS, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }), [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey])
-
-  const handleResetFiltros = useCallback(() => {
-    dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: [] });
-    dispatch({ type: 'SET_ESCOPOS', payload: [] });
-    dispatch({ type: 'SET_UNIDADES', payload: [] });
-    dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: [] });
-    dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: [] });
-    
-    if (anoOpcoes && anoOpcoes.length > 0) {
-      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
-    } else {
-      dispatch({ type: 'SET_ANOS', payload: [] })
+    if (filtroMesParadoFS && filtroMesParadoFS.length > 0) {
+      const setM = new Set(filtroMesParadoFS.map(String))
+      lista = lista.filter(item => setM.has(String(item.mesesParado)))
     }
-    
-    dispatch({ type: 'SET_PERIODO_ATIVO', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCompraConsumo', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraVariacao', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'filtroMesParado', payload: null });
-    dispatch({ type: 'SET_FIELD', field: 'granularidade', payload: 'mensal' });
+    return lista
+  }, [itensParados, filtroMesParado, filtroMesParadoFS])
 
-    setVis({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false });
-  }, [dispatch, anoOpcoes]);
+  const { dados: itensParadosFS, total: itensParadosFSTotal, unidadesOpcoes: unidadesFSParados } = useMemo(
+    () => filtrarListaFS(itensParadosPreFS, { texto: filtroTextoFS, unidades: filtroUnidadeFS, camposTexto: ['nome', 'codigo'], maxItems: 1000 }),
+    [itensParadosPreFS, filtroTextoFS, filtroUnidadeFSKey, filtrarListaFS]
+  )
 
-  const periodoTxtExport = (periodoDisplay || formatarPeriodoTexto(periodoEfetivo)).replace(/\//g, "-");
+  // -------------------------------------------------------------------------
+  // EXPORTAÇÕES
+  // -------------------------------------------------------------------------
+  const periodoTxtExport = (periodoDisplay || formatarPeriodoTexto(periodoEfetivo)).replace(/\//g, "-")
 
   const exportarExcelMaioresValores = useCallback(() => {
-    setExportando(true);
+    setExportando(true)
     setTimeout(() => {
       const dadosExportacao = maioresValoresDataCompleta.map(i => ({
         'Período': periodoTxtExport,
@@ -1756,17 +260,17 @@ export default function VisaoGeral({ data }) {
         'Quantidade': i.quantidade,
         'Preço Médio (R$)': i.precoMedio,
         'Valor em Estoque (R$)': i.valor
-      }));
-      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Maiores Valores");
-      XLSX.writeFile(wb, `Maiores_Valores_Estoque_${periodoTxtExport.replace('/','-')}.xlsx`);
-      setExportando(false);
-    }, 150);
+      }))
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Maiores Valores")
+      XLSX.writeFile(wb, `Maiores_Valores_Estoque_${periodoTxtExport.replace('/','-')}.xlsx`)
+      setExportando(false)
+    }, 150)
   }, [maioresValoresDataCompleta, periodoTxtExport])
 
   const exportarExcelDuplicados = useCallback(() => {
-    setExportando(true);
+    setExportando(true)
     setTimeout(() => {
       const dadosExportacao = duplicadosDataCompleta.map(i => ({
         'Período': periodoTxtExport,
@@ -1775,17 +279,17 @@ export default function VisaoGeral({ data }) {
         'Lista de SKUs': i.skus_lista,
         'Qtd Fís.': i.quantidade,
         'Valor Imobilizado (R$)': i.valor
-      }));
-      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Duplicados");
-      XLSX.writeFile(wb, `Cadastros_Duplicados_${periodoTxtExport.replace('/','-')}.xlsx`);
-      setExportando(false);
-    }, 150);
+      }))
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Duplicados")
+      XLSX.writeFile(wb, `Cadastros_Duplicados_${periodoTxtExport.replace('/','-')}.xlsx`)
+      setExportando(false)
+    }, 150)
   }, [duplicadosDataCompleta, periodoTxtExport])
 
   const exportarExcelComprasSemConsumo = useCallback(() => {
-    setExportando(true);
+    setExportando(true)
     setTimeout(() => {
       const dadosExportacao = comprasSemConsumoDataCompleta.map(i => ({
         'Período': periodoTxtExport,
@@ -1796,17 +300,17 @@ export default function VisaoGeral({ data }) {
         'Qtde Comprada': i.qtdeComprada,
         'Valor Comprado (R$)': i.comprado,
         'Valor Consumido (R$)': i.consumido
-      }));
-      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Compras Sem Consumo");
-      XLSX.writeFile(wb, `Compras_Sem_Consumo_${periodoTxtExport.replace('/','-')}.xlsx`);
-      setExportando(false);
-    }, 150);
+      }))
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Compras Sem Consumo")
+      XLSX.writeFile(wb, `Compras_Sem_Consumo_${periodoTxtExport.replace('/','-')}.xlsx`)
+      setExportando(false)
+    }, 150)
   }, [comprasSemConsumoDataCompleta, periodoTxtExport])
 
   const exportarExcelParados = useCallback(() => {
-    setExportando(true);
+    setExportando(true)
     setTimeout(() => {
       const dadosExportacao = itensParadosParaExportar.map(i => ({
         'Período': periodoTxtExport,
@@ -1816,26 +320,33 @@ export default function VisaoGeral({ data }) {
         'Quantidade': i.quantidade,
         'Valor Parado (R$)': i.valor,
         'Meses Parado': i.mesesParado
-      }));
-      const ws = XLSX.utils.json_to_sheet(dadosExportacao);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Materiais Parados");
-      XLSX.writeFile(wb, `Materiais_Parados_${periodoTxtExport.replace('/','-')}.xlsx`);
-      setExportando(false);
-    }, 150);
+      }))
+      const ws = XLSX.utils.json_to_sheet(dadosExportacao)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Materiais Parados")
+      XLSX.writeFile(wb, `Materiais_Parados_${periodoTxtExport.replace('/','-')}.xlsx`)
+      setExportando(false)
+    }, 150)
   }, [itensParadosParaExportar, periodoTxtExport])
 
   const exportarPowerPoint = useCallback(() => {
-    setExportando(true);
-    setTimeout(() => { alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view."); setExportando(false); }, 1000);
-  }, [periodoEfetivo, metrics, escoposSel, tiposEstoqueSel])
+    setExportando(true)
+    setTimeout(() => {
+      alert("Integração completa do PPTX precisa de configuração avançada do pptxgenjs com os dados desta view.")
+      setExportando(false)
+    }, 1000)
+  }, [])
 
+  // -------------------------------------------------------------------------
+  // TOGGLES DE VISIBILIDADE DOS GRÁFICOS
+  // -------------------------------------------------------------------------
   const toggleVis = useCallback((key) => setVis((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisComprasConsumo = useCallback((key) => setVisComprasConsumo((v) => ({ ...v, [key]: !v[key] })), [])
   const toggleVisGiroCobertura = useCallback((key) => setVisGiroCobertura((v) => ({ ...v, [key]: !v[key] })), [])
 
-  // Helper: um ponto da série está selecionado se o período efetivo (sempre mensal)
-  // for igual ao closingPeriodo do ponto (ou ao próprio periodo no modo mensal)
+  // -------------------------------------------------------------------------
+  // HELPERS DE GRÁFICO
+  // -------------------------------------------------------------------------
   const isPeriodSelected = useCallback((d) => {
     if (!periodoEfetivo || !d) return false
     if (d.closingPeriodo && d.closingPeriodo === periodoEfetivo) return true
@@ -1843,18 +354,16 @@ export default function VisaoGeral({ data }) {
     return false
   }, [periodoEfetivo])
 
-  // Clique no gráfico: sempre grava o closingPeriodo (mensal) para o snapshot/cards funcionarem
   const handleChartClick = useCallback((event) => {
     if (!event?.points?.[0]?.x) return
     const clickedLabel = event.points[0].x
-    // Procura o ponto correspondente em qualquer série para pegar o closingPeriodo
     const series = timeSeriesAgg.total || []
     const point = series.find(d => d.periodo === clickedLabel)
     const periodoParaSnapshot = point?.closingPeriodo || clickedLabel
     dispatch({ type: 'SET_PERIODO_ATIVO', payload: periodoParaSnapshot })
   }, [dispatch, timeSeriesAgg.total])
 
-  // Ao mudar a granularidade, seleciona automaticamente o ÚLTIMO período disponível
+  // Ao mudar granularidade, seleciona o último período
   useEffect(() => {
     const series = timeSeriesAgg.total || []
     if (!series.length) return
@@ -1864,7 +373,7 @@ export default function VisaoGeral({ data }) {
       dispatch({ type: 'SET_PERIODO_ATIVO', payload: closing })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [granularidade]) // só reage à mudança de granularidade
+  }, [granularidade])
 
   const maxValorGlobal = useMemo(() => {
     let m = 10
@@ -1888,8 +397,11 @@ export default function VisaoGeral({ data }) {
   }
 
   const chartShapes = useMemo(() => getChartShapes('total', 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.total, periodoEfetivo, isPeriodSelected])
-  const chartShapesSkus = useMemo(() => getChartShapes('skus', abaSkus === 'duplicados' ? 'rgba(241, 196, 15, 1)' : 'rgba(245, 130, 32, 1)'), [timeSeriesAgg.skus, periodoEfetivo, abaSkus, isPeriodSelected])
-  
+  const chartShapesSkus = useMemo(
+    () => getChartShapes('skus', abaSkus === 'duplicados' ? 'rgba(241, 196, 15, 1)' : 'rgba(245, 130, 32, 1)'),
+    [timeSeriesAgg.skus, periodoEfetivo, abaSkus, isPeriodSelected]
+  )
+
   const chartShapesGiro = useMemo(() => {
     if (!periodoEfetivo || !giroCoberturaTempo.length) return []
     const index = giroCoberturaTempo.findIndex((d) => d.periodo === periodoEfetivo)
@@ -1900,73 +412,115 @@ export default function VisaoGeral({ data }) {
     ]
   }, [giroCoberturaTempo, periodoEfetivo])
 
-  const chartAnnotations = useMemo(() => {
-    let anns = []
-    const createAnns = (dataArr, color, yOffset) => dataArr.map(d => {
-      const isSelected = isPeriodSelected(d)
-      return {
-        x: d.periodo, 
-        y: d.valor, 
-        text: `<b>${fmtValorCurto(d.valor)}</b>`, 
-        showarrow: true, 
-        arrowhead: 0, 
-        arrowcolor: 'rgba(0,0,0,0)',
-        ax: 0, 
-        ay: yOffset, 
-        font: { size: 10, color: isSelected ? '#080808' : '#ffffff', family: 'Inter' }, 
-        bgcolor: isSelected ? color : 'rgba(22, 22, 22, 0.85)', 
-        bordercolor: color, 
-        borderwidth: 1, 
-        borderpad: 4,
-      }
-    })
-    if (vis.total) anns.push(...createAnns(timeSeriesAgg.total, '#f58220', -22))
-    if (vis.operacional) anns.push(...createAnns(timeSeriesAgg.operacional, '#3498db', 24))
-    if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, '#e74c3c', -22))
-    if (vis.obsoleto) anns.push(...createAnns(timeSeriesAgg.obsoleto, '#9b59b6', 24))
-    if (vis.obra) anns.push(...createAnns(timeSeriesAgg.obra, '#1abc9c', -22))
-    if (vis.insumo) anns.push(...createAnns(timeSeriesAgg.insumo, '#f1c40f', 24))
-    return anns
-  }, [timeSeriesAgg, vis, periodoEfetivo])
+  // -------------------------------------------------------------------------
+  // RESET DE FILTROS
+  // -------------------------------------------------------------------------
+  const handleResetFiltros = useCallback(() => {
+    dispatch({ type: 'SET_TIPOS_ESTOQUE', payload: [] })
+    dispatch({ type: 'SET_ESCOPOS', payload: [] })
+    dispatch({ type: 'SET_UNIDADES', payload: [] })
+    dispatch({ type: 'SET_FIELD', field: 'regioesSel', payload: [] })
+    dispatch({ type: 'SET_FIELD', field: 'segmentosSel', payload: [] })
 
-  const sumRanking = useMemo(() => rankingUnidadeAtivo.reduce((acc, curr) => acc + curr.valor, 0), [rankingUnidadeAtivo])
-  const maxValRanking = useMemo(() => Math.max(...rankingUnidadeAtivo.map((d) => d.valor), 1), [rankingUnidadeAtivo])
-  const colorMapRanking = { total: '#f58220', operacional: '#3498db', critico: '#e74c3c', obsoleto: '#9b59b6', obra: '#1abc9c', insumo: '#f1c40f' };
-  const activeRankColor = colorMapRanking[abaRankingUnidade] || '#f58220';
-
-  const plotDataRanking = useMemo(() => [
-    {
-      type: 'bar', orientation: 'h',
-      y: rankingUnidadeAtivo.map((d) => d.unidade),
-      x: rankingUnidadeAtivo.map(() => maxValRanking * 1.3),
-      marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
-      hoverinfo: 'none',
-      showlegend: false
-    },
-    {
-      type: 'bar', orientation: 'h',
-      y: rankingUnidadeAtivo.map((d) => d.unidade),
-      x: rankingUnidadeAtivo.map((d) => d.valor),
-      cliponaxis: false,
-      textposition: 'outside',
-      text: rankingUnidadeAtivo.map((d) => {
-        const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
-        const rawText = fmtValorCurto(d.valor)
-        const pct = sumRanking > 0 ? ((d.valor / sumRanking) * 100).toFixed(1) : 0
-        const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
-        const badgeColor = isSelected ? activeRankColor : 'rgba(140, 155, 165, 0.3)'
-        return `<span style="color: ${textColor};">${rawText}</span><span style="color: transparent;">__</span><span style="color: ${badgeColor}; font-size: 10px; font-weight: 800;">[ ${pct}% ]</span>`
-      }),
-      textfont: { size: 10, family: 'Inter', weight: 600 },
-      marker: {
-        color: activeRankColor,
-        opacity: rankingUnidadeAtivo.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.2),
-        line: { color: '#080808', width: 1 }
-      },
-      hoverinfo: 'none'
+    if (anoOpcoes && anoOpcoes.length > 0) {
+      dispatch({ type: 'SET_ANOS', payload: [String(anoOpcoes[anoOpcoes.length - 1])] })
+    } else {
+      dispatch({ type: 'SET_ANOS', payload: [] })
     }
-  ], [rankingUnidadeAtivo, selectedBarraRanking, maxValRanking, activeRankColor, sumRanking])
 
+    dispatch({ type: 'SET_PERIODO_ATIVO', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraRanking', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraExposicao', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCritico', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObsoleto', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraObra', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraCompraConsumo', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraVariacao', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'selectedBarraSkus', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'filtroMesParado', payload: null })
+    dispatch({ type: 'SET_FIELD', field: 'granularidade', payload: 'mensal' })
+
+    setVis({ total: true, operacional: false, critico: false, obsoleto: false, obra: false, insumo: false })
+  }, [dispatch, anoOpcoes])
+
+  // -------------------------------------------------------------------------
+  // FLAGS DE CARD ATIVO
+  // -------------------------------------------------------------------------
+  const isRankingSelected = activeCard === 'ranking_unidade'
+  const isExposicaoSelected = activeCard === 'composicao_estoque'
+  const isCompraConsumoSelected = activeCard === 'compra_consumo_unidade'
+  const isVariacaoSelected = activeCard === 'variacao_estoque'
+  const isSkusUnidadeSelected = activeCard === 'skus_unidade'
+
+  const tabStyles = {
+    total: 'bg-[#f58220]/20 text-[#f58220] border-[#f58220]/50 shadow-[0_0_10px_rgba(245,130,32,0.15)]',
+    operacional: 'bg-[#3498db]/20 text-[#3498db] border-[#3498db]/50 shadow-[0_0_10px_rgba(52,152,219,0.15)]',
+    critico: 'bg-[#e74c3c]/20 text-[#e74c3c] border-[#e74c3c]/50 shadow-[0_0_10px_rgba(231,76,60,0.15)]',
+    obsoleto: 'bg-[#9b59b6]/20 text-[#9b59b6] border-[#9b59b6]/50 shadow-[0_0_10px_rgba(155,89,182,0.15)]',
+    obra: 'bg-[#1abc9c]/20 text-[#1abc9c] border-[#1abc9c]/50 shadow-[0_0_10px_rgba(26,188,156,0.15)]',
+    insumo: 'bg-[#f1c40f]/20 text-[#f1c40f] border-[#f1c40f]/50 shadow-[0_0_10px_rgba(241,196,15,0.15)]'
+  }
+
+  // -------------------------------------------------------------------------
+  // COLUNAS DAS TABELAS
+  // -------------------------------------------------------------------------
+  const colsMaioresValores = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[220px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'ge', label: 'GE', className: 'text-muted font-medium text-center' },
+    { key: 'itemCritico', label: 'Crítico', align: 'center', render: (i) => (
+      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${i.itemCritico === 'Sim' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : 'bg-dark-500/20 text-muted border-dark-500/30'}`}>
+        {i.itemCritico}
+      </span>
+    )},
+    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
+    { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
+  ], [])
+
+  const colsDuplicados = useMemo(() => [
+    { key: 'nome', label: 'Nome do Produto (Agrupado)', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
+    { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (
+      <span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>
+    )},
+    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[240px] truncate', title: (i) => i.skus_lista },
+    { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'valor', label: 'Valor Imobilizado', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
+  ], [])
+
+  const colsComprasSemConsumo = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[140px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'flags', label: 'Atributos (Lentes)', align: 'left', render: (i) => (
+      <div className="flex flex-wrap gap-1">
+        {i.flags.critico && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30">Crítico</span>}
+        {i.flags.obsoleto && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30">Obsoleto</span>}
+        {i.flags.obra && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30">Obra</span>}
+        {i.flags.insumo && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">Insumo</span>}
+        {i.flags.op && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30">Operacional</span>}
+      </div>
+    )},
+    { key: 'qtdeComprada', label: 'Qtde Comprada', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.qtdeComprada).toLocaleString('pt-BR') },
+    { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
+    { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-[#2ecc71]', render: (i) => fmtBRL(i.consumido) },
+  ], [])
+
+  const colsParados = useMemo(() => [
+    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
+    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
+    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[220px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
+    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
+    { key: 'valor', label: 'Valor Parado', align: 'right', className: 'font-mono text-[#f58220] font-bold', render: (i) => fmtBRL(i.valor) },
+    { key: 'mesesParado', label: 'Meses Parado', align: 'center', render: (i) => (
+      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-accent/15 text-accent border-accent/30">{i.mesesParado} meses</span>
+    )},
+  ], [])
+
+  // -------------------------------------------------------------------------
+  // HELPER DE BARRAS HORIZONTAIS INTERATIVAS
+  // -------------------------------------------------------------------------
   const makeInteractiveHBar = useCallback((items, color, selectedBar, fieldName) => {
     if (!items.length) return <p className="text-muted text-sm text-center py-10">Sem dados</p>
     const maxValItems = Math.max(...items.map((d) => d.valor ?? d.total), 1)
@@ -2005,14 +559,14 @@ export default function VisaoGeral({ data }) {
           ]}
           layout={{
             ...PLOT_LAYOUT,
-            barmode: 'overlay', 
+            barmode: 'overlay',
             bargap: 0.4,
             height: Math.max(300, items.length * 32),
             margin: { l: 115, r: 80, t: 10, b: 10 },
             xaxis: { showgrid: false, showticklabels: false, zeroline: false, range: [0, maxValItems * 1.25] },
             yaxis: {
               showgrid: true,
-              gridcolor: '#4A4A4A', 
+              gridcolor: '#4A4A4A',
               tickson: 'boundaries',
               tickmode: 'array',
               tickvals: items.map((d) => d.unidade),
@@ -2021,8 +575,8 @@ export default function VisaoGeral({ data }) {
                 const textColor = isSelected ? '#d1d8df' : 'rgba(140, 155, 165, 0.3)'
                 return `<span style="color: ${textColor};">${d.unidade}&nbsp;&nbsp;</span>`
               }),
-              ticklen: 0, 
-              tickcolor: 'rgba(0,0,0,0)', 
+              ticklen: 0,
+              tickcolor: 'rgba(0,0,0,0)',
               tickpad: 8,
               automargin: true
             }
@@ -2040,73 +594,78 @@ export default function VisaoGeral({ data }) {
     )
   }, [dispatch])
 
-  const colsMaioresValores = useMemo(() => [
-    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
-    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[220px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
-    { key: 'ge', label: 'GE', className: 'text-muted font-medium text-center' },
-    { key: 'itemCritico', label: 'Crítico', align: 'center', render: (i) => (
-        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${i.itemCritico === 'Sim' ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30' : 'bg-dark-500/20 text-muted border-dark-500/30'}`}>
-          {i.itemCritico}
-        </span>
-      )
+
+  const chartAnnotations = useMemo(() => {
+    let anns = []
+    const createAnns = (dataArr, color, yOffset) => dataArr.map(d => {
+      const isSelected = isPeriodSelected(d)
+      return {
+        x: d.periodo, 
+        y: d.valor, 
+        text: `<b>${fmtValorCurto(d.valor)}</b>`, 
+        showarrow: true, 
+        arrowhead: 0, 
+        arrowcolor: 'rgba(0,0,0,0)',
+        ax: 0, 
+        ay: yOffset, 
+        font: { size: 10, color: isSelected ? '#080808' : '#ffffff', family: 'Inter' }, 
+        bgcolor: isSelected ? color : 'rgba(22, 22, 22, 0.85)', 
+        bordercolor: color, 
+        borderwidth: 1, 
+        borderpad: 4,
+      }
+    })
+    if (vis.total) anns.push(...createAnns(timeSeriesAgg.total, '#f58220', -22))
+    if (vis.operacional) anns.push(...createAnns(timeSeriesAgg.operacional, '#3498db', 24))
+    if (vis.critico) anns.push(...createAnns(timeSeriesAgg.critico, '#e74c3c', -22))
+    if (vis.obsoleto) anns.push(...createAnns(timeSeriesAgg.obsoleto, '#9b59b6', 24))
+    if (vis.obra) anns.push(...createAnns(timeSeriesAgg.obra, '#1abc9c', -22))
+    if (vis.insumo) anns.push(...createAnns(timeSeriesAgg.insumo, '#f1c40f', 24))
+    return anns
+  }, [timeSeriesAgg, vis, periodoEfetivo, isPeriodSelected])
+
+  const sumRanking = useMemo(() => rankingUnidadeAtivo.reduce((acc, curr) => acc + curr.valor, 0), [rankingUnidadeAtivo])
+  const maxValRanking = useMemo(() => Math.max(...rankingUnidadeAtivo.map((d) => d.valor), 1), [rankingUnidadeAtivo])
+  const colorMapRanking = { total: '#f58220', operacional: '#3498db', critico: '#e74c3c', obsoleto: '#9b59b6', obra: '#1abc9c', insumo: '#f1c40f' }
+  const activeRankColor = colorMapRanking[abaRankingUnidade] || '#f58220'
+
+  const plotDataRanking = useMemo(() => [
+    {
+      type: 'bar', orientation: 'h',
+      y: rankingUnidadeAtivo.map((d) => d.unidade),
+      x: rankingUnidadeAtivo.map(() => maxValRanking * 1.3),
+      marker: { color: 'rgba(255, 255, 255, 0.01)' }, 
+      hoverinfo: 'none',
+      showlegend: false
     },
-    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
-    { key: 'precoMedio', label: 'Preço Médio', align: 'right', className: 'font-mono text-accent', render: (i) => fmtBRL(i.precoMedio) },
-    { key: 'valor', label: 'Valor em Estoque', align: 'right', className: 'font-mono text-[#3498db] font-bold', render: (i) => fmtBRL(i.valor) },
-  ], [])
+    {
+      type: 'bar', orientation: 'h',
+      y: rankingUnidadeAtivo.map((d) => d.unidade),
+      x: rankingUnidadeAtivo.map((d) => d.valor),
+      cliponaxis: false,
+      textposition: 'outside',
+      text: rankingUnidadeAtivo.map((d) => {
+        const isSelected = !selectedBarraRanking || d.unidade === selectedBarraRanking
+        const rawText = fmtValorCurto(d.valor)
+        const pct = sumRanking > 0 ? ((d.valor / sumRanking) * 100).toFixed(1) : 0
+        const textColor = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'
+        const badgeColor = isSelected ? activeRankColor : 'rgba(140, 155, 165, 0.3)'
+        return `<span style="color: ${textColor};">${rawText}</span><span style="color: transparent;">__</span><span style="color: ${badgeColor}; font-size: 10px; font-weight: 800;">[ ${pct}% ]</span>`
+      }),
+      textfont: { size: 10, family: 'Inter', weight: 600 },
+      marker: {
+        color: activeRankColor,
+        opacity: rankingUnidadeAtivo.map((d) => (!selectedBarraRanking || d.unidade === selectedBarraRanking) ? 1 : 0.2),
+        line: { color: '#080808', width: 1 }
+      },
+      hoverinfo: 'none'
+    }
+  ], [rankingUnidadeAtivo, selectedBarraRanking, maxValRanking, activeRankColor, sumRanking])
 
-  const colsDuplicados = useMemo(() => [
-    { key: 'nome', label: 'Nome do Produto (Agrupado)', className: 'text-white font-medium max-w-[220px] truncate', title: (i) => i.nome },
-    { key: 'qtd_skus', label: 'Qtd SKUs', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md text-[10px] font-bold shadow-sm border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">{i.qtd_skus} SKUs</span>) },
-    { key: 'skus_lista', label: 'Lista de SKUs', className: 'text-[#f1c40f] font-mono text-[10px] max-w-[240px] truncate', title: (i) => i.skus_lista },
-    { key: 'quantidade', label: 'Qtd Fís.', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
-    { key: 'valor', label: 'Valor Imobilizado', align: 'right', className: 'font-mono text-[#f1c40f] font-bold', render: (i) => fmtBRL(i.valor) },
-  ], [])
 
-  const colsComprasSemConsumo = useMemo(() => [
-    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
-    { key: 'codigo', label: 'Código SKU', className: 'text-[#e74c3c] font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[140px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
-    { key: 'flags', label: 'Atributos (Lentes)', align: 'left', render: (i) => (
-        <div className="flex flex-wrap gap-1">
-          {i.flags.critico && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/30">Crítico</span>}
-          {i.flags.obsoleto && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#9b59b6]/15 text-[#9b59b6] border-[#9b59b6]/30">Obsoleto</span>}
-          {i.flags.obra && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#1abc9c]/15 text-[#1abc9c] border-[#1abc9c]/30">Obra</span>}
-          {i.flags.insumo && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#f1c40f]/15 text-[#f1c40f] border-[#f1c40f]/30">Insumo</span>}
-          {i.flags.op && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold border bg-[#3498db]/15 text-[#3498db] border-[#3498db]/30">Operacional</span>}
-        </div>
-      )
-    },
-    { key: 'qtdeComprada', label: 'Qtde Comprada', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.qtdeComprada).toLocaleString('pt-BR') },
-    { key: 'comprado', label: 'Valor Comprado', align: 'right', className: 'font-mono text-[#e74c3c] font-bold', render: (i) => fmtBRL(i.comprado) },
-    { key: 'consumido', label: 'Valor Consumido', align: 'right', className: 'font-mono text-muted font-bold', render: (i) => fmtBRL(i.consumido) },
-  ], [])
-
-  const colsParados = useMemo(() => [
-    { key: 'unidade', label: 'Unidade', className: 'text-white font-medium' },
-    { key: 'codigo', label: 'Código SKU', className: 'text-accent font-mono' },
-    { key: 'nome', label: 'Nome do Produto', className: 'text-white truncate max-w-[280px]', title: (i) => i.nome, render: (i) => i.nome || '—' },
-    { key: 'quantidade', label: 'Quantidade', align: 'right', className: 'font-mono text-white', render: (i) => Number(i.quantidade).toLocaleString('pt-BR') },
-    { key: 'valor', label: 'Valor Parado', align: 'right', className: 'font-mono text-[#2ecc71] font-bold', render: (i) => fmtBRL(i.valor) },
-    { key: 'mesesParado', label: 'Meses Parado', align: 'center', render: (i) => (<span className="px-2.5 py-1 rounded-md bg-[#2A1610] text-[#f58220] border border-[#f58220]/30 text-[10px] font-bold shadow-sm group-hover:bg-[#f58220]/15 transition-colors">{i.mesesParado} Meses</span>) },
-  ], [])
-
-  const isRankingSelected = activeCard === 'ranking_unidade'
-  const isExposicaoSelected = activeCard === 'composicao_estoque'
-  const isCompraConsumoSelected = activeCard === 'compra_consumo_unidade'
-  const isVariacaoSelected = activeCard === 'variacao_estoque'
-  const isSkusUnidadeSelected = activeCard === 'skus_unidade'
-
-  const tabStyles = {
-    total: 'bg-[#f58220]/20 text-[#f58220] border-[#f58220]/50 shadow-[0_0_10px_rgba(245,130,32,0.15)]',
-    operacional: 'bg-[#3498db]/20 text-[#3498db] border-[#3498db]/50 shadow-[0_0_10px_rgba(52,152,219,0.15)]',
-    critico: 'bg-[#e74c3c]/20 text-[#e74c3c] border-[#e74c3c]/50 shadow-[0_0_10px_rgba(231,76,60,0.15)]',
-    obsoleto: 'bg-[#9b59b6]/20 text-[#9b59b6] border-[#9b59b6]/50 shadow-[0_0_10px_rgba(155,89,182,0.15)]',
-    obra: 'bg-[#1abc9c]/20 text-[#1abc9c] border-[#1abc9c]/50 shadow-[0_0_10px_rgba(26,188,156,0.15)]',
-    insumo: 'bg-[#f1c40f]/20 text-[#f1c40f] border-[#f1c40f]/50 shadow-[0_0_10px_rgba(241,196,15,0.15)]'
-  };
-
+  // -------------------------------------------------------------------------
+  // RENDER
+  // -------------------------------------------------------------------------
   return (
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       <style>{`
