@@ -16,7 +16,7 @@ import {
 import * as XLSX from 'xlsx'
 
 // COMPONENTES FILHOS E HOOK EXTERNO
-import { useInventoryState } from './useInventoryState'
+import { useInventoryState } from '../hooks/useInventoryState'
 import { FullScreenPortal } from './FullScreenPortal.jsx'
 import { CyberMultiSelect } from './CyberMultiSelect.jsx'
 import { ExecutiveCard } from './ExecutiveCard.jsx'
