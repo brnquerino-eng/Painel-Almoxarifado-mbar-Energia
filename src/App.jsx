@@ -3,6 +3,7 @@ import Header from './components/Header'
 import LoadingScreen from './components/LoadingScreen'
 import VisaoGeral from './components/VisaoGeral'
 import PainelInventarios from './components/PainelInventarios'
+import PergunteAoEstoque from './components/PergunteAoEstoque'
 import { useEstoqueData } from './hooks/useEstoqueData'
 import { useInventarioData } from './hooks/useInventarioData'
 
@@ -113,19 +114,7 @@ export default function App() {
             <div className="animate-fade-in">
               {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
               {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
-              
-              {/* Telas Futuras Preparadas */}
-              {activeTab === 'pergunte' && (
-                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                  <div className="bg-[#111] p-10 rounded-3xl border border-dashed border-[#2A2A2A] max-w-lg w-full">
-                    <span className="text-4xl mb-4 block">✨</span>
-                    <h2 className="text-xl font-bold text-white mb-2">Pergunte ao Estoque</h2>
-                    <p className="text-gray-500 text-sm">
-                      Módulo de inteligência artificial generativa em desenvolvimento. Em breve, você poderá consultar seu banco de dados em linguagem natural.
-                    </p>
-                  </div>
-                </div>
-              )}
+              {activeTab === 'pergunte' && <PergunteAoEstoque />}
 
               {activeTab === 'resumo' && (
                 <div className="flex flex-col items-center justify-center h-[60vh] text-center">
