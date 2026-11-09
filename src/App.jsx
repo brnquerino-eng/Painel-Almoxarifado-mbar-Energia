@@ -91,7 +91,7 @@ export default function App() {
         <main className="flex-1 p-6 lg:p-8">
           
           {(errorEstoque || errorInventario) && (
-            <div className="bg-red-900/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
+            <div className="bg-[#990000]/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
               <strong>Erro ao carregar dados:</strong>{' '}
               {errorEstoque || errorInventario}
             </div>
@@ -114,7 +114,9 @@ export default function App() {
             <div className="animate-fade-in">
               {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
               {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
-              {activeTab === 'pergunte' && <PergunteAoEstoque />}
+              {activeTab === 'pergunte' && (
+                <PergunteAoEstoque data={estoqueData} loading={loadingEstoque} />
+              )}
 
               {activeTab === 'resumo' && (
                 <div className="flex flex-col items-center justify-center h-[60vh] text-center">
