@@ -10,10 +10,17 @@ const SUGGESTIONS = [
   "Resumo executivo do estoque por segmento e região"
 ];
 
+// Modelos Groq atualizados (novembro 2026) - removidos os deprecados
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant'
+];
+
+// Modelos Gemini atualizados e estáveis
 const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-1.5-flash',
-  'gemini-2.0-flash'
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.6-flash'
 ];
 
 export default function PergunteAoEstoque({ data = [], loading = false }) {
@@ -40,7 +47,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Pré-agrega os dados gerais do estoque para otimizar pesquisas
+  // Pré-agrega os dados gerais do estoque para otimizar pesquisas locais e externas
   const contextoResumido = useMemo(() => {
     if (!data || data.length === 0) return null;
 
@@ -122,6 +129,22 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     };
   }, [data]);
 
+  // Versão enxuta do contexto para enviar às APIs (evita timeout e excesso de tokens)
+  const contextoParaAPI = useMemo(() => {
+    if (!contextoResumido) return null;
+
+    return {
+      estatisticasGerais: contextoResumido.estatisticasGerais,
+      top5ItensMaiorValor: contextoResumido.top10ItensMaiorValor.slice(0, 5),
+      resumoPorUnidade: Object.fromEntries(
+        Object.entries(contextoResumido.resumoPorUnidade)
+          .sort((a, b) => b[1].saldo - a[1].saldo)
+          .slice(0, 8)
+      ),
+      amostraItensCriticos: contextoResumido.amostraItensCriticos.slice(0, 5)
+    };
+  }, [contextoResumido]);
+
   const formatarMoeda = (valor) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
   };
@@ -148,7 +171,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     let mes = null;
     let ano = null;
 
-    // Busca padrão "10/2026" ou "mês 10/2026"
+    // Busca formato "10/2026" ou "mês 10/2026"
     const matchSlash = p.match(/(?:mês|mes)?\s*(\d{1,2})\/(\d{4})/);
     if (matchSlash) {
       mes = parseInt(matchSlash[1], 10);
@@ -169,7 +192,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes, ano };
   };
 
-  // Motor Analytics Local: Responde instantaneamente e com exatidão matemática
+  // Motor Analytics Local: Responde instantaneamente em 0ms com exatidão matemática
   const processarConsultaLocal = (pergunta) => {
     if (!data || data.length === 0 || !contextoResumido) return null;
     const p = pergunta.toLowerCase();
@@ -303,53 +326,75 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return null;
   };
 
-  // Suporte a API do Groq (Llama 3.3 70B)
+  // Suporte a API da Groq com fallback e timeout mais generoso
   const consultarGroqAPI = async (promptSistema, perguntaUsuario) => {
     const url = 'https://api.groq.com/openai/v1/chat/completions';
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${groqApiKey}`
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: promptSistema },
-          { role: 'user', content: perguntaUsuario }
-        ],
-        temperature: 0.2
-      })
-    });
+    for (const model of GROQ_MODELS) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 segundos
 
-    clearTimeout(timeoutId);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${groqApiKey}`
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: promptSistema },
+              { role: 'user', content: perguntaUsuario }
+            ],
+            temperature: 0.2,
+            max_tokens: 1024
+          })
+        });
 
-    if (!response.ok) {
-      throw new Error(`Groq HTTP Error: ${response.status}`);
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const dataRes = await response.json();
+          const content = dataRes.choices?.[0]?.message?.content;
+          if (content) return content;
+        } else {
+          const errorText = await response.text();
+          console.warn(`Groq modelo ${model} → HTTP ${response.status}:`, errorText);
+
+          // Se a chave estiver inválida, não adianta tentar os outros modelos
+          if (response.status === 401 || response.status === 403) {
+            console.error('Chave da Groq inválida ou sem permissão');
+            return null;
+          }
+        }
+      } catch (e) {
+        const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
+        console.warn(`Erro na tentativa com Groq (${model}):`, msg);
+      }
     }
-
-    const dataRes = await response.json();
-    return dataRes.choices?.[0]?.message?.content || null;
+    return null;
   };
 
-  // Suporte a API do Gemini com fallback entre modelos ativos
-  const consultarGeminiAPI = async (promptSistema) => {
+  // Suporte a API do Gemini como fallback secundário
+  const consultarGeminiAPI = async (promptCompleto) => {
     for (const model of GEMINI_MODELS) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 segundos
 
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            contents: [{ parts: [{ text: promptSistema }] }]
+            contents: [{ parts: [{ text: promptCompleto }] }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 1024
+            }
           })
         });
 
@@ -359,9 +404,18 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           const result = await response.json();
           const txt = result.candidates?.[0]?.content?.parts?.[0]?.text;
           if (txt) return txt;
+        } else {
+          const errorText = await response.text();
+          console.warn(`Gemini modelo ${model} → HTTP ${response.status}:`, errorText);
+
+          if (response.status === 401 || response.status === 403) {
+            console.error('Chave do Gemini inválida ou sem permissão');
+            return null;
+          }
         }
       } catch (e) {
-        // Tenta o próximo modelo
+        const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
+        console.warn(`Erro na tentativa com Gemini (${model}):`, msg);
       }
     }
     return null;
@@ -383,7 +437,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     setIsLoading(true);
 
     try {
-      // 1. Prioridade Maxima: Tenta responder de forma deterministica no Motor Local
+      // 1. Passo 1: Executa Motor Local Determinístico (0ms)
       const respostaLocal = processarConsultaLocal(query);
       
       if (respostaLocal) {
@@ -395,27 +449,25 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
         };
         setMessages((prev) => [...prev, botMsg]);
       } else {
-        // 2. Se for consulta complexa, recorre as APIs externas
-        const promptSistema = `
-Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
-Responda com clareza, tom executivo e dados consolidados com base no resumo do estoque:
-${JSON.stringify(contextoResumido)}
-`;
+        // 2. Passo 2: Se for consulta genérica/complexa, aciona APIs externas
+        // Usamos o contexto enxuto para reduzir tokens e latência
+        const promptSistema = `Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
+Responda com clareza, tom executivo e dados consolidados com base no resumo do estoque abaixo.
+Use apenas os dados fornecidos. Se não souber, diga que a informação não está disponível no resumo atual.
+
+RESUMO DO ESTOQUE:
+${JSON.stringify(contextoParaAPI, null, 2)}`;
 
         let responseText = null;
 
-        // Tenta o Groq se houver chave configurada
+        // Tenta Groq se houver chave configurada
         if (groqApiKey && !groqApiKey.includes('SUA_CHAVE')) {
-          try {
-            responseText = await consultarGroqAPI(promptSistema, query);
-          } catch (e) {
-            console.warn('Falha no Groq, alternando para Gemini...', e);
-          }
+          responseText = await consultarGroqAPI(promptSistema, query);
         }
 
-        // Se não usou Groq ou falhou, tenta o Gemini
+        // Se Groq não esteve disponível ou falhou, tenta Gemini
         if (!responseText && geminiApiKey && !geminiApiKey.includes('SUA_CHAVE')) {
-          responseText = await consultarGeminiAPI(`${promptSistema}\nPergunta: "${query}"`);
+          responseText = await consultarGeminiAPI(`${promptSistema}\n\nPergunta do usuário: "${query}"`);
         }
 
         if (responseText) {
@@ -427,7 +479,7 @@ ${JSON.stringify(contextoResumido)}
           };
           setMessages((prev) => [...prev, botMsg]);
         } else {
-          throw new Error('Servidores de IA temporariamente indisponíveis. Tente fazer consultas sobre valores por mês (ex: mês 10/2026), curva ABC ou top itens.');
+          throw new Error('Servidores de IA temporariamente indisponíveis. Tente realizar consultas sobre valores por mês (ex: mês 10/2026), curva ABC ou maiores itens.');
         }
       }
     } catch (error) {
