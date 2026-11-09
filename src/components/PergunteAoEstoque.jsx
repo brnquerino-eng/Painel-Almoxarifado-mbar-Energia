@@ -1,18 +1,16 @@
 // src/components/PergunteAoEstoque.jsx
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Bot, User, Sparkles, Trash2, RefreshCw, HelpCircle, ArrowRight, CheckCircle2, Database } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Trash2, RefreshCw, HelpCircle, ArrowRight, CheckCircle2, Database, Calendar } from 'lucide-react';
 
 const SUGGESTIONS = [
+  "Qual o valor total do estoque no mês 10 de 2026?",
   "Quais são os 5 itens com maior valor em estoque?",
   "Quais unidades possuem materiais em estado crítico?",
-  "Qual o valor total acumulado no estoque e divisão por unidade?",
   "Resumo executivo do estoque por segmento e região"
 ];
 
-// Fila de modelos priorizando o gemini-3.8-flash e usando demais versões como fallback de resiliência
 const GEMINI_MODELS = [
-  'gemini-3.8-flash',
   'gemini-2.5-flash',
   'gemini-1.5-flash',
   'gemini-2.0-flash'
@@ -31,7 +29,8 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -41,7 +40,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Pré-agrega os dados do estoque para cálculos locais e envio à IA
+  // Pré-agrega os dados gerais do estoque para otimizar pesquisas
   const contextoResumido = useMemo(() => {
     if (!data || data.length === 0) return null;
 
@@ -127,16 +126,124 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
   };
 
-  // Motor Analytics Local: Responde instantaneamente perguntas padrão sem depender da API
-  const processarConsultaLocal = (pergunta) => {
-    if (!contextoResumido) return null;
-    const p = pergunta.toLowerCase();
+  // Auxiliar para extrair mês e ano da pergunta do usuário
+  const extrairMesEAno = (prompt) => {
+    const p = prompt.toLowerCase();
+    
+    const meses = {
+      'janeiro': 1, 'jan': 1, '01': 1, '1': 1,
+      'fevereiro': 2, 'fev': 2, '02': 2, '2': 2,
+      'março': 3, 'marco': 3, 'mar': 3, '03': 3, '3': 3,
+      'abril': 4, 'abr': 4, '04': 4, '4': 4,
+      'maio': 5, 'mai': 5, '05': 5, '5': 5,
+      'junho': 6, 'jun': 6, '06': 6, '6': 6,
+      'julho': 7, 'jul': 7, '07': 7, '7': 7,
+      'agosto': 8, 'ago': 8, '08': 8, '8': 8,
+      'setembro': 9, 'set': 9, '09': 9, '9': 9,
+      'outubro': 10, 'out': 10, '10': 10,
+      'novembro': 11, 'nov': 11, '11': 11,
+      'dezembro': 12, 'dez': 12, '12': 12
+    };
 
-    // 1. Consulta de Valor Total do Estoque
+    let mes = null;
+    let ano = null;
+
+    // Busca padrão "10/2026" ou "mês 10/2026"
+    const matchSlash = p.match(/(?:mês|mes)?\s*(\d{1,2})\/(\d{4})/);
+    if (matchSlash) {
+      mes = parseInt(matchSlash[1], 10);
+      ano = parseInt(matchSlash[2], 10);
+    } else {
+      // Busca ano de 4 dígitos (ex: 2026)
+      const matchAno = p.match(/\b(202[0-9])\b/);
+      if (matchAno) ano = parseInt(matchAno[1], 10);
+
+      // Busca indicação de mês (ex: "mês 10", "mes 10", "outubro")
+      const matchMes = p.match(/mês\s*(\d{1,2})|mes\s*(\d{1,2})|\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/);
+      if (matchMes) {
+        const termo = matchMes[1] || matchMes[2] || matchMes[3];
+        if (termo && meses[termo]) mes = meses[termo];
+      }
+    }
+
+    return { mes, ano };
+  };
+
+  // Motor Analytics Local: Responde instantaneamente e com exatidão matemática
+  const processarConsultaLocal = (pergunta) => {
+    if (!data || data.length === 0 || !contextoResumido) return null;
+    const p = pergunta.toLowerCase();
+    const { mes, ano } = extrairMesEAno(pergunta);
+
+    // 1. Consulta Filtrada por Mês e/ou Ano Especificado
+    if (mes !== null || ano !== null) {
+      const itensFiltrados = data.filter(item => {
+        const itemMes = Number(item.mes_referencia);
+        const itemAno = Number(item.ano_referencia);
+        
+        const bateMes = mes ? itemMes === mes : true;
+        const bateAno = ano ? itemAno === ano : true;
+        
+        return bateMes && bateAno;
+      });
+
+      const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
+      const anoStr = ano ? String(ano) : 'Todos os Anos';
+
+      if (itensFiltrados.length === 0) {
+        return `📅 **Consulta do Período ${nomeMesStr}/${anoStr}:**\n\nNão foram encontrados registros no banco de dados para a competência solicitada (Mês: ${nomeMesStr} | Ano: ${anoStr}).`;
+      }
+
+      let valTotalCompetencia = 0;
+      let valEntradasCompetencia = 0;
+      let valSaidasCompetencia = 0;
+      const porUnidadeFiltrado = {};
+
+      itensFiltrados.forEach(item => {
+        const valSaldo = Number(item.valor_saldo_atual) || 0;
+        const valEntrada = Number(item.valor_entrada_compras) || 0;
+        const valSaida = Number(item.valor_saida_cons_interno) || 0;
+
+        valTotalCompetencia += valSaldo;
+        valEntradasCompetencia += valEntrada;
+        valSaidasCompetencia += valSaida;
+
+        const und = item.unidade_almoxarifado || 'N/A';
+        if (!porUnidadeFiltrado[und]) porUnidadeFiltrado[und] = 0;
+        porUnidadeFiltrado[und] += valSaldo;
+      });
+
+      const topItemComp = [...itensFiltrados].sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))[0];
+
+      let resposta = `📊 **Fechamento do Estoque — Mês ${nomeMesStr}/${anoStr}**\n\n`;
+      resposta += `• **Valor Total em Saldo:** ${formatarMoeda(valTotalCompetencia)}\n`;
+      resposta += `• **Total de Registros:** ${itensFiltrados.length.toLocaleString('pt-BR')} SKUs\n`;
+      resposta += `• **Entradas (Compras):** ${formatarMoeda(valEntradasCompetencia)}\n`;
+      resposta += `• **Saídas (Consumo Interno):** ${formatarMoeda(valSaidasCompetencia)}\n\n`;
+
+      if (topItemComp) {
+        resposta += `🥇 **Item de Maior Valor na Competência (${nomeMesStr}/${anoStr}):**\n`;
+        resposta += `• **Descrição:** ${topItemComp.nome_produto || 'Produto sem descrição'}\n`;
+        resposta += `• **Código:** ${topItemComp.codigo_produto || 'N/A'} | **Unidade:** ${topItemComp.unidade_almoxarifado || 'N/A'}\n`;
+        resposta += `• **Valor em Saldo:** ${formatarMoeda(topItemComp.valor_saldo_atual)} (Qtd: ${topItemComp.qtde_saldo_atual || 0})\n\n`;
+      }
+
+      resposta += `**Divisão por Unidade no Período:**\n`;
+      Object.entries(porUnidadeFiltrado)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .forEach(([und, val]) => {
+          resposta += `• **${und}:** ${formatarMoeda(val)}\n`;
+        });
+
+      return resposta;
+    }
+
+    // 2. Consulta de Valor Total do Estoque Acumulado
     if ((p.includes('valor') && (p.includes('total') || p.includes('acumulado') || p.includes('estoque'))) || p.includes('quanto vale')) {
       const { valorTotalEstoque, totalRegistros, valorTotalEntradas, valorTotalSaidas } = contextoResumido.estatisticasGerais;
       
-      let resposta = `📊 **Resumo Financeiro do Estoque (Âmbar Energia)**\n\n`;
+      let resposta = `📊 **Resumo Financeiro Geral do Estoque (Âmbar Energia)**\n\n`;
       resposta += `• **Valor Total em Saldo:** ${formatarMoeda(valorTotalEstoque)}\n`;
       resposta += `• **Total de Itens Cadastrados:** ${totalRegistros.toLocaleString('pt-BR')} registros\n`;
       resposta += `• **Entradas (Compras):** ${formatarMoeda(valorTotalEntradas)}\n`;
@@ -153,7 +260,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // 2. Consulta de Top Itens por Valor / Maior Valor
+    // 3. Consulta de Top 5 Itens de Maior Valor
     if (p.includes('maior valor') || p.includes('top 5') || p.includes('5 itens') || p.includes('item de maior')) {
       const top = contextoResumido.top10ItensMaiorValor.slice(0, 5);
       let resposta = `🏆 **Top 5 Itens com Maior Valor em Estoque:**\n\n`;
@@ -167,7 +274,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // 3. Consulta de Materiais Críticos
+    // 4. Consulta de Materiais Críticos
     if (p.includes('crítico') || p.includes('critico') || p.includes('estado crítico')) {
       const { qtdItensCriticos } = contextoResumido.estatisticasGerais;
       let resposta = `⚠️ **Análise de Materiais em Estado Crítico:**\n\n`;
@@ -182,7 +289,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // 4. Resumo por Unidade ou Segmento
+    // 5. Resumo por Unidade
     if (p.includes('unidade') || p.includes('segmento') || p.includes('região') || p.includes('divisão')) {
       let resposta = `🏢 **Divisão do Estoque por Unidade Operacional:**\n\n`;
       Object.entries(contextoResumido.resumoPorUnidade)
@@ -196,22 +303,44 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return null;
   };
 
-  const consultarGeminiAPI = async (perguntaUsuario) => {
-    if (!apiKey || apiKey.includes('SUA_CHAVE')) {
-      return "⚠️ **Chave de API não configurada na Vercel.** Por favor, verifique a variável `VITE_GEMINI_API_KEY` nas configurações da Vercel.";
+  // Suporte a API do Groq (Llama 3.3 70B)
+  const consultarGroqAPI = async (promptSistema, perguntaUsuario) => {
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${groqApiKey}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: promptSistema },
+          { role: 'user', content: perguntaUsuario }
+        ],
+        temperature: 0.2
+      })
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Groq HTTP Error: ${response.status}`);
     }
 
-    const promptSistema = `
-Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
-Responda de forma clara, executiva e objetiva com base no resumo do estoque:
-${JSON.stringify(contextoResumido)}
+    const dataRes = await response.json();
+    return dataRes.choices?.[0]?.message?.content || null;
+  };
 
-Pergunta: "${perguntaUsuario}"
-`;
-
+  // Suporte a API do Gemini com fallback entre modelos ativos
+  const consultarGeminiAPI = async (promptSistema) => {
     for (const model of GEMINI_MODELS) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -232,11 +361,10 @@ Pergunta: "${perguntaUsuario}"
           if (txt) return txt;
         }
       } catch (e) {
-        // Tenta o próximo modelo da fila
+        // Tenta o próximo modelo
       }
     }
-
-    throw new Error('Não foi possível conectar ao servidor de IA no momento.');
+    return null;
   };
 
   const handleSend = async (textToSend) => {
@@ -255,7 +383,7 @@ Pergunta: "${perguntaUsuario}"
     setIsLoading(true);
 
     try {
-      // 1. Tenta responder instantaneamente pelo motor de cálculo local
+      // 1. Prioridade Maxima: Tenta responder de forma deterministica no Motor Local
       const respostaLocal = processarConsultaLocal(query);
       
       if (respostaLocal) {
@@ -267,15 +395,40 @@ Pergunta: "${perguntaUsuario}"
         };
         setMessages((prev) => [...prev, botMsg]);
       } else {
-        // 2. Se for pergunta genérica ou complexa, recorre à API do Gemini (varrendo os modelos)
-        const responseText = await consultarGeminiAPI(query);
-        const botMsg = {
-          id: Date.now() + 1,
-          sender: 'bot',
-          text: responseText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages((prev) => [...prev, botMsg]);
+        // 2. Se for consulta complexa, recorre as APIs externas
+        const promptSistema = `
+Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
+Responda com clareza, tom executivo e dados consolidados com base no resumo do estoque:
+${JSON.stringify(contextoResumido)}
+`;
+
+        let responseText = null;
+
+        // Tenta o Groq se houver chave configurada
+        if (groqApiKey && !groqApiKey.includes('SUA_CHAVE')) {
+          try {
+            responseText = await consultarGroqAPI(promptSistema, query);
+          } catch (e) {
+            console.warn('Falha no Groq, alternando para Gemini...', e);
+          }
+        }
+
+        // Se não usou Groq ou falhou, tenta o Gemini
+        if (!responseText && geminiApiKey && !geminiApiKey.includes('SUA_CHAVE')) {
+          responseText = await consultarGeminiAPI(`${promptSistema}\nPergunta: "${query}"`);
+        }
+
+        if (responseText) {
+          const botMsg = {
+            id: Date.now() + 1,
+            sender: 'bot',
+            text: responseText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          setMessages((prev) => [...prev, botMsg]);
+        } else {
+          throw new Error('Servidores de IA temporariamente indisponíveis. Tente fazer consultas sobre valores por mês (ex: mês 10/2026), curva ABC ou top itens.');
+        }
       }
     } catch (error) {
       console.error('Erro no Pergunte ao Estoque:', error);
@@ -442,7 +595,7 @@ Pergunta: "${perguntaUsuario}"
               loading
                 ? "Carregando e sincronizando banco de dados..."
                 : isDataReady
-                ? "Pergunte sobre valor total, maiores itens, materiais críticos ou unidades..."
+                ? "Pergunte sobre valor no mês 10/2026, maiores itens, materiais críticos ou unidades..."
                 : "Clique em 'Atualizar Dados' no menu lateral..."
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
