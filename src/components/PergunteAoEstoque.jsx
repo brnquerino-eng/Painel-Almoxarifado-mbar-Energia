@@ -1,6 +1,6 @@
 // src/components/PergunteAoEstoque.jsx
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, Trash2, RefreshCw, HelpCircle, ArrowRight, CheckCircle2, Database } from 'lucide-react';
 
 const SUGGESTIONS = [
@@ -10,19 +10,19 @@ const SUGGESTIONS = [
   "Resumo executivo do estoque por segmento e região"
 ];
 
-// Modelos Groq atualizados (novembro 2026)
 const GROQ_MODELS = [
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
   'qwen/qwen3.8-27b'
 ];
 
-// Modelos Gemini atualizados
 const GEMINI_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.6-flash'
 ];
+
+const MAX_ITENS_API = 30; // Teto seguro para não estourar tokens
 
 export default function PergunteAoEstoque({ data = [], loading = false }) {
   const [messages, setMessages] = useState([
@@ -52,7 +52,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
   };
 
-  // Descobre o período mais recente existente na base
+  // Descobre o período mais recente da base
   const getPeriodoMaisRecente = () => {
     if (!data || data.length === 0) return { mes: null, ano: null };
 
@@ -71,7 +71,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes: maiorMes || null, ano: maiorAno || null };
   };
 
-  // Extrai mês e ano da pergunta do usuário (dinâmico)
+  // Extrai período da pergunta
   const extrairPeriodo = (prompt) => {
     const p = prompt.toLowerCase();
 
@@ -90,7 +90,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       'dezembro': 12, 'dez': 12, '12': 12
     };
 
-    // "hoje", "atual", "agora", "recente" → período mais recente da base
     if (
       p.includes('hoje') ||
       p.includes('atual') ||
@@ -105,7 +104,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     let mes = null;
     let ano = null;
 
-    // Formato 10/2026 ou mês 10/2026
     const matchSlash = p.match(/(?:mês|mes)?\s*(\d{1,2})\/(\d{4})/);
     if (matchSlash) {
       mes = parseInt(matchSlash[1], 10);
@@ -113,18 +111,15 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return { mes, ano };
     }
 
-    // Ano de 4 dígitos
     const matchAno = p.match(/\b(202[0-9])\b/);
     if (matchAno) ano = parseInt(matchAno[1], 10);
 
-    // Nome do mês ou "mês 10"
     const matchMes = p.match(/mês\s*(\d{1,2})|mes\s*(\d{1,2})|\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/);
     if (matchMes) {
       const termo = matchMes[1] || matchMes[2] || matchMes[3];
       if (termo && meses[termo]) mes = meses[termo];
     }
 
-    // Se não encontrou nada, usa o período mais recente
     if (mes === null && ano === null) {
       return getPeriodoMaisRecente();
     }
@@ -132,7 +127,27 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes, ano };
   };
 
-  // Filtra a base pelo período detectado
+  // Detecta quantos itens o usuário pediu (top N)
+  const extrairQuantidadePedida = (prompt) => {
+    const p = prompt.toLowerCase();
+
+    // Exemplos: "top 10", "10 maiores", "me liste os 15", "20 itens"
+    const match = p.match(/(?:top|os|as|liste|listar|mostre|mostrar|quais são os|me dê os|me de os)?\s*(\d{1,3})\s*(?:maiores|itens|produtos|materiais|valores)?/);
+    
+    if (match) {
+      const qtd = parseInt(match[1], 10);
+      if (qtd > 0) return qtd;
+    }
+
+    // Se falar "maiores" sem número, assume 10
+    if (p.includes('maior') || p.includes('maiores') || p.includes('top')) {
+      return 10;
+    }
+
+    return 10; // padrão
+  };
+
+  // Filtra a base pelo período
   const filtrarPorPeriodo = (mes, ano) => {
     if (!data || data.length === 0) return [];
 
@@ -145,17 +160,17 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     });
   };
 
-  // Monta o resumo a partir de um conjunto de dados (já filtrado)
-  const montarResumo = (dadosFiltrados) => {
+  // Monta o resumo com quantidade dinâmica
+  const montarResumo = (dadosFiltrados, qtdItens = 10) => {
     if (!dadosFiltrados || dadosFiltrados.length === 0) return null;
+
+    const qtdFinal = Math.min(qtdItens, MAX_ITENS_API);
 
     let valorTotalEstoque = 0;
     let valorTotalEntradas = 0;
     let valorTotalSaidas = 0;
 
     const porUnidade = {};
-    const porCategoria = {};
-    const porSegmento = {};
     const itensCriticos = [];
 
     dadosFiltrados.forEach(item => {
@@ -173,14 +188,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       porUnidade[und].qtdItens += 1;
       porUnidade[und].consumo += valSaida;
 
-      const cat = item.ge || 'OUTROS';
-      if (!porCategoria[cat]) porCategoria[cat] = 0;
-      porCategoria[cat] += valSaldo;
-
-      const seg = item.Segmento || 'N/A';
-      if (!porSegmento[seg]) porSegmento[seg] = 0;
-      porSegmento[seg] += valSaldo;
-
       if (item.item_critico && String(item.item_critico).toUpperCase() === 'SIM') {
         itensCriticos.push({
           codigo: item.codigo_produto,
@@ -192,9 +199,9 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       }
     });
 
-    const top10Maiores = [...dadosFiltrados]
+    const topItens = [...dadosFiltrados]
       .sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))
-      .slice(0, 10)
+      .slice(0, qtdFinal)
       .map(i => ({
         codigo: i.codigo_produto,
         nome: i.nome_produto,
@@ -207,7 +214,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     const topConsumo = Object.entries(porUnidade)
       .map(([unidade, info]) => ({ unidade, ...info }))
       .sort((a, b) => b.consumo - a.consumo)
-      .slice(0, 10);
+      .slice(0, 15);
 
     return {
       estatisticasGerais: {
@@ -218,39 +225,42 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
         qtdItensCriticos: itensCriticos.length
       },
       resumoPorUnidade: porUnidade,
-      resumoPorCategoria: porCategoria,
-      resumoPorSegmento: porSegmento,
-      top10ItensMaiorValor: top10Maiores,
+      topItensMaiorValor: topItens,
       topUnidadesPorConsumo: topConsumo,
-      amostraItensCriticos: itensCriticos.slice(0, 10)
+      amostraItensCriticos: itensCriticos.slice(0, 10),
+      quantidadeSolicitada: qtdItens,
+      quantidadeEnviada: qtdFinal,
+      atingiuLimite: qtdItens > MAX_ITENS_API
     };
   };
 
-  // Versão enxuta para enviar às APIs
+  // Contexto enxuto para a API
   const montarContextoParaAPI = (resumo) => {
     if (!resumo) return null;
 
     return {
       estatisticasGerais: resumo.estatisticasGerais,
-      top5ItensMaiorValor: resumo.top10ItensMaiorValor.slice(0, 5),
-      topUnidadesPorConsumo: resumo.topUnidadesPorConsumo.slice(0, 8),
+      topItensMaiorValor: resumo.topItensMaiorValor,
+      topUnidadesPorConsumo: resumo.topUnidadesPorConsumo.slice(0, 10),
       resumoPorUnidade: Object.fromEntries(
         Object.entries(resumo.resumoPorUnidade)
           .sort((a, b) => b[1].saldo - a[1].saldo)
-          .slice(0, 10)
+          .slice(0, 12)
       ),
-      amostraItensCriticos: resumo.amostraItensCriticos.slice(0, 5)
+      amostraItensCriticos: resumo.amostraItensCriticos.slice(0, 5),
+      avisoLimite: resumo.atingiuLimite
+        ? `O usuário pediu ${resumo.quantidadeSolicitada} itens, mas o limite máximo enviado é ${MAX_ITENS_API}.`
+        : null
     };
   };
 
-  // Motor local (usa dados já filtrados pelo período)
+  // Motor local
   const processarConsultaLocal = (pergunta, resumo, mes, ano) => {
     if (!resumo) return null;
     const p = pergunta.toLowerCase();
     const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
     const anoStr = ano ? String(ano) : 'Todos';
 
-    // Valor total
     if (
       (p.includes('valor') && (p.includes('total') || p.includes('acumulado') || p.includes('estoque'))) ||
       p.includes('quanto vale') ||
@@ -267,7 +277,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
       Object.entries(resumo.resumoPorUnidade)
         .sort((a, b) => b[1].saldo - a[1].saldo)
-        .slice(0, 8)
+        .slice(0, 10)
         .forEach(([unidade, info]) => {
           resposta += `• **${unidade}:** ${formatarMoeda(info.saldo)} (${info.qtdItens.toLocaleString('pt-BR')} itens)\n`;
         });
@@ -275,10 +285,13 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // Top 5 itens
-    if (p.includes('maior valor') || p.includes('top 5') || p.includes('5 itens') || p.includes('item de maior')) {
-      const top = resumo.top10ItensMaiorValor.slice(0, 5);
-      let resposta = `🏆 **Top 5 Itens com Maior Valor — ${nomeMesStr}/${anoStr}**\n\n`;
+    if (p.includes('maior valor') || p.includes('top') || p.includes('maiores') || p.includes('itens')) {
+      const top = resumo.topItensMaiorValor;
+      let resposta = `🏆 **Top ${top.length} Itens com Maior Valor — ${nomeMesStr}/${anoStr}**\n\n`;
+
+      if (resumo.atingiuLimite) {
+        resposta += `⚠️ Você pediu ${resumo.quantidadeSolicitada} itens. Por limitação técnica, estou retornando no máximo **${MAX_ITENS_API}**.\n\n`;
+      }
 
       top.forEach((item, idx) => {
         resposta += `${idx + 1}. **${item.nome || 'Produto sem descrição'}** (Cód: ${item.codigo || 'N/A'})\n`;
@@ -289,23 +302,21 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // Materiais críticos
-    if (p.includes('crítico') || p.includes('critico') || p.includes('estado crítico')) {
+    if (p.includes('crítico') || p.includes('critico')) {
       const { qtdItensCriticos } = resumo.estatisticasGerais;
       let resposta = `⚠️ **Materiais em Estado Crítico — ${nomeMesStr}/${anoStr}**\n\n`;
       resposta += `Total de itens críticos: **${qtdItensCriticos}**.\n\n`;
 
       if (resumo.amostraItensCriticos.length > 0) {
         resposta += `**Principais Itens Críticos:**\n`;
-        resumo.amostraItensCriticos.slice(0, 5).forEach((item) => {
+        resumo.amostraItensCriticos.forEach((item) => {
           resposta += `• **${item.nome}** (Unidade: ${item.unidade}) - Saldo: ${formatarMoeda(item.valor)}\n`;
         });
       }
       return resposta;
     }
 
-    // Unidades / consumo
-    if (p.includes('unidade') || p.includes('segmento') || p.includes('região') || p.includes('divisão') || p.includes('consum')) {
+    if (p.includes('unidade') || p.includes('consum')) {
       let resposta = `🏢 **Unidades — ${nomeMesStr}/${anoStr}**\n\n`;
 
       Object.entries(resumo.resumoPorUnidade)
@@ -343,7 +354,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
               { role: 'user', content: perguntaUsuario }
             ],
             temperature: 0.2,
-            max_tokens: 1024
+            max_tokens: 1500
           })
         });
 
@@ -382,7 +393,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
             contents: [{ parts: [{ text: promptCompleto }] }],
             generationConfig: {
               temperature: 0.2,
-              maxOutputTokens: 1024
+              maxOutputTokens: 1500
             }
           })
         });
@@ -422,17 +433,25 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     setIsLoading(true);
 
     try {
-      // 1. Detecta o período pedido pelo usuário
+      // 1. Detecta período
       const { mes, ano } = extrairPeriodo(query);
       const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
       const anoStr = ano ? String(ano) : 'Todos';
 
-      // 2. Filtra a base pelo período
+      // 2. Detecta quantos itens o usuário quer
+      const qtdPedida = extrairQuantidadePedida(query);
+
+      // 3. Filtra a base
       const dadosFiltrados = filtrarPorPeriodo(mes, ano);
 
-      // 3. Monta o resumo só com esses dados
-      const resumo = montarResumo(dadosFiltrados);
+      // 4. Monta resumo com quantidade dinâmica (máx 30)
+      const resumo = montarResumo(dadosFiltrados, qtdPedida);
       const contextoAPI = montarContextoParaAPI(resumo);
+
+      let avisoLimite = '';
+      if (resumo?.atingiuLimite) {
+        avisoLimite = `\n\n⚠️ AVISO AO USUÁRIO: Você solicitou ${qtdPedida} itens. Por limitação técnica de processamento, o sistema retorna no máximo ${MAX_ITENS_API} itens por consulta.`;
+      }
 
       const promptSistema = `Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
 Responda com clareza, tom executivo e dados consolidados.
@@ -440,28 +459,36 @@ Use APENAS os dados do período informado abaixo. Não invente informações.
 
 PERÍODO ANALISADO: ${nomeMesStr}/${anoStr}
 TOTAL DE REGISTROS NESTE PERÍODO: ${dadosFiltrados.length}
+QUANTIDADE DE ITENS SOLICITADA PELO USUÁRIO: ${qtdPedida}
+QUANTIDADE DE ITENS ENVIADA NESTE CONTEXTO: ${resumo?.quantidadeEnviada || 0}
+${resumo?.atingiuLimite ? `IMPORTANTE: O usuário pediu mais de ${MAX_ITENS_API} itens. Informe educadamente que o limite máximo por consulta é ${MAX_ITENS_API}.` : ''}
 
 RESUMO DO ESTOQUE NESTE PERÍODO:
 ${JSON.stringify(contextoAPI, null, 2)}`;
 
       let responseText = null;
 
-      // 4. Prioridade: Groq
+      // 5. Groq
       if (groqApiKey && !groqApiKey.includes('SUA_CHAVE')) {
         responseText = await consultarGroqAPI(promptSistema, query);
       }
 
-      // 5. Fallback: Gemini
+      // 6. Gemini
       if (!responseText && geminiApiKey && !geminiApiKey.includes('SUA_CHAVE')) {
         responseText = await consultarGeminiAPI(`${promptSistema}\n\nPergunta do usuário: "${query}"`);
       }
 
-      // 6. Último recurso: Motor Local
+      // 7. Motor Local
       if (!responseText) {
         responseText = processarConsultaLocal(query, resumo, mes, ano);
       }
 
       if (responseText) {
+        // Garante que o aviso de limite apareça mesmo se a IA não mencionar
+        if (resumo?.atingiuLimite && !responseText.includes('limitação') && !responseText.includes('máximo')) {
+          responseText += avisoLimite;
+        }
+
         const botMsg = {
           id: Date.now() + 1,
           sender: 'bot',
@@ -637,7 +664,7 @@ ${JSON.stringify(contextoAPI, null, 2)}`;
               loading
                 ? "Carregando e sincronizando banco de dados..."
                 : isDataReady
-                ? "Ex: valor do estoque em janeiro/2026, unidades de hoje, maiores itens no mês 10..."
+                ? "Ex: top 10 do mês 5/2026, unidades de hoje, maiores itens em janeiro..."
                 : "Clique em 'Atualizar Dados' no menu lateral..."
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
@@ -651,7 +678,7 @@ ${JSON.stringify(contextoAPI, null, 2)}`;
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Respostas baseadas no período detectado na sua pergunta • Almoxarifado Âmbar Energia
+          Respostas por período • Limite de até {MAX_ITENS_API} itens por consulta • Âmbar Energia
         </p>
       </div>
     </div>
