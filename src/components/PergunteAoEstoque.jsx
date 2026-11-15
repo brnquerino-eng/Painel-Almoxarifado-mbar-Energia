@@ -22,8 +22,8 @@ import { supabase } from '../lib/supabase';
 const SUGGESTIONS = [
   'No mês atual, quais são os itens sem valor no estoque?',
   'Quais são os 5 itens com maior valor em estoque?',
-  'Resumo executivo do estoque por segmento e região',
-  'Qual o resumo das diferenças de inventário no período mais recente?'
+  'Resumo do estoque por unidade sem gerenciais',
+  'Qual o valor de Candiota no período atual?'
 ];
 
 const GROQ_MODELS = [
@@ -39,15 +39,15 @@ const GEMINI_MODELS = [
 ];
 
 const MAX_ITENS_API = 30;
-const MAX_HISTORICO_MSG = 8; // últimas mensagens enviadas como memória
+const MAX_HISTORICO_MSG = 8;
 
 const SCHEMA_BANCO_SUPABASE = `
-TABELA 1: painel_estoque (Posição mensal, saldos, movimentações e criticidade do almoxarifado)
+TABELA 1: painel_estoque
 Colunas:
 - id (int4)
 - mes_referencia (int4)
 - ano_referencia (int4)
-- unidade_almoxarifado (text)
+- unidade_almoxarifado (text) -- ex: CANDIOTA, CANDIOTA GERENCIAL, MAUÁ, MANACAPURU
 - codigo_produto (text)
 - nome_produto (text)
 - un (text)
@@ -92,7 +92,7 @@ Colunas:
 - "Região" (text)
 - "nCdEmpresa" (int8)
 
-TABELA 2: painel_inventario (Contagens físicas, acuracidade e divergências de inventário)
+TABELA 2: painel_inventario
 Colunas:
 - id (int8)
 - data_inicio (text)
@@ -161,9 +161,7 @@ function MarkdownRenderer({ text }) {
         break;
       }
 
-      if (match.index > 0) {
-        parts.push(remaining.slice(0, match.index));
-      }
+      if (match.index > 0) parts.push(remaining.slice(0, match.index));
 
       if (type === 'bold') {
         parts.push(
@@ -237,9 +235,7 @@ function MarkdownRenderer({ text }) {
                 {rows.map((row, rIdx) => (
                   <tr key={rIdx} className="hover:bg-[#1A1F2C]/70 transition-colors">
                     {row.map((cell, cIdx) => {
-                      const hasCurrency = cell.includes('R$');
-                      const hasNumberPattern = /^-?[\d.,]+%?$/.test(cell);
-                      const isNumeric = hasCurrency || hasNumberPattern;
+                      const isNumeric = cell.includes('R$') || /^-?[\d.,]+%?$/.test(cell);
                       return (
                         <td
                           key={cIdx}
@@ -262,13 +258,12 @@ function MarkdownRenderer({ text }) {
     }
 
     if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
-      const titleText = trimmed.replace(/^#{2,3}\s+/, '');
       elements.push(
         <h4
           key={`h-${i}`}
-          className="mt-3 mb-1.5 text-sm font-bold text-[#FF8533] tracking-wide flex items-center gap-1.5 border-b border-gray-800/80 pb-1"
+          className="mt-3 mb-1.5 text-sm font-bold text-[#FF8533] tracking-wide border-b border-gray-800/80 pb-1"
         >
-          {formatInline(titleText)}
+          {formatInline(trimmed.replace(/^#{2,3}\s+/, ''))}
         </h4>
       );
       i++;
@@ -282,11 +277,12 @@ function MarkdownRenderer({ text }) {
     }
 
     if (/^[•\-*]\s+/.test(trimmed)) {
-      const content = trimmed.replace(/^[•\-*]\s+/, '');
       elements.push(
         <div key={`ul-${i}`} className="flex items-start gap-2 my-1 pl-1">
           <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#CC5500] shrink-0" />
-          <span className="text-gray-200 leading-relaxed">{formatInline(content)}</span>
+          <span className="text-gray-200 leading-relaxed">
+            {formatInline(trimmed.replace(/^[•\-*]\s+/, ''))}
+          </span>
         </div>
       );
       i++;
@@ -297,7 +293,7 @@ function MarkdownRenderer({ text }) {
     if (numMatch) {
       elements.push(
         <div key={`ol-${i}`} className="flex items-start gap-2 my-1.5 pl-1">
-          <span className="px-1.5 py-0.5 text-[11px] font-bold rounded bg-[#CC5500]/20 text-[#FF8533] border border-[#CC5500]/30 shrink-0 mt-0.5 tabular-nums">
+          <span className="px-1.5 py-0.5 text-[11px] font-bold rounded bg-[#CC5500]/20 text-[#FF8533] border border-[#CC5500]/30 shrink-0 mt-0.5">
             {numMatch[1]}
           </span>
           <span className="text-gray-200 leading-relaxed">{formatInline(numMatch[2])}</span>
@@ -311,7 +307,7 @@ function MarkdownRenderer({ text }) {
       elements.push(
         <div
           key={`alert-${i}`}
-          className="my-2.5 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs leading-relaxed"
+          className="my-2.5 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs"
         >
           {formatInline(trimmed)}
         </div>
@@ -342,7 +338,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     {
       id: 1,
       sender: 'bot',
-      text: 'Olá! Sou a assistente inteligente do **Almoxarifado Âmbar Energia** conectada diretamente à base completa no **Supabase** (`painel_estoque` e `painel_inventario`).\n\nPosso consultar **100% dos registros**. Perguntas sem data usam automaticamente o **período mais recente** da base. O histórico desta conversa fica ativo até você limpar o chat.',
+      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada ao **Supabase**.\n\nBuscas inteligentes: ignoro maiúscula, espaços e separo unidades **operacionais** de **gerenciais**.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até você limpar o chat.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       badge: 'Supabase Full-DB Conectado'
     }
@@ -355,16 +351,11 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
   const [dbConnected, setDbConnected] = useState(false);
 
   const chatEndRef = useRef(null);
-
   const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
   const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
   useEffect(() => {
@@ -376,12 +367,10 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
         if (!pingErr && pingRes) {
           setDbConnected(true);
-
           const { data: perRes, error: perErr } = await supabase.rpc('executar_consulta_ia', {
             query_sql:
               'SELECT ano_referencia AS ano, mes_referencia AS mes FROM painel_estoque WHERE ano_referencia IS NOT NULL AND mes_referencia IS NOT NULL ORDER BY ano_referencia DESC, mes_referencia DESC LIMIT 1'
           });
-
           if (!perErr && Array.isArray(perRes) && perRes.length > 0) {
             setDbPeriodoRecente({
               mes: Number(perRes[0].mes),
@@ -390,17 +379,15 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           }
         }
       } catch (err) {
-        console.warn('Verificação inicial RPC Supabase:', err);
+        console.warn('Verificação RPC Supabase:', err);
       }
     };
-
     verificarConexaoRPC();
   }, []);
 
-  const formatarMoeda = (valor) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
-
-  const formatarNumero = (valor) => new Intl.NumberFormat('pt-BR').format(valor || 0);
+  const formatarMoeda = (v) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  const formatarNumero = (v) => new Intl.NumberFormat('pt-BR').format(v || 0);
 
   const handleCopy = (id, text) => {
     navigator.clipboard.writeText(text);
@@ -408,42 +395,31 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Monta o histórico da conversa para a IA (memória do chat)
   const montarHistoricoConversa = () => {
-    const msgsUteis = messages
-      .filter((m) => m.sender === 'user' || m.sender === 'bot')
-      .filter((m) => m.id !== 1) // ignora saudação inicial
+    const msgs = messages
+      .filter((m) => (m.sender === 'user' || m.sender === 'bot') && m.id !== 1)
       .slice(-MAX_HISTORICO_MSG);
-
-    if (msgsUteis.length === 0) return 'Nenhuma conversa anterior neste chat.';
-
-    return msgsUteis
-      .map((m) => `${m.sender === 'user' ? 'USUÁRIO' : 'ASSISTENTE'}: ${m.text}`)
-      .join('\n\n');
+    if (msgs.length === 0) return 'Nenhuma conversa anterior neste chat.';
+    return msgs.map((m) => `${m.sender === 'user' ? 'USUÁRIO' : 'ASSISTENTE'}: ${m.text}`).join('\n\n');
   };
 
-  const extrairSQLPuro = (respostaBruta) => {
-    if (!respostaBruta) return null;
-    let limpo = respostaBruta
+  const extrairSQLPuro = (texto) => {
+    if (!texto) return null;
+    let limpo = texto
       .replace(/<think>[\s\S]*?<\/think>/gi, '')
       .replace(/```sql/gi, '')
       .replace(/```/g, '')
       .trim();
-
-    const matchInicio = limpo.match(/\b(SELECT|WITH)\b[\s\S]*/i);
-    if (matchInicio) limpo = matchInicio[0].trim();
-
+    const match = limpo.match(/\b(SELECT|WITH)\b[\s\S]*/i);
+    if (match) limpo = match[0].trim();
     return limpo.replace(/;+\s*$/, '').trim();
   };
 
   const getPeriodoMaisRecente = () => {
     if (dbPeriodoRecente.mes && dbPeriodoRecente.ano) return dbPeriodoRecente;
-
-    if (!data || data.length === 0) return { mes: null, ano: null };
-
+    if (!data?.length) return { mes: null, ano: null };
     let maiorAno = 0;
     let maiorMes = 0;
-
     data.forEach((item) => {
       const ano = Number(item.ano_referencia) || 0;
       const mes = Number(item.mes_referencia) || 0;
@@ -452,15 +428,12 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
         maiorMes = mes;
       }
     });
-
     return { mes: maiorMes || null, ano: maiorAno || null };
   };
 
-  // Extrai período. Se a pergunta for genérica (sem data), usa o período atual da base.
   const extrairPeriodo = (prompt) => {
     const p = prompt.toLowerCase();
-    const periodoRecente = getPeriodoMaisRecente();
-
+    const recente = getPeriodoMaisRecente();
     const meses = {
       janeiro: 1, jan: 1, '01': 1, '1': 1,
       fevereiro: 2, fev: 2, '02': 2, '2': 2,
@@ -476,7 +449,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       dezembro: 12, dez: 12, '12': 12
     };
 
-    // Hoje / atual / recente → período mais recente
     if (
       p.includes('hoje') ||
       p.includes('atual') ||
@@ -485,7 +457,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       p.includes('último') ||
       p.includes('ultimo')
     ) {
-      return { ...periodoRecente, origem: 'periodo_atual' };
+      return { ...recente, origem: 'periodo_atual' };
     }
 
     let mes = null;
@@ -511,25 +483,49 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       if (termo && meses[termo]) mes = meses[termo];
     }
 
-    // Pergunta genérica sem qualquer data → sempre período atual da base
     if (mes === null && ano === null) {
-      return { ...periodoRecente, origem: 'periodo_atual_padrao' };
+      return { ...recente, origem: 'periodo_atual_padrao' };
     }
 
     return { mes, ano, origem: 'parcial' };
   };
 
+  // Detecta intenção sobre gerenciais na pergunta
+  const extrairIntencaoGerencial = (prompt) => {
+    const p = prompt.toLowerCase();
+    if (
+      p.includes('somente gerencial') ||
+      p.includes('só gerencial') ||
+      p.includes('so gerencial') ||
+      p.includes('apenas gerencial') ||
+      p.includes('só as gerenciais') ||
+      p.includes('somente as gerenciais')
+    ) {
+      return 'somente_gerenciais';
+    }
+    if (
+      p.includes('sem gerencial') ||
+      p.includes('desconsidere gerencial') ||
+      p.includes('exceto gerencial') ||
+      p.includes('não gerencial') ||
+      p.includes('nao gerencial') ||
+      p.includes('sem as gerenciais') ||
+      p.includes('fora gerencial')
+    ) {
+      return 'sem_gerenciais';
+    }
+    return 'todos';
+  };
+
   const consultarGroqAPI = async (promptSistema, perguntaUsuario, maxTokens = 1500) => {
     if (!groqApiKey || groqApiKey.includes('SUA_CHAVE')) return null;
-
-    const groqEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
 
     for (const model of GROQ_MODELS) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 25000);
-
-        const response = await fetch(groqEndpoint, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -546,7 +542,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
             max_tokens: maxTokens
           })
         });
-
         clearTimeout(timeoutId);
 
         if (response.ok) {
@@ -555,12 +550,11 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           if (content) return { text: content, model };
         } else {
           const errorText = await response.text();
-          console.warn(`Groq modelo ${model} → HTTP ${response.status}:`, errorText);
+          console.warn(`Groq ${model} → HTTP ${response.status}:`, errorText);
           if (response.status === 401 || response.status === 403) return null;
         }
       } catch (e) {
-        const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
-        console.warn(`Erro na tentativa com Groq (${model}):`, msg);
+        console.warn(`Erro Groq (${model}):`, e.name === 'AbortError' ? 'Timeout' : e.message);
       }
     }
     return null;
@@ -571,11 +565,10 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
     for (const model of GEMINI_MODELS) {
       try {
-        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 25000);
-
-        const response = await fetch(geminiEndpoint, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -584,7 +577,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
             generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens }
           })
         });
-
         clearTimeout(timeoutId);
 
         if (response.ok) {
@@ -593,28 +585,30 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           if (txt) return { text: txt, model };
         } else {
           const errorText = await response.text();
-          console.warn(`Gemini modelo ${model} → HTTP ${response.status}:`, errorText);
+          console.warn(`Gemini ${model} → HTTP ${response.status}:`, errorText);
           if (response.status === 401 || response.status === 403) return null;
         }
       } catch (e) {
-        const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
-        console.warn(`Erro na tentativa com Gemini (${model}):`, msg);
+        console.warn(`Erro Gemini (${model}):`, e.name === 'AbortError' ? 'Timeout' : e.message);
       }
     }
     return null;
   };
 
   const chamarIAEmCascata = async (promptSistema, promptUsuario, maxTokens = 1500) => {
-    const resGroq = await consultarGroqAPI(promptSistema, promptUsuario, maxTokens);
-    if (resGroq?.text) return { text: resGroq.text, provedor: 'Groq', model: resGroq.model };
-
-    const resGemini = await consultarGeminiAPI(`${promptSistema}\n\n${promptUsuario}`, maxTokens);
-    if (resGemini?.text) return { text: resGemini.text, provedor: 'Gemini', model: resGemini.model };
-
+    const g = await consultarGroqAPI(promptSistema, promptUsuario, maxTokens);
+    if (g?.text) return { text: g.text, provedor: 'Groq', model: g.model };
+    const ge = await consultarGeminiAPI(`${promptSistema}\n\n${promptUsuario}`, maxTokens);
+    if (ge?.text) return { text: ge.text, provedor: 'Gemini', model: ge.model };
     return null;
   };
 
-  const consultarViaSupabaseSQL = async (perguntaUsuario, periodoDetectado, historicoConversa) => {
+  const consultarViaSupabaseSQL = async (
+    perguntaUsuario,
+    periodoDetectado,
+    historicoConversa,
+    intencaoGerencial
+  ) => {
     const periodoRecente = getPeriodoMaisRecente();
     const refMes = periodoDetectado.mes || periodoRecente.mes;
     const refAno = periodoDetectado.ano || periodoRecente.ano;
@@ -622,42 +616,60 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       periodoDetectado.origem === 'periodo_atual' ||
       periodoDetectado.origem === 'periodo_atual_padrao';
 
+    let regraGerencial = '';
+    if (intencaoGerencial === 'sem_gerenciais') {
+      regraGerencial = `REGRA GERENCIAL: O usuário pediu SEM gerenciais. Exclua unidades cujo nome contenha 'GERENCIAL' (ex: AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%').`;
+    } else if (intencaoGerencial === 'somente_gerenciais') {
+      regraGerencial = `REGRA GERENCIAL: O usuário pediu SOMENTE gerenciais. Filtre apenas unidades com 'GERENCIAL' no nome (ex: AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%').`;
+    } else {
+      regraGerencial = `REGRA GERENCIAL: Se o usuário citar uma usina (ex: Candiota, Mauá, Manacapuru):
+- NÃO misture operacional com gerencial sem avisar.
+- "Candiota" sozinho → priorize a unidade operacional (nome igual ou muito próximo, SEM a palavra GERENCIAL).
+- Se existirem as duas, pode mostrar separadas (Candiota vs Candiota Gerencial).
+- Só una as duas se o usuário pedir explicitamente "todas" ou "incluindo gerenciais".`;
+    }
+
     const promptGeradorSQL = `Você é um Especialista Sênior em PostgreSQL da Âmbar Energia.
-Sua única tarefa é transformar a pergunta do usuário em UMA consulta SQL SELECT válida para o Supabase.
+Gere UMA consulta SQL SELECT válida para o Supabase.
 
 ${SCHEMA_BANCO_SUPABASE}
 
-HISTÓRICO RECENTE DESTA CONVERSA (use para entender follow-ups como "e o mês anterior?", "por unidade?", etc.):
+HISTÓRICO DA CONVERSA:
 ${historicoConversa}
 
-CONTEXTO DE PERÍODO:
-- Período mais recente disponível no banco: Mês ${periodoRecente.mes || '?'} / Ano ${periodoRecente.ano || '?'}.
-- Período desta pergunta: mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
-- ${usouPeriodoAtual ? 'A pergunta NÃO informou data explícita. USE OBRIGATORIAMENTE o período mais recente acima.' : 'Use o período indicado na pergunta.'}
+PERÍODO:
+- Mais recente no banco: ${periodoRecente.mes}/${periodoRecente.ano}
+- Período desta pergunta: mes_referencia = ${refMes} AND ano_referencia = ${refAno}
+- ${usouPeriodoAtual ? 'Pergunta SEM data explícita → USE OBRIGATORIAMENTE o período mais recente.' : 'Use o período da pergunta.'}
 
-REGRAS OBRIGATÓRIAS DO SQL:
-1. Retorne APENAS o código SQL puro, começando com SELECT ou WITH. Sem explicações, sem markdown, sem ponto-e-vírgula no final.
-2. NUNCA use INSERT, UPDATE, DELETE, DROP, ALTER.
-3. Colunas com maiúsculas/acentos na painel_estoque DEVEM ter aspas duplas: "Sigla", "Segmento", "Região", "nCdEmpresa".
-4. Em painel_inventario, "nCdEmpresa" com aspas; sigla_empresa, segmento_empresa, regiao_empresa sem aspas.
-5. Se a pergunta for genérica (sem mês/ano), filtre SEMPRE por mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
-6. Para comparação mês atual vs anterior, calcule o mês anterior a partir de ${refMes}/${refAno}.
-7. Filtros de texto: ILIKE '%termo%'.
-8. Itens sem valor: COALESCE(valor_saldo_atual, 0) = 0. Inclua COUNT(*) OVER() AS total_encontrado quando listar.
-9. Listagens individuais: LIMIT ${MAX_ITENS_API}. Agrupamentos: limite só se passar de 50 linhas.
-10. Aliases em português claros.`;
+${regraGerencial}
+
+REGRAS DE BUSCA INTELIGENTE (OBRIGATÓRIAS):
+1. Retorne APENAS SQL puro (SELECT ou WITH). Sem markdown, sem explicação, sem ponto-e-vírgula final.
+2. NUNCA INSERT/UPDATE/DELETE/DROP/ALTER.
+3. Colunas com maiúsculas na painel_estoque: "Sigla", "Segmento", "Região", "nCdEmpresa" (com aspas).
+4. NORMALIZAÇÃO DE TEXTO: sempre use TRIM() e ILIKE para nomes de unidade, produto, segmento, região.
+   Exemplo correto:
+   WHERE TRIM(unidade_almoxarifado) ILIKE '%candiota%'
+   NUNCA use = 'CANDIOTA' puro (quebra com espaço, minúscula, variação).
+5. Se a extensão unaccent existir, pode usar: unaccent(TRIM(unidade_almoxarifado)) ILIKE unaccent('%manacapuru%')
+   Se não tiver certeza, use só TRIM + ILIKE.
+6. Nomes compostos: "Candiota Gerencial" é DIFERENTE de "Candiota". Trate como unidades distintas.
+7. Pergunta genérica sem mês/ano → filtre mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
+8. Comparação mês atual vs anterior: calcule o mês anterior a partir de ${refMes}/${refAno}.
+9. Itens sem valor: COALESCE(valor_saldo_atual, 0) = 0. Use COUNT(*) OVER() AS total_encontrado em listagens.
+10. Listagens: LIMIT ${MAX_ITENS_API}. GROUP BY: limite só se > 50 linhas.
+11. Aliases em português claros.`;
 
     const geracao = await chamarIAEmCascata(
       promptGeradorSQL,
       `Pergunta do usuário: "${perguntaUsuario}"`,
       900
     );
-
     if (!geracao) return null;
 
     let sqlGerado = extrairSQLPuro(geracao.text);
     if (!sqlGerado) return null;
-
     console.log('SQL gerado:', sqlGerado);
 
     let { data: dadosBanco, error: erroBanco } = await supabase.rpc('executar_consulta_ia', {
@@ -665,13 +677,12 @@ REGRAS OBRIGATÓRIAS DO SQL:
     });
 
     if (erroBanco) {
-      console.warn('Erro na 1ª tentativa SQL Supabase:', erroBanco.message);
+      console.warn('Erro 1ª tentativa SQL:', erroBanco.message);
       const correcao = await chamarIAEmCascata(
         promptGeradorSQL,
-        `A consulta SQL anterior falhou no PostgreSQL.\nSQL com erro:\n${sqlGerado}\n\nErro:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT válido.`,
+        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro PostgreSQL:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT válido. Lembre TRIM + ILIKE e regras de gerencial.`,
         900
       );
-
       if (correcao) {
         const sqlCorrigido = extrairSQLPuro(correcao.text);
         if (sqlCorrigido) {
@@ -685,41 +696,41 @@ REGRAS OBRIGATÓRIAS DO SQL:
     }
 
     if (erroBanco) {
-      console.error('Falha definitiva SQL Supabase:', erroBanco.message);
+      console.error('Falha SQL definitiva:', erroBanco.message);
       return null;
     }
 
-    const linhasRetornadas = Array.isArray(dadosBanco) ? dadosBanco : [];
+    const linhas = Array.isArray(dadosBanco) ? dadosBanco : [];
 
-    const promptFormatador = `Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
+    const promptFormatador = `Você é a Assistente Executiva do Almoxarifado Âmbar Energia.
 
-HISTÓRICO RECENTE DA CONVERSA:
+HISTÓRICO:
 ${historicoConversa}
 
-PERGUNTA ATUAL: "${perguntaUsuario}"
-SQL EXECUTADO: ${sqlGerado}
-PERÍODO CONSULTADO: ${String(refMes).padStart(2, '0')}/${refAno}
-TOTAL DE LINHAS RETORNADAS: ${linhasRetornadas.length}
+PERGUNTA: "${perguntaUsuario}"
+SQL: ${sqlGerado}
+PERÍODO: ${String(refMes).padStart(2, '0')}/${refAno}
+LINHAS: ${linhas.length}
+INTENÇÃO GERENCIAL: ${intencaoGerencial}
 
-RESULTADO DO BANCO (JSON):
-${JSON.stringify(linhasRetornadas, null, 2)}
+DADOS DO BANCO:
+${JSON.stringify(linhas, null, 2)}
 
 INSTRUÇÕES:
-1. Responda em Markdown, tom executivo, claro e preciso.
-2. Com 2+ registros, use TABELA MARKDOWN.
-3. Valores em R$ e quantidades com separador de milhar.
-4. Códigos de produto entre crases.
-5. Se total_encontrado > linhas retornadas, informe o total geral.
-6. Se JSON vazio, diga que não há registros no período.
-7. Use APENAS os dados retornados. Se a pergunta for genérica, deixe claro que os números são do período ${String(refMes).padStart(2, '0')}/${refAno}.
-8. Considere o histórico para follow-ups.`;
+1. Markdown executivo, claro e preciso.
+2. 2+ registros → tabela markdown.
+3. Valores em R$, quantidades com milhar.
+4. Códigos entre crases.
+5. Se a pergunta citou uma usina, deixe claro se o resultado é operacional, gerencial ou ambos.
+6. Se JSON vazio, diga que não há registros no período/critério.
+7. Pergunta sem data → deixe explícito que os números são do período ${String(refMes).padStart(2, '0')}/${refAno}.
+8. Use só os dados retornados.`;
 
     const formatacao = await chamarIAEmCascata(
       promptFormatador,
-      'Formate a resposta executiva com base nos dados do banco e no histórico.',
+      'Formate a resposta executiva.',
       1800
     );
-
     if (!formatacao) return null;
 
     return {
@@ -729,11 +740,11 @@ INSTRUÇÕES:
     };
   };
 
-  const processarConsultaLocal = (pergunta, mes, ano) => {
-    if (!data || data.length === 0) return null;
-
+  const processarConsultaLocal = (pergunta, mes, ano, intencaoGerencial) => {
+    if (!data?.length) return null;
     const p = pergunta.toLowerCase();
-    const dadosFiltrados = data.filter((item) => {
+
+    let dadosFiltrados = data.filter((item) => {
       const itemMes = Number(item.mes_referencia);
       const itemAno = Number(item.ano_referencia);
       const bateMes = mes ? itemMes === mes : true;
@@ -741,7 +752,18 @@ INSTRUÇÕES:
       return bateMes && bateAno;
     });
 
-    if (dadosFiltrados.length === 0) return null;
+    // Filtro inteligente de gerenciais no motor local
+    if (intencaoGerencial === 'sem_gerenciais') {
+      dadosFiltrados = dadosFiltrados.filter(
+        (i) => !(i.unidade_almoxarifado || '').toUpperCase().includes('GERENCIAL')
+      );
+    } else if (intencaoGerencial === 'somente_gerenciais') {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        (i.unidade_almoxarifado || '').toUpperCase().includes('GERENCIAL')
+      );
+    }
+
+    if (!dadosFiltrados.length) return null;
 
     const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
     const anoStr = ano ? String(ano) : 'Todos';
@@ -750,122 +772,80 @@ INSTRUÇÕES:
     let valorTotalEntradas = 0;
     let valorTotalSaidas = 0;
     const porUnidade = {};
-    const porSegmento = {};
-    const porRegiao = {};
-    const itensCriticos = [];
-    const itensSemValor = [];
 
     dadosFiltrados.forEach((item) => {
       const valSaldo = Number(item.valor_saldo_atual) || 0;
-      const qtdSaldo = Number(item.qtde_saldo_atual) || 0;
       const valEntrada = Number(item.valor_entrada_compras) || 0;
       const valSaida = Number(item.valor_saida_cons_interno) || 0;
-
       valorTotalEstoque += valSaldo;
       valorTotalEntradas += valEntrada;
       valorTotalSaidas += valSaida;
 
-      const und = item.unidade_almoxarifado || 'N/A';
+      const und = (item.unidade_almoxarifado || 'N/A').trim();
       if (!porUnidade[und]) porUnidade[und] = { saldo: 0, qtdItens: 0, consumo: 0 };
       porUnidade[und].saldo += valSaldo;
       porUnidade[und].qtdItens += 1;
       porUnidade[und].consumo += valSaida;
-
-      const seg = item.Segmento || item.segmento || 'Não Classificado';
-      if (!porSegmento[seg]) porSegmento[seg] = { saldo: 0, qtdItens: 0, consumo: 0 };
-      porSegmento[seg].saldo += valSaldo;
-      porSegmento[seg].qtdItens += 1;
-      porSegmento[seg].consumo += valSaida;
-
-      const reg = item['Região'] || item.regiao || 'Não Classificada';
-      if (!porRegiao[reg]) porRegiao[reg] = { saldo: 0, qtdItens: 0, consumo: 0 };
-      porRegiao[reg].saldo += valSaldo;
-      porRegiao[reg].qtdItens += 1;
-      porRegiao[reg].consumo += valSaida;
-
-      const objItem = {
-        codigo: item.codigo_produto || 'S/C',
-        nome: item.nome_produto || 'Sem descrição',
-        unidade: und,
-        valor: valSaldo,
-        qtd: qtdSaldo
-      };
-
-      if (item.item_critico && String(item.item_critico).toUpperCase() === 'SIM') {
-        itensCriticos.push(objItem);
-      }
-      if (valSaldo === 0) itensSemValor.push(objItem);
     });
 
-    if (p.includes('sem valor') || p.includes('zerado') || p.includes('valor zero')) {
-      const ordenados = [...itensSemValor].sort((a, b) => b.qtd - a.qtd);
-      const amostra = ordenados.slice(0, MAX_ITENS_API);
-      let resposta = `### 🔍 Itens Sem Valor em Estoque — ${nomeMesStr}/${anoStr}\n\n`;
-      if (ordenados.length === 0) {
-        return `${resposta}✅ Nenhum item com valor zerado encontrado neste período.`;
+    // Busca por nome de unidade mencionada (case-insensitive, parcial)
+    const unidadesKeys = Object.keys(porUnidade);
+    const unidadeMencionada = unidadesKeys.find((u) => p.includes(u.toLowerCase()));
+
+    if (unidadeMencionada || p.includes('candiota') || p.includes('mauá') || p.includes('maua') || p.includes('manacapuru')) {
+      const termo =
+        unidadeMencionada ||
+        (p.includes('candiota')
+          ? 'candiota'
+          : p.includes('manacapuru')
+          ? 'manacapuru'
+          : p.includes('mauá') || p.includes('maua')
+          ? 'mau'
+          : null);
+
+      if (termo) {
+        const matches = Object.entries(porUnidade).filter(([und]) =>
+          und.toLowerCase().includes(termo.toLowerCase())
+        );
+        if (matches.length) {
+          let resposta = `### 🏭 Unidades encontradas — ${nomeMesStr}/${anoStr}\n\n`;
+          resposta += `| Unidade | SKUs | Consumo | Saldo |\n| :--- | :---: | :---: | :---: |\n`;
+          matches
+            .sort((a, b) => b[1].saldo - a[1].saldo)
+            .forEach(([und, info]) => {
+              resposta += `| **${und}** | ${formatarNumero(info.qtdItens)} | ${formatarMoeda(info.consumo)} | ${formatarMoeda(info.saldo)} |\n`;
+            });
+          return resposta;
+        }
       }
-      resposta += `• **Total de SKUs sem valor:** ${formatarNumero(ordenados.length)}\n\n`;
-      resposta += `| Código | Material | Unidade | Qtd. Física | Valor Saldo |\n| :--- | :--- | :--- | :---: | :---: |\n`;
-      amostra.forEach((i) => {
-        resposta += `| \`${i.codigo}\` | ${i.nome} | ${i.unidade} | ${formatarNumero(i.qtd)} | ${formatarMoeda(i.valor)} |\n`;
-      });
-      return resposta;
     }
 
-    if (p.includes('segmento') || p.includes('região') || p.includes('regiao')) {
-      let resposta = `### 🗺️ Resumo por Segmento e Região — ${nomeMesStr}/${anoStr}\n\n`;
-      resposta += `| Segmento | SKUs | Consumo | Saldo Atual |\n| :--- | :---: | :---: | :---: |\n`;
-      Object.entries(porSegmento)
-        .sort((a, b) => b[1].saldo - a[1].saldo)
-        .forEach(([seg, info]) => {
-          resposta += `| **${seg}** | ${formatarNumero(info.qtdItens)} | ${formatarMoeda(info.consumo)} | ${formatarMoeda(info.saldo)} |\n`;
-        });
-      resposta += `\n| Região | SKUs | Consumo | Saldo Atual |\n| :--- | :---: | :---: | :---: |\n`;
-      Object.entries(porRegiao)
-        .sort((a, b) => b[1].saldo - a[1].saldo)
-        .forEach(([reg, info]) => {
-          resposta += `| **${reg}** | ${formatarNumero(info.qtdItens)} | ${formatarMoeda(info.consumo)} | ${formatarMoeda(info.saldo)} |\n`;
-        });
-      return resposta;
-    }
-
-    if (p.includes('crítico') || p.includes('critico')) {
-      let resposta = `### ⚠️ Materiais em Estado Crítico — ${nomeMesStr}/${anoStr}\n\n`;
-      resposta += `• **Total de itens críticos:** ${formatarNumero(itensCriticos.length)}\n\n`;
-      if (itensCriticos.length > 0) {
-        resposta += `| Código | Material | Unidade | Qtd. | Valor Saldo |\n| :--- | :--- | :--- | :---: | :---: |\n`;
-        itensCriticos.slice(0, MAX_ITENS_API).forEach((i) => {
-          resposta += `| \`${i.codigo}\` | ${i.nome} | ${i.unidade} | ${formatarNumero(i.qtd)} | ${formatarMoeda(i.valor)} |\n`;
-        });
-      }
-      return resposta;
-    }
-
-    if (p.includes('maior') || p.includes('top') || p.includes('itens')) {
+    if (p.includes('maior') || p.includes('top')) {
       const top = [...dadosFiltrados]
         .sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))
         .slice(0, 10);
-      let resposta = `### 🏆 Top 10 Itens com Maior Valor — ${nomeMesStr}/${anoStr}\n\n`;
-      resposta += `| # | Código | Material | Unidade | Qtd. | Valor Saldo |\n| :---: | :--- | :--- | :--- | :---: | :---: |\n`;
+      let resposta = `### 🏆 Top 10 — ${nomeMesStr}/${anoStr}\n\n`;
+      resposta += `| # | Código | Material | Unidade | Valor |\n| :---: | :--- | :--- | :--- | :---: |\n`;
       top.forEach((i, idx) => {
-        resposta += `| ${idx + 1} | \`${i.codigo_produto || 'S/C'}\` | ${i.nome_produto} | ${i.unidade_almoxarifado} | ${formatarNumero(i.qtde_saldo_atual)} | ${formatarMoeda(i.valor_saldo_atual)} |\n`;
+        resposta += `| ${idx + 1} | \`${i.codigo_produto || 'S/C'}\` | ${i.nome_produto} | ${i.unidade_almoxarifado} | ${formatarMoeda(i.valor_saldo_atual)} |\n`;
       });
       return resposta;
     }
 
     let resposta = `### 📊 Resumo do Estoque — ${nomeMesStr}/${anoStr}\n\n`;
-    resposta += `• **Valor Total em Saldo:** ${formatarMoeda(valorTotalEstoque)}\n`;
-    resposta += `• **Entradas (Compras):** ${formatarMoeda(valorTotalEntradas)}\n`;
-    resposta += `• **Saídas (Consumo Interno):** ${formatarMoeda(valorTotalSaidas)}\n`;
-    resposta += `• **Total de Registros:** ${formatarNumero(dadosFiltrados.length)} SKUs\n\n`;
-    resposta += `| Unidade | SKUs | Consumo | Saldo Atual |\n| :--- | :---: | :---: | :---: |\n`;
+    if (intencaoGerencial === 'sem_gerenciais') resposta += `_Filtro: sem unidades gerenciais_\n\n`;
+    if (intencaoGerencial === 'somente_gerenciais') resposta += `_Filtro: somente unidades gerenciais_\n\n`;
+    resposta += `• **Valor Total:** ${formatarMoeda(valorTotalEstoque)}\n`;
+    resposta += `• **Entradas:** ${formatarMoeda(valorTotalEntradas)}\n`;
+    resposta += `• **Saídas:** ${formatarMoeda(valorTotalSaidas)}\n`;
+    resposta += `• **Registros:** ${formatarNumero(dadosFiltrados.length)}\n\n`;
+    resposta += `| Unidade | SKUs | Consumo | Saldo |\n| :--- | :---: | :---: | :---: |\n`;
     Object.entries(porUnidade)
       .sort((a, b) => b[1].saldo - a[1].saldo)
-      .slice(0, 12)
+      .slice(0, 15)
       .forEach(([und, info]) => {
         resposta += `| **${und}** | ${formatarNumero(info.qtdItens)} | ${formatarMoeda(info.consumo)} | ${formatarMoeda(info.saldo)} |\n`;
       });
-
     return resposta;
   };
 
@@ -873,14 +853,15 @@ INSTRUÇÕES:
     const query = (textToSend || input).trim();
     if (!query || isLoading) return;
 
-    const userMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        sender: 'user',
+        text: query,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]);
     if (!textToSend) setInput('');
     setIsLoading(true);
 
@@ -889,9 +870,15 @@ INSTRUÇÕES:
       const { mes, ano } = periodo;
       const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Histórico';
       const anoStr = ano ? String(ano) : 'Completo';
-      const historicoConversa = montarHistoricoConversa();
+      const historico = montarHistoricoConversa();
+      const intencaoGerencial = extrairIntencaoGerencial(query);
 
-      const resultadoSQL = await consultarViaSupabaseSQL(query, periodo, historicoConversa);
+      const resultadoSQL = await consultarViaSupabaseSQL(
+        query,
+        periodo,
+        historico,
+        intencaoGerencial
+      );
 
       if (resultadoSQL?.texto) {
         setMessages((prev) => [
@@ -908,32 +895,31 @@ INSTRUÇÕES:
         return;
       }
 
-      const respostaLocal = processarConsultaLocal(query, mes, ano);
-
-      if (respostaLocal) {
+      const local = processarConsultaLocal(query, mes, ano, intencaoGerencial);
+      if (local) {
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now() + 1,
             sender: 'bot',
-            text: respostaLocal,
+            text: local,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             badge: `${nomeMesStr}/${anoStr} • Motor Local`
           }
         ]);
       } else {
         throw new Error(
-          `Não foi possível consultar o banco e não há dados em memória para ${nomeMesStr}/${anoStr}. Verifique a função 'executar_consulta_ia' no Supabase.`
+          `Sem dados para ${nomeMesStr}/${anoStr}. Verifique a função executar_consulta_ia no Supabase.`
         );
       }
     } catch (error) {
-      console.error('Erro no Pergunte ao Estoque:', error);
+      console.error(error);
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now() + 1,
           sender: 'bot',
-          text: `⚠️ **Não foi possível concluir a consulta:**\n\n${error.message}`,
+          text: `⚠️ **Não foi possível concluir:**\n\n${error.message}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           badge: 'Aviso'
         }
@@ -955,7 +941,7 @@ INSTRUÇÕES:
       {
         id: Date.now(),
         sender: 'bot',
-        text: 'Histórico limpo. A memória desta conversa foi reiniciada. Qual consulta deseja fazer agora?',
+        text: 'Histórico e memória limpos. Pode perguntar novamente.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         badge: 'Pronto'
       }
@@ -967,9 +953,9 @@ INSTRUÇÕES:
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] w-full max-w-6xl mx-auto p-4 md:p-6 text-gray-100">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 mb-4 rounded-xl bg-gradient-to-r from-[#12161F] via-[#151A25] to-[#12161F] border border-[#CC5500]/30 shadow-lg shadow-black/40 gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 mb-4 rounded-xl bg-gradient-to-r from-[#12161F] via-[#151A25] to-[#12161F] border border-[#CC5500]/30 shadow-lg gap-3">
         <div className="flex items-center gap-3">
-          <div className="relative p-2.5 rounded-xl bg-[#CC5500]/15 border border-[#CC5500]/40 text-[#FF7A1A] shadow-inner">
+          <div className="relative p-2.5 rounded-xl bg-[#CC5500]/15 border border-[#CC5500]/40 text-[#FF7A1A]">
             <Sparkles className="w-6 h-6" />
             <span
               className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-[#12161F] ${
@@ -979,12 +965,10 @@ INSTRUÇÕES:
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-bold tracking-wide text-white uppercase font-sans">
-                Pergunte ao Estoque
-              </h2>
+              <h2 className="text-lg font-bold tracking-wide text-white uppercase">Pergunte ao Estoque</h2>
               {dbConnected ? (
                 <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                  <Database className="w-3 h-3" /> Supabase Full-DB Ativo
+                  <Database className="w-3 h-3" /> Supabase Ativo
                 </span>
               ) : loading ? (
                 <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 border border-amber-500/30 text-amber-400">
@@ -992,93 +976,88 @@ INSTRUÇÕES:
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                  <CheckCircle2 className="w-3 h-3" /> {data.length.toLocaleString('pt-BR')} itens em memória
+                  <CheckCircle2 className="w-3 h-3" /> {data.length.toLocaleString('pt-BR')} em memória
                 </span>
               )}
               {periodoAtual.mes && periodoAtual.ano && (
-                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#1E2433] border border-gray-700 text-gray-300">
+                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] bg-[#1E2433] border border-gray-700 text-gray-300">
                   <Calendar className="w-3 h-3 text-[#FF8533]" />
-                  Período Atual: {String(periodoAtual.mes).padStart(2, '0')}/{periodoAtual.ano}
+                  {String(periodoAtual.mes).padStart(2, '0')}/{periodoAtual.ano}
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Text-to-SQL • Memória de conversa • Âmbar Energia
-            </p>
+            <p className="text-xs text-gray-400 mt-0.5">Busca inteligente • Gerenciais • Memória de chat</p>
           </div>
         </div>
-
         <button
           onClick={handleClearChat}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-400 transition-all rounded-lg bg-[#1A1F2C] border border-gray-800 hover:border-[#CC5500]/50 hover:text-white shrink-0"
-          title="Limpar histórico e memória da conversa"
+          className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-400 rounded-lg bg-[#1A1F2C] border border-gray-800 hover:border-[#CC5500]/50 hover:text-white"
         >
-          <Trash2 className="w-4 h-4 text-gray-400" />
-          <span>Limpar Chat</span>
+          <Trash2 className="w-4 h-4" />
+          Limpar Chat
         </button>
       </div>
 
       <div className="mb-4">
-        <div className="flex items-center gap-2 mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+        <div className="flex items-center gap-2 mb-2 text-[11px] font-semibold uppercase text-gray-400">
           <HelpCircle className="w-3.5 h-3.5 text-[#CC5500]" />
-          <span>Consultas Sugeridas</span>
+          Consultas Sugeridas
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {SUGGESTIONS.map((suggestion, index) => (
+          {SUGGESTIONS.map((s, i) => (
             <button
-              key={index}
-              onClick={() => handleSend(suggestion)}
+              key={i}
+              onClick={() => handleSend(s)}
               disabled={isLoading || !isReady}
-              className="flex items-center justify-between p-3 text-left transition-all rounded-xl bg-[#12161F] border border-gray-800/90 hover:border-[#CC5500]/60 hover:bg-[#171C28] group text-xs text-gray-300 disabled:opacity-40 shadow-sm"
+              className="flex items-center justify-between p-3 text-left rounded-xl bg-[#12161F] border border-gray-800/90 hover:border-[#CC5500]/60 text-xs text-gray-300 disabled:opacity-40"
             >
-              <span className="line-clamp-2 leading-snug">{suggestion}</span>
-              <ArrowRight className="w-3.5 h-3.5 text-gray-500 group-hover:text-[#FF8533] shrink-0 ml-2 transition-transform group-hover:translate-x-0.5" />
+              <span className="line-clamp-2">{s}</span>
+              <ArrowRight className="w-3.5 h-3.5 text-gray-500 shrink-0 ml-2" />
             </button>
           ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-5 rounded-xl bg-[#0D0F12] border border-gray-800/80 shadow-inner custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-4 space-y-5 rounded-xl bg-[#0D0F12] border border-gray-800/80 custom-scrollbar">
         {messages.map((msg) => (
           <div
             key={msg.id}
             className={`flex items-start gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
           >
             <div
-              className={`flex items-center justify-center w-8 h-8 rounded-xl shrink-0 border shadow-sm ${
+              className={`flex items-center justify-center w-8 h-8 rounded-xl shrink-0 border ${
                 msg.sender === 'user'
-                  ? 'bg-[#1E2433] border-gray-700 text-gray-200'
+                  ? 'bg-[#1E2433] border-gray-700'
                   : 'bg-[#CC5500]/15 border-[#CC5500]/40 text-[#FF8533]'
               }`}
             >
               {msg.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
             </div>
-
             <div
-              className={`max-w-[88%] md:max-w-[82%] rounded-2xl p-4 text-sm shadow-md ${
+              className={`max-w-[88%] rounded-2xl p-4 text-sm ${
                 msg.sender === 'user'
-                  ? 'bg-gradient-to-br from-[#D86B14] to-[#B84A00] text-white font-medium rounded-tr-none'
-                  : 'bg-[#131722] text-gray-200 border border-gray-800/90 rounded-tl-none'
+                  ? 'bg-gradient-to-br from-[#D86B14] to-[#B84A00] text-white rounded-tr-none'
+                  : 'bg-[#131722] border border-gray-800/90 rounded-tl-none'
               }`}
             >
               {msg.sender === 'bot' && (
                 <div className="flex items-center justify-between gap-4 pb-2 mb-2 border-b border-gray-800/70">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#FF8533]">
-                    {msg.badge || 'Análise de Estoque'}
+                  <span className="text-[10px] font-semibold uppercase text-[#FF8533]">
+                    {msg.badge || 'Análise'}
                   </span>
                   <div className="flex items-center gap-3">
                     {msg.sql && (
                       <button
                         onClick={() => setVisibleSqlId(visibleSqlId === msg.id ? null : msg.id)}
-                        className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#FF8533] transition-colors"
+                        className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#FF8533]"
                       >
                         <Code2 className="w-3.5 h-3.5" />
-                        <span>{visibleSqlId === msg.id ? 'Ocultar SQL' : 'Ver SQL'}</span>
+                        {visibleSqlId === msg.id ? 'Ocultar SQL' : 'Ver SQL'}
                       </button>
                     )}
                     <button
                       onClick={() => handleCopy(msg.id, msg.text)}
-                      className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+                      className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300"
                     >
                       {copiedId === msg.id ? (
                         <>
@@ -1088,26 +1067,23 @@ INSTRUÇÕES:
                       ) : (
                         <>
                           <Copy className="w-3 h-3" />
-                          <span>Copiar</span>
+                          Copiar
                         </>
                       )}
                     </button>
                   </div>
                 </div>
               )}
-
               {msg.sender === 'bot' && msg.sql && visibleSqlId === msg.id && (
                 <div className="mb-3 p-2.5 rounded-lg bg-[#090B0E] border border-gray-800 font-mono text-[11px] text-emerald-400 overflow-x-auto">
                   {msg.sql}
                 </div>
               )}
-
               {msg.sender === 'user' ? (
-                <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                <p className="whitespace-pre-wrap">{msg.text}</p>
               ) : (
                 <MarkdownRenderer text={msg.text} />
               )}
-
               <span
                 className={`block mt-2.5 text-[10px] ${
                   msg.sender === 'user' ? 'text-orange-100/80 text-right' : 'text-gray-500 text-right'
@@ -1120,22 +1096,21 @@ INSTRUÇÕES:
         ))}
 
         {isLoading && (
-          <div className="flex items-start gap-3 flex-row">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0 bg-[#CC5500]/15 border border-[#CC5500]/40 text-[#FF8533]">
+          <div className="flex items-start gap-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-[#CC5500]/15 border border-[#CC5500]/40 text-[#FF8533]">
               <Bot className="w-4 h-4 animate-pulse" />
             </div>
-            <div className="bg-[#131722] border border-gray-800 rounded-2xl rounded-tl-none p-4 text-sm text-gray-300 flex items-center gap-3 shadow-md">
+            <div className="bg-[#131722] border border-gray-800 rounded-2xl rounded-tl-none p-4 text-sm text-gray-300 flex items-center gap-3">
               <RefreshCw className="w-4 h-4 animate-spin text-[#FF8533]" />
-              <span>Consultando base e consolidando resposta...</span>
+              Consultando base...
             </div>
           </div>
         )}
-
         <div ref={chatEndRef} />
       </div>
 
       <div className="mt-4">
-        <div className="relative flex items-center rounded-xl bg-[#12161F] border border-gray-800 focus-within:border-[#CC5500] transition-all p-2 shadow-lg">
+        <div className="relative flex items-center rounded-xl bg-[#12161F] border border-gray-800 focus-within:border-[#CC5500] p-2">
           <input
             type="text"
             value={input}
@@ -1144,21 +1119,21 @@ INSTRUÇÕES:
             disabled={isLoading || !isReady}
             placeholder={
               isReady
-                ? 'Ex: quantos itens temos em estoque? (usa período atual se não informar data)'
-                : 'Conectando à base de dados...'
+                ? 'Ex: valor de Candiota sem gerenciais | estoque atual de Manacapuru'
+                : 'Conectando...'
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
           />
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || isLoading || !isReady}
-            className="flex items-center justify-center p-2.5 rounded-lg bg-[#D86B14] text-white hover:bg-[#b85609] transition-colors disabled:opacity-40 shrink-0"
+            className="p-2.5 rounded-lg bg-[#D86B14] text-white hover:bg-[#b85609] disabled:opacity-40"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Memória ativa neste chat • Perguntas sem data usam o período atual • Limpar Chat reinicia a memória
+          Busca inteligente (TRIM + ILIKE) • Separação operacional/gerencial • Memória até limpar o chat
         </p>
       </div>
     </div>

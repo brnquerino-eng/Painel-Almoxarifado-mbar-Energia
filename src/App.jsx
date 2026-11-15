@@ -8,7 +8,7 @@ import { useEstoqueData } from './hooks/useEstoqueData'
 import { useInventarioData } from './hooks/useInventarioData'
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('geral')
+  const [activeTab, setActiveTab] = useState('pergunte')
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
   const [buscando, setBuscando] = useState(false)
 
