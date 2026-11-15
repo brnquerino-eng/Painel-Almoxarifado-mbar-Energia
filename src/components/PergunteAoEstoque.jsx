@@ -1,7 +1,7 @@
 // src/components/PergunteAoEstoque.jsx
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Bot, User, Sparkles, Trash2, RefreshCw, HelpCircle, ArrowRight, CheckCircle2, Database, Calendar } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Trash2, RefreshCw, HelpCircle, ArrowRight, CheckCircle2, Database } from 'lucide-react';
 
 const SUGGESTIONS = [
   "Qual o valor total do estoque no mês 10 de 2026?",
@@ -10,14 +10,14 @@ const SUGGESTIONS = [
   "Resumo executivo do estoque por segmento e região"
 ];
 
-// Modelos Groq atualizados (novembro 2026) - removidos os deprecados
+// Modelos Groq atualizados (novembro 2026)
 const GROQ_MODELS = [
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
   'qwen/qwen3.8-27b'
 ];
 
-// Modelos Gemini atualizados e estáveis
+// Modelos Gemini atualizados
 const GEMINI_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
@@ -48,112 +48,33 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Pré-agrega os dados gerais do estoque para otimizar pesquisas locais e externas
-  const contextoResumido = useMemo(() => {
-    if (!data || data.length === 0) return null;
-
-    const totalItens = data.length;
-    let valorTotalEstoque = 0;
-    let valorTotalEntradas = 0;
-    let valorTotalSaidas = 0;
-    
-    const porUnidade = {};
-    const porCategoria = {};
-    const porSegmento = {};
-    const itensCriticos = [];
-
-    data.forEach(item => {
-      const valSaldo = Number(item.valor_saldo_atual) || 0;
-      const valEntrada = Number(item.valor_entrada_compras) || 0;
-      const valSaida = Number(item.valor_saida_cons_interno) || 0;
-
-      valorTotalEstoque += valSaldo;
-      valorTotalEntradas += valEntrada;
-      valorTotalSaidas += valSaida;
-
-      // Agrupamento por Unidade
-      const und = item.unidade_almoxarifado || 'N/A';
-      if (!porUnidade[und]) porUnidade[und] = { saldo: 0, qtdItens: 0 };
-      porUnidade[und].saldo += valSaldo;
-      porUnidade[und].qtdItens += 1;
-
-      // Agrupamento por Categoria (GE)
-      const cat = item.ge || 'OUTROS';
-      if (!porCategoria[cat]) porCategoria[cat] = 0;
-      porCategoria[cat] += valSaldo;
-
-      // Agrupamento por Segmento
-      const seg = item.Segmento || 'N/A';
-      if (!porSegmento[seg]) porSegmento[seg] = 0;
-      porSegmento[seg] += valSaldo;
-
-      // Lista de Itens Críticos
-      if (item.item_critico && String(item.item_critico).toUpperCase() === 'SIM') {
-        itensCriticos.push({
-          codigo: item.codigo_produto,
-          nome: item.nome_produto,
-          unidade: item.unidade_almoxarifado,
-          valor: valSaldo,
-          qtd: item.qtde_saldo_atual
-        });
-      }
-    });
-
-    // Top 10 Itens por Valor de Saldo
-    const top10Maiores = [...data]
-      .sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))
-      .slice(0, 10)
-      .map(i => ({
-        codigo: i.codigo_produto,
-        nome: i.nome_produto,
-        unidade: i.unidade_almoxarifado,
-        valor: Number(i.valor_saldo_atual) || 0,
-        qtd: i.qtde_saldo_atual,
-        precoMedio: i.preco_medio,
-        mes: i.mes_referencia,
-        ano: i.ano_referencia
-      }));
-
-    return {
-      estatisticasGerais: {
-        totalRegistros: totalItens,
-        valorTotalEstoque,
-        valorTotalEntradas,
-        valorTotalSaidas,
-        qtdItensCriticos: itensCriticos.length
-      },
-      resumoPorUnidade: porUnidade,
-      resumoPorCategoria: porCategoria,
-      resumoPorSegmento: porSegmento,
-      top10ItensMaiorValor: top10Maiores,
-      amostraItensCriticos: itensCriticos.slice(0, 10)
-    };
-  }, [data]);
-
-  // Versão enxuta do contexto para enviar às APIs (evita timeout e excesso de tokens)
-  const contextoParaAPI = useMemo(() => {
-    if (!contextoResumido) return null;
-
-    return {
-      estatisticasGerais: contextoResumido.estatisticasGerais,
-      top5ItensMaiorValor: contextoResumido.top10ItensMaiorValor.slice(0, 5),
-      resumoPorUnidade: Object.fromEntries(
-        Object.entries(contextoResumido.resumoPorUnidade)
-          .sort((a, b) => b[1].saldo - a[1].saldo)
-          .slice(0, 8)
-      ),
-      amostraItensCriticos: contextoResumido.amostraItensCriticos.slice(0, 5)
-    };
-  }, [contextoResumido]);
-
   const formatarMoeda = (valor) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
   };
 
-  // Auxiliar para extrair mês e ano da pergunta do usuário
-  const extrairMesEAno = (prompt) => {
+  // Descobre o período mais recente existente na base
+  const getPeriodoMaisRecente = () => {
+    if (!data || data.length === 0) return { mes: null, ano: null };
+
+    let maiorAno = 0;
+    let maiorMes = 0;
+
+    data.forEach(item => {
+      const ano = Number(item.ano_referencia) || 0;
+      const mes = Number(item.mes_referencia) || 0;
+      if (ano > maiorAno || (ano === maiorAno && mes > maiorMes)) {
+        maiorAno = ano;
+        maiorMes = mes;
+      }
+    });
+
+    return { mes: maiorMes || null, ano: maiorAno || null };
+  };
+
+  // Extrai mês e ano da pergunta do usuário (dinâmico)
+  const extrairPeriodo = (prompt) => {
     const p = prompt.toLowerCase();
-    
+
     const meses = {
       'janeiro': 1, 'jan': 1, '01': 1, '1': 1,
       'fevereiro': 2, 'fev': 2, '02': 2, '2': 2,
@@ -169,114 +90,184 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       'dezembro': 12, 'dez': 12, '12': 12
     };
 
+    // "hoje", "atual", "agora", "recente" → período mais recente da base
+    if (
+      p.includes('hoje') ||
+      p.includes('atual') ||
+      p.includes('agora') ||
+      p.includes('recente') ||
+      p.includes('último') ||
+      p.includes('ultimo')
+    ) {
+      return getPeriodoMaisRecente();
+    }
+
     let mes = null;
     let ano = null;
 
-    // Busca formato "10/2026" ou "mês 10/2026"
+    // Formato 10/2026 ou mês 10/2026
     const matchSlash = p.match(/(?:mês|mes)?\s*(\d{1,2})\/(\d{4})/);
     if (matchSlash) {
       mes = parseInt(matchSlash[1], 10);
       ano = parseInt(matchSlash[2], 10);
-    } else {
-      // Busca ano de 4 dígitos (ex: 2026)
-      const matchAno = p.match(/\b(202[0-9])\b/);
-      if (matchAno) ano = parseInt(matchAno[1], 10);
+      return { mes, ano };
+    }
 
-      // Busca indicação de mês (ex: "mês 10", "mes 10", "outubro")
-      const matchMes = p.match(/mês\s*(\d{1,2})|mes\s*(\d{1,2})|\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/);
-      if (matchMes) {
-        const termo = matchMes[1] || matchMes[2] || matchMes[3];
-        if (termo && meses[termo]) mes = meses[termo];
-      }
+    // Ano de 4 dígitos
+    const matchAno = p.match(/\b(202[0-9])\b/);
+    if (matchAno) ano = parseInt(matchAno[1], 10);
+
+    // Nome do mês ou "mês 10"
+    const matchMes = p.match(/mês\s*(\d{1,2})|mes\s*(\d{1,2})|\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/);
+    if (matchMes) {
+      const termo = matchMes[1] || matchMes[2] || matchMes[3];
+      if (termo && meses[termo]) mes = meses[termo];
+    }
+
+    // Se não encontrou nada, usa o período mais recente
+    if (mes === null && ano === null) {
+      return getPeriodoMaisRecente();
     }
 
     return { mes, ano };
   };
 
-  // Motor Analytics Local: Responde instantaneamente em 0ms com exatidão matemática
-  const processarConsultaLocal = (pergunta) => {
-    if (!data || data.length === 0 || !contextoResumido) return null;
-    const p = pergunta.toLowerCase();
-    const { mes, ano } = extrairMesEAno(pergunta);
+  // Filtra a base pelo período detectado
+  const filtrarPorPeriodo = (mes, ano) => {
+    if (!data || data.length === 0) return [];
 
-    // 1. Consulta Filtrada por Mês e/ou Ano Especificado
-    if (mes !== null || ano !== null) {
-      const itensFiltrados = data.filter(item => {
-        const itemMes = Number(item.mes_referencia);
-        const itemAno = Number(item.ano_referencia);
-        
-        const bateMes = mes ? itemMes === mes : true;
-        const bateAno = ano ? itemAno === ano : true;
-        
-        return bateMes && bateAno;
-      });
+    return data.filter(item => {
+      const itemMes = Number(item.mes_referencia);
+      const itemAno = Number(item.ano_referencia);
+      const bateMes = mes ? itemMes === mes : true;
+      const bateAno = ano ? itemAno === ano : true;
+      return bateMes && bateAno;
+    });
+  };
 
-      const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
-      const anoStr = ano ? String(ano) : 'Todos os Anos';
+  // Monta o resumo a partir de um conjunto de dados (já filtrado)
+  const montarResumo = (dadosFiltrados) => {
+    if (!dadosFiltrados || dadosFiltrados.length === 0) return null;
 
-      if (itensFiltrados.length === 0) {
-        return `📅 **Consulta do Período ${nomeMesStr}/${anoStr}:**\n\nNão foram encontrados registros no banco de dados para a competência solicitada (Mês: ${nomeMesStr} | Ano: ${anoStr}).`;
-      }
+    let valorTotalEstoque = 0;
+    let valorTotalEntradas = 0;
+    let valorTotalSaidas = 0;
 
-      let valTotalCompetencia = 0;
-      let valEntradasCompetencia = 0;
-      let valSaidasCompetencia = 0;
-      const porUnidadeFiltrado = {};
+    const porUnidade = {};
+    const porCategoria = {};
+    const porSegmento = {};
+    const itensCriticos = [];
 
-      itensFiltrados.forEach(item => {
-        const valSaldo = Number(item.valor_saldo_atual) || 0;
-        const valEntrada = Number(item.valor_entrada_compras) || 0;
-        const valSaida = Number(item.valor_saida_cons_interno) || 0;
+    dadosFiltrados.forEach(item => {
+      const valSaldo = Number(item.valor_saldo_atual) || 0;
+      const valEntrada = Number(item.valor_entrada_compras) || 0;
+      const valSaida = Number(item.valor_saida_cons_interno) || 0;
 
-        valTotalCompetencia += valSaldo;
-        valEntradasCompetencia += valEntrada;
-        valSaidasCompetencia += valSaida;
+      valorTotalEstoque += valSaldo;
+      valorTotalEntradas += valEntrada;
+      valorTotalSaidas += valSaida;
 
-        const und = item.unidade_almoxarifado || 'N/A';
-        if (!porUnidadeFiltrado[und]) porUnidadeFiltrado[und] = 0;
-        porUnidadeFiltrado[und] += valSaldo;
-      });
+      const und = item.unidade_almoxarifado || 'N/A';
+      if (!porUnidade[und]) porUnidade[und] = { saldo: 0, qtdItens: 0, consumo: 0 };
+      porUnidade[und].saldo += valSaldo;
+      porUnidade[und].qtdItens += 1;
+      porUnidade[und].consumo += valSaida;
 
-      const topItemComp = [...itensFiltrados].sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))[0];
+      const cat = item.ge || 'OUTROS';
+      if (!porCategoria[cat]) porCategoria[cat] = 0;
+      porCategoria[cat] += valSaldo;
 
-      let resposta = `📊 **Fechamento do Estoque — Mês ${nomeMesStr}/${anoStr}**\n\n`;
-      resposta += `• **Valor Total em Saldo:** ${formatarMoeda(valTotalCompetencia)}\n`;
-      resposta += `• **Total de Registros:** ${itensFiltrados.length.toLocaleString('pt-BR')} SKUs\n`;
-      resposta += `• **Entradas (Compras):** ${formatarMoeda(valEntradasCompetencia)}\n`;
-      resposta += `• **Saídas (Consumo Interno):** ${formatarMoeda(valSaidasCompetencia)}\n\n`;
+      const seg = item.Segmento || 'N/A';
+      if (!porSegmento[seg]) porSegmento[seg] = 0;
+      porSegmento[seg] += valSaldo;
 
-      if (topItemComp) {
-        resposta += `🥇 **Item de Maior Valor na Competência (${nomeMesStr}/${anoStr}):**\n`;
-        resposta += `• **Descrição:** ${topItemComp.nome_produto || 'Produto sem descrição'}\n`;
-        resposta += `• **Código:** ${topItemComp.codigo_produto || 'N/A'} | **Unidade:** ${topItemComp.unidade_almoxarifado || 'N/A'}\n`;
-        resposta += `• **Valor em Saldo:** ${formatarMoeda(topItemComp.valor_saldo_atual)} (Qtd: ${topItemComp.qtde_saldo_atual || 0})\n\n`;
-      }
-
-      resposta += `**Divisão por Unidade no Período:**\n`;
-      Object.entries(porUnidadeFiltrado)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .forEach(([und, val]) => {
-          resposta += `• **${und}:** ${formatarMoeda(val)}\n`;
+      if (item.item_critico && String(item.item_critico).toUpperCase() === 'SIM') {
+        itensCriticos.push({
+          codigo: item.codigo_produto,
+          nome: item.nome_produto,
+          unidade: item.unidade_almoxarifado,
+          valor: valSaldo,
+          qtd: item.qtde_saldo_atual
         });
+      }
+    });
 
-      return resposta;
-    }
+    const top10Maiores = [...dadosFiltrados]
+      .sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))
+      .slice(0, 10)
+      .map(i => ({
+        codigo: i.codigo_produto,
+        nome: i.nome_produto,
+        unidade: i.unidade_almoxarifado,
+        valor: Number(i.valor_saldo_atual) || 0,
+        qtd: i.qtde_saldo_atual,
+        precoMedio: i.preco_medio
+      }));
 
-    // 2. Consulta de Valor Total do Estoque Acumulado
-    if ((p.includes('valor') && (p.includes('total') || p.includes('acumulado') || p.includes('estoque'))) || p.includes('quanto vale')) {
-      const { valorTotalEstoque, totalRegistros, valorTotalEntradas, valorTotalSaidas } = contextoResumido.estatisticasGerais;
-      
-      let resposta = `📊 **Resumo Financeiro Geral do Estoque (Âmbar Energia)**\n\n`;
+    const topConsumo = Object.entries(porUnidade)
+      .map(([unidade, info]) => ({ unidade, ...info }))
+      .sort((a, b) => b.consumo - a.consumo)
+      .slice(0, 10);
+
+    return {
+      estatisticasGerais: {
+        totalRegistros: dadosFiltrados.length,
+        valorTotalEstoque,
+        valorTotalEntradas,
+        valorTotalSaidas,
+        qtdItensCriticos: itensCriticos.length
+      },
+      resumoPorUnidade: porUnidade,
+      resumoPorCategoria: porCategoria,
+      resumoPorSegmento: porSegmento,
+      top10ItensMaiorValor: top10Maiores,
+      topUnidadesPorConsumo: topConsumo,
+      amostraItensCriticos: itensCriticos.slice(0, 10)
+    };
+  };
+
+  // Versão enxuta para enviar às APIs
+  const montarContextoParaAPI = (resumo) => {
+    if (!resumo) return null;
+
+    return {
+      estatisticasGerais: resumo.estatisticasGerais,
+      top5ItensMaiorValor: resumo.top10ItensMaiorValor.slice(0, 5),
+      topUnidadesPorConsumo: resumo.topUnidadesPorConsumo.slice(0, 8),
+      resumoPorUnidade: Object.fromEntries(
+        Object.entries(resumo.resumoPorUnidade)
+          .sort((a, b) => b[1].saldo - a[1].saldo)
+          .slice(0, 10)
+      ),
+      amostraItensCriticos: resumo.amostraItensCriticos.slice(0, 5)
+    };
+  };
+
+  // Motor local (usa dados já filtrados pelo período)
+  const processarConsultaLocal = (pergunta, resumo, mes, ano) => {
+    if (!resumo) return null;
+    const p = pergunta.toLowerCase();
+    const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
+    const anoStr = ano ? String(ano) : 'Todos';
+
+    // Valor total
+    if (
+      (p.includes('valor') && (p.includes('total') || p.includes('acumulado') || p.includes('estoque'))) ||
+      p.includes('quanto vale') ||
+      p.includes('saldo')
+    ) {
+      const { valorTotalEstoque, totalRegistros, valorTotalEntradas, valorTotalSaidas } = resumo.estatisticasGerais;
+
+      let resposta = `📊 **Resumo do Estoque — ${nomeMesStr}/${anoStr}**\n\n`;
       resposta += `• **Valor Total em Saldo:** ${formatarMoeda(valorTotalEstoque)}\n`;
-      resposta += `• **Total de Itens Cadastrados:** ${totalRegistros.toLocaleString('pt-BR')} registros\n`;
+      resposta += `• **Total de Registros:** ${totalRegistros.toLocaleString('pt-BR')} SKUs\n`;
       resposta += `• **Entradas (Compras):** ${formatarMoeda(valorTotalEntradas)}\n`;
       resposta += `• **Saídas (Consumo Interno):** ${formatarMoeda(valorTotalSaidas)}\n\n`;
-      resposta += `**Divisão Principal por Unidade:**\n`;
+      resposta += `**Divisão por Unidade:**\n`;
 
-      Object.entries(contextoResumido.resumoPorUnidade)
+      Object.entries(resumo.resumoPorUnidade)
         .sort((a, b) => b[1].saldo - a[1].saldo)
-        .slice(0, 5)
+        .slice(0, 8)
         .forEach(([unidade, info]) => {
           resposta += `• **${unidade}:** ${formatarMoeda(info.saldo)} (${info.qtdItens.toLocaleString('pt-BR')} itens)\n`;
         });
@@ -284,11 +275,11 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // 3. Consulta de Top 5 Itens de Maior Valor
+    // Top 5 itens
     if (p.includes('maior valor') || p.includes('top 5') || p.includes('5 itens') || p.includes('item de maior')) {
-      const top = contextoResumido.top10ItensMaiorValor.slice(0, 5);
-      let resposta = `🏆 **Top 5 Itens com Maior Valor em Estoque:**\n\n`;
-      
+      const top = resumo.top10ItensMaiorValor.slice(0, 5);
+      let resposta = `🏆 **Top 5 Itens com Maior Valor — ${nomeMesStr}/${anoStr}**\n\n`;
+
       top.forEach((item, idx) => {
         resposta += `${idx + 1}. **${item.nome || 'Produto sem descrição'}** (Cód: ${item.codigo || 'N/A'})\n`;
         resposta += `   • **Valor em Saldo:** ${formatarMoeda(item.valor)}\n`;
@@ -298,43 +289,45 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       return resposta;
     }
 
-    // 4. Consulta de Materiais Críticos
+    // Materiais críticos
     if (p.includes('crítico') || p.includes('critico') || p.includes('estado crítico')) {
-      const { qtdItensCriticos } = contextoResumido.estatisticasGerais;
-      let resposta = `⚠️ **Análise de Materiais em Estado Crítico:**\n\n`;
-      resposta += `Total de itens marcados como críticos no almoxarifado: **${qtdItensCriticos}**.\n\n`;
+      const { qtdItensCriticos } = resumo.estatisticasGerais;
+      let resposta = `⚠️ **Materiais em Estado Crítico — ${nomeMesStr}/${anoStr}**\n\n`;
+      resposta += `Total de itens críticos: **${qtdItensCriticos}**.\n\n`;
 
-      if (contextoResumido.amostraItensCriticos.length > 0) {
-        resposta += `**Principais Itens Críticos em Saldo:**\n`;
-        contextoResumido.amostraItensCriticos.slice(0, 5).forEach((item) => {
+      if (resumo.amostraItensCriticos.length > 0) {
+        resposta += `**Principais Itens Críticos:**\n`;
+        resumo.amostraItensCriticos.slice(0, 5).forEach((item) => {
           resposta += `• **${item.nome}** (Unidade: ${item.unidade}) - Saldo: ${formatarMoeda(item.valor)}\n`;
         });
       }
       return resposta;
     }
 
-    // 5. Resumo por Unidade
-    if (p.includes('unidade') || p.includes('segmento') || p.includes('região') || p.includes('divisão')) {
-      let resposta = `🏢 **Divisão do Estoque por Unidade Operacional:**\n\n`;
-      Object.entries(contextoResumido.resumoPorUnidade)
+    // Unidades / consumo
+    if (p.includes('unidade') || p.includes('segmento') || p.includes('região') || p.includes('divisão') || p.includes('consum')) {
+      let resposta = `🏢 **Unidades — ${nomeMesStr}/${anoStr}**\n\n`;
+
+      Object.entries(resumo.resumoPorUnidade)
         .sort((a, b) => b[1].saldo - a[1].saldo)
         .forEach(([unidade, info]) => {
-          resposta += `• **${unidade}:** ${formatarMoeda(info.saldo)} — ${info.qtdItens.toLocaleString('pt-BR')} SKUs\n`;
+          resposta += `• **${unidade}:** Saldo ${formatarMoeda(info.saldo)} | Consumo ${formatarMoeda(info.consumo)} | ${info.qtdItens.toLocaleString('pt-BR')} SKUs\n`;
         });
+
       return resposta;
     }
 
     return null;
   };
 
-  // Suporte a API da Groq com fallback e timeout mais generoso
+  // API Groq
   const consultarGroqAPI = async (promptSistema, perguntaUsuario) => {
     const url = 'https://api.groq.com/openai/v1/chat/completions';
 
     for (const model of GROQ_MODELS) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 segundos
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
 
         const response = await fetch(url, {
           method: 'POST',
@@ -344,7 +337,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           },
           signal: controller.signal,
           body: JSON.stringify({
-            model: model,
+            model,
             messages: [
               { role: 'system', content: promptSistema },
               { role: 'user', content: perguntaUsuario }
@@ -363,12 +356,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
         } else {
           const errorText = await response.text();
           console.warn(`Groq modelo ${model} → HTTP ${response.status}:`, errorText);
-
-          // Se a chave estiver inválida, não adianta tentar os outros modelos
-          if (response.status === 401 || response.status === 403) {
-            console.error('Chave da Groq inválida ou sem permissão');
-            return null;
-          }
+          if (response.status === 401 || response.status === 403) return null;
         }
       } catch (e) {
         const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
@@ -378,13 +366,13 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return null;
   };
 
-  // Suporte a API do Gemini como fallback secundário
+  // API Gemini
   const consultarGeminiAPI = async (promptCompleto) => {
     for (const model of GEMINI_MODELS) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 segundos
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
 
         const response = await fetch(url, {
           method: 'POST',
@@ -408,11 +396,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
         } else {
           const errorText = await response.text();
           console.warn(`Gemini modelo ${model} → HTTP ${response.status}:`, errorText);
-
-          if (response.status === 401 || response.status === 403) {
-            console.error('Chave do Gemini inválida ou sem permissão');
-            return null;
-          }
+          if (response.status === 401 || response.status === 403) return null;
         }
       } catch (e) {
         const msg = e.name === 'AbortError' ? 'Timeout (25s)' : e.message;
@@ -438,50 +422,57 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     setIsLoading(true);
 
     try {
-      // 1. Passo 1: Executa Motor Local Determinístico (0ms)
-      const respostaLocal = processarConsultaLocal(query);
-      
-      if (respostaLocal) {
+      // 1. Detecta o período pedido pelo usuário
+      const { mes, ano } = extrairPeriodo(query);
+      const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
+      const anoStr = ano ? String(ano) : 'Todos';
+
+      // 2. Filtra a base pelo período
+      const dadosFiltrados = filtrarPorPeriodo(mes, ano);
+
+      // 3. Monta o resumo só com esses dados
+      const resumo = montarResumo(dadosFiltrados);
+      const contextoAPI = montarContextoParaAPI(resumo);
+
+      const promptSistema = `Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
+Responda com clareza, tom executivo e dados consolidados.
+Use APENAS os dados do período informado abaixo. Não invente informações.
+
+PERÍODO ANALISADO: ${nomeMesStr}/${anoStr}
+TOTAL DE REGISTROS NESTE PERÍODO: ${dadosFiltrados.length}
+
+RESUMO DO ESTOQUE NESTE PERÍODO:
+${JSON.stringify(contextoAPI, null, 2)}`;
+
+      let responseText = null;
+
+      // 4. Prioridade: Groq
+      if (groqApiKey && !groqApiKey.includes('SUA_CHAVE')) {
+        responseText = await consultarGroqAPI(promptSistema, query);
+      }
+
+      // 5. Fallback: Gemini
+      if (!responseText && geminiApiKey && !geminiApiKey.includes('SUA_CHAVE')) {
+        responseText = await consultarGeminiAPI(`${promptSistema}\n\nPergunta do usuário: "${query}"`);
+      }
+
+      // 6. Último recurso: Motor Local
+      if (!responseText) {
+        responseText = processarConsultaLocal(query, resumo, mes, ano);
+      }
+
+      if (responseText) {
         const botMsg = {
           id: Date.now() + 1,
           sender: 'bot',
-          text: respostaLocal,
+          text: responseText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         setMessages((prev) => [...prev, botMsg]);
       } else {
-        // 2. Passo 2: Se for consulta genérica/complexa, aciona APIs externas
-        // Usamos o contexto enxuto para reduzir tokens e latência
-        const promptSistema = `Você é a Assistente Virtual Executiva de Inteligência do Almoxarifado da Âmbar Energia.
-Responda com clareza, tom executivo e dados consolidados com base no resumo do estoque abaixo.
-Use apenas os dados fornecidos. Se não souber, diga que a informação não está disponível no resumo atual.
-
-RESUMO DO ESTOQUE:
-${JSON.stringify(contextoParaAPI, null, 2)}`;
-
-        let responseText = null;
-
-        // Tenta Groq se houver chave configurada
-        if (groqApiKey && !groqApiKey.includes('SUA_CHAVE')) {
-          responseText = await consultarGroqAPI(promptSistema, query);
-        }
-
-        // Se Groq não esteve disponível ou falhou, tenta Gemini
-        if (!responseText && geminiApiKey && !geminiApiKey.includes('SUA_CHAVE')) {
-          responseText = await consultarGeminiAPI(`${promptSistema}\n\nPergunta do usuário: "${query}"`);
-        }
-
-        if (responseText) {
-          const botMsg = {
-            id: Date.now() + 1,
-            sender: 'bot',
-            text: responseText,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          };
-          setMessages((prev) => [...prev, botMsg]);
-        } else {
-          throw new Error('Servidores de IA temporariamente indisponíveis. Tente realizar consultas sobre valores por mês (ex: mês 10/2026), curva ABC ou maiores itens.');
-        }
+        throw new Error(
+          `Não encontrei dados para o período ${nomeMesStr}/${anoStr}. Tente outro mês/ano ou verifique se a base está carregada.`
+        );
       }
     } catch (error) {
       console.error('Erro no Pergunte ao Estoque:', error);
@@ -519,7 +510,7 @@ ${JSON.stringify(contextoParaAPI, null, 2)}`;
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] w-full max-w-6xl mx-auto p-4 md:p-6 text-gray-100">
-      {/* Header do Chat */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 mb-4 rounded-xl bg-[#12161F] border border-[#CC5500]/30 shadow-lg shadow-black/40 gap-3">
         <div className="flex items-center gap-3">
           <div className="relative p-2.5 rounded-lg bg-[#CC5500]/20 border border-[#CC5500]/50 text-[#CC5500]">
@@ -556,12 +547,12 @@ ${JSON.stringify(contextoParaAPI, null, 2)}`;
           className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-400 transition-colors rounded-lg bg-[#1A1F2C] border border-gray-800 hover:border-[#CC5500]/50 hover:text-white shrink-0"
           title="Limpar Histórico"
         >
-          <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-[#CC5500]" />
+          <Trash2 className="w-4 h-4 text-gray-400" />
           <span className="hidden sm:inline">Limpar Chat</span>
         </button>
       </div>
 
-      {/* Sugestões Rápidas */}
+      {/* Sugestões */}
       <div className="mb-4">
         <div className="flex items-center gap-2 mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
           <HelpCircle className="w-3.5 h-3.5 text-[#CC5500]" />
@@ -582,14 +573,12 @@ ${JSON.stringify(contextoParaAPI, null, 2)}`;
         </div>
       </div>
 
-      {/* Janela de Mensagens */}
+      {/* Mensagens */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 rounded-xl bg-[#0D0F12] border border-gray-800/80 shadow-inner custom-scrollbar">
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex items-start gap-3 ${
-              msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'
-            }`}
+            className={`flex items-start gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
           >
             <div
               className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 border ${
@@ -648,7 +637,7 @@ ${JSON.stringify(contextoParaAPI, null, 2)}`;
               loading
                 ? "Carregando e sincronizando banco de dados..."
                 : isDataReady
-                ? "Pergunte sobre valor no mês 10/2026, maiores itens, materiais críticos ou unidades..."
+                ? "Ex: valor do estoque em janeiro/2026, unidades de hoje, maiores itens no mês 10..."
                 : "Clique em 'Atualizar Dados' no menu lateral..."
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
@@ -662,7 +651,7 @@ ${JSON.stringify(contextoParaAPI, null, 2)}`;
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Respostas calculadas em tempo real com base no banco de dados do Almoxarifado Âmbar Energia.
+          Respostas baseadas no período detectado na sua pergunta • Almoxarifado Âmbar Energia
         </p>
       </div>
     </div>
