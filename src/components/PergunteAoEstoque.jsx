@@ -41,13 +41,13 @@ const GEMINI_MODELS = [
 const MAX_ITENS_API = 30;
 const MAX_HISTORICO_MSG = 8;
 
-const SCHEMA_BANCO_SUPABASE = `
+const SCHEMA_BANCO = `
 TABELA 1: painel_estoque
 Colunas:
 - id (int4)
 - mes_referencia (int4)
 - ano_referencia (int4)
-- unidade_almoxarifado (text) -- ex: CANDIOTA, CANDIOTA GERENCIAL, MAUÁ, MANACAPURU
+- unidade_almoxarifado (text)
 - codigo_produto (text)
 - nome_produto (text)
 - un (text)
@@ -136,7 +136,6 @@ function MarkdownRenderer({ text }) {
     while (remaining.length > 0) {
       const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
       const codeMatch = remaining.match(/`([^`]+)`/);
-
       let match = null;
       let type = null;
 
@@ -338,9 +337,9 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     {
       id: 1,
       sender: 'bot',
-      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada ao **Supabase**.\n\nBuscas inteligentes: ignoro maiúscula, espaços e separo unidades **operacionais** de **gerenciais**.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até você limpar o chat.',
+      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base** completa (`painel_estoque` e `painel_inventario`).\n\nBuscas inteligentes: ignoro maiúscula e espaços, e separo unidades **operacionais** de **gerenciais**.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até você limpar o chat.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      badge: 'Supabase Full-DB Conectado'
+      badge: 'Base Conectada'
     }
   ]);
   const [input, setInput] = useState('');
@@ -359,7 +358,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
   }, [messages, isLoading]);
 
   useEffect(() => {
-    const verificarConexaoRPC = async () => {
+    const verificarConexao = async () => {
       try {
         const { data: pingRes, error: pingErr } = await supabase.rpc('executar_consulta_ia', {
           query_sql: 'SELECT 1 AS ok'
@@ -379,10 +378,10 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
           }
         }
       } catch (err) {
-        console.warn('Verificação RPC Supabase:', err);
+        console.warn('Verificação da Base:', err);
       }
     };
-    verificarConexaoRPC();
+    verificarConexao();
   }, []);
 
   const formatarMoeda = (v) =>
@@ -490,7 +489,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes, ano, origem: 'parcial' };
   };
 
-  // Detecta intenção sobre gerenciais na pergunta
   const extrairIntencaoGerencial = (prompt) => {
     const p = prompt.toLowerCase();
     if (
@@ -603,7 +601,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return null;
   };
 
-  const consultarViaSupabaseSQL = async (
+  const consultarViaBaseSQL = async (
     perguntaUsuario,
     periodoDetectado,
     historicoConversa,
@@ -618,48 +616,39 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
     let regraGerencial = '';
     if (intencaoGerencial === 'sem_gerenciais') {
-      regraGerencial = `REGRA GERENCIAL: O usuário pediu SEM gerenciais. Exclua unidades cujo nome contenha 'GERENCIAL' (ex: AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%').`;
+      regraGerencial = `REGRA GERENCIAL: SEM gerenciais. Exclua unidades com 'GERENCIAL' no nome (AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%').`;
     } else if (intencaoGerencial === 'somente_gerenciais') {
-      regraGerencial = `REGRA GERENCIAL: O usuário pediu SOMENTE gerenciais. Filtre apenas unidades com 'GERENCIAL' no nome (ex: AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%').`;
+      regraGerencial = `REGRA GERENCIAL: SOMENTE gerenciais (AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%').`;
     } else {
-      regraGerencial = `REGRA GERENCIAL: Se o usuário citar uma usina (ex: Candiota, Mauá, Manacapuru):
-- NÃO misture operacional com gerencial sem avisar.
-- "Candiota" sozinho → priorize a unidade operacional (nome igual ou muito próximo, SEM a palavra GERENCIAL).
-- Se existirem as duas, pode mostrar separadas (Candiota vs Candiota Gerencial).
-- Só una as duas se o usuário pedir explicitamente "todas" ou "incluindo gerenciais".`;
+      regraGerencial = `REGRA GERENCIAL: Se citar usina (Candiota, Mauá, Manacapuru), não misture operacional com gerencial. "Candiota" sozinho prioriza a operacional. Se existirem as duas, mostre separadas.`;
     }
 
-    const promptGeradorSQL = `Você é um Especialista Sênior em PostgreSQL da Âmbar Energia.
-Gere UMA consulta SQL SELECT válida para o Supabase.
+    const promptGeradorSQL = `Você é Especialista Sênior em PostgreSQL da Âmbar Energia.
+Gere UMA consulta SQL SELECT válida.
 
-${SCHEMA_BANCO_SUPABASE}
+${SCHEMA_BANCO}
 
 HISTÓRICO DA CONVERSA:
 ${historicoConversa}
 
 PERÍODO:
-- Mais recente no banco: ${periodoRecente.mes}/${periodoRecente.ano}
+- Mais recente na Base: ${periodoRecente.mes}/${periodoRecente.ano}
 - Período desta pergunta: mes_referencia = ${refMes} AND ano_referencia = ${refAno}
-- ${usouPeriodoAtual ? 'Pergunta SEM data explícita → USE OBRIGATORIAMENTE o período mais recente.' : 'Use o período da pergunta.'}
+- ${usouPeriodoAtual ? 'Pergunta SEM data → USE o período mais recente.' : 'Use o período da pergunta.'}
 
 ${regraGerencial}
 
-REGRAS DE BUSCA INTELIGENTE (OBRIGATÓRIAS):
-1. Retorne APENAS SQL puro (SELECT ou WITH). Sem markdown, sem explicação, sem ponto-e-vírgula final.
+REGRAS OBRIGATÓRIAS:
+1. APENAS SQL puro (SELECT ou WITH). Sem markdown, sem ponto-e-vírgula final.
 2. NUNCA INSERT/UPDATE/DELETE/DROP/ALTER.
-3. Colunas com maiúsculas na painel_estoque: "Sigla", "Segmento", "Região", "nCdEmpresa" (com aspas).
-4. NORMALIZAÇÃO DE TEXTO: sempre use TRIM() e ILIKE para nomes de unidade, produto, segmento, região.
-   Exemplo correto:
-   WHERE TRIM(unidade_almoxarifado) ILIKE '%candiota%'
-   NUNCA use = 'CANDIOTA' puro (quebra com espaço, minúscula, variação).
-5. Se a extensão unaccent existir, pode usar: unaccent(TRIM(unidade_almoxarifado)) ILIKE unaccent('%manacapuru%')
-   Se não tiver certeza, use só TRIM + ILIKE.
-6. Nomes compostos: "Candiota Gerencial" é DIFERENTE de "Candiota". Trate como unidades distintas.
-7. Pergunta genérica sem mês/ano → filtre mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
-8. Comparação mês atual vs anterior: calcule o mês anterior a partir de ${refMes}/${refAno}.
-9. Itens sem valor: COALESCE(valor_saldo_atual, 0) = 0. Use COUNT(*) OVER() AS total_encontrado em listagens.
-10. Listagens: LIMIT ${MAX_ITENS_API}. GROUP BY: limite só se > 50 linhas.
-11. Aliases em português claros.`;
+3. Colunas com maiúsculas: "Sigla", "Segmento", "Região", "nCdEmpresa".
+4. NORMALIZAÇÃO: sempre TRIM() + ILIKE em nomes de unidade, produto, segmento, região.
+   Ex: WHERE TRIM(unidade_almoxarifado) ILIKE '%candiota%'
+5. Candiota ≠ Candiota Gerencial. Trate como unidades distintas.
+6. Pergunta sem mês/ano → mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
+7. Itens sem valor: COALESCE(valor_saldo_atual, 0) = 0. COUNT(*) OVER() AS total_encontrado em listagens.
+8. Listagens: LIMIT ${MAX_ITENS_API}.
+9. Aliases em português.`;
 
     const geracao = await chamarIAEmCascata(
       promptGeradorSQL,
@@ -680,7 +669,7 @@ REGRAS DE BUSCA INTELIGENTE (OBRIGATÓRIAS):
       console.warn('Erro 1ª tentativa SQL:', erroBanco.message);
       const correcao = await chamarIAEmCascata(
         promptGeradorSQL,
-        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro PostgreSQL:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT válido. Lembre TRIM + ILIKE e regras de gerencial.`,
+        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT. Use TRIM + ILIKE.`,
         900
       );
       if (correcao) {
@@ -713,17 +702,17 @@ PERÍODO: ${String(refMes).padStart(2, '0')}/${refAno}
 LINHAS: ${linhas.length}
 INTENÇÃO GERENCIAL: ${intencaoGerencial}
 
-DADOS DO BANCO:
+DADOS DA BASE:
 ${JSON.stringify(linhas, null, 2)}
 
 INSTRUÇÕES:
-1. Markdown executivo, claro e preciso.
+1. Markdown executivo.
 2. 2+ registros → tabela markdown.
 3. Valores em R$, quantidades com milhar.
 4. Códigos entre crases.
-5. Se a pergunta citou uma usina, deixe claro se o resultado é operacional, gerencial ou ambos.
-6. Se JSON vazio, diga que não há registros no período/critério.
-7. Pergunta sem data → deixe explícito que os números são do período ${String(refMes).padStart(2, '0')}/${refAno}.
+5. Se citou usina, deixe claro se é operacional, gerencial ou ambos.
+6. JSON vazio → informe que não há registros.
+7. Sem data na pergunta → deixe explícito o período ${String(refMes).padStart(2, '0')}/${refAno}.
 8. Use só os dados retornados.`;
 
     const formatacao = await chamarIAEmCascata(
@@ -736,7 +725,7 @@ INSTRUÇÕES:
     return {
       texto: formatacao.text,
       sql: sqlGerado,
-      provedor: `Supabase SQL • ${formatacao.provedor}`
+      provedor: `Base SQL • ${formatacao.provedor}`
     };
   };
 
@@ -752,7 +741,6 @@ INSTRUÇÕES:
       return bateMes && bateAno;
     });
 
-    // Filtro inteligente de gerenciais no motor local
     if (intencaoGerencial === 'sem_gerenciais') {
       dadosFiltrados = dadosFiltrados.filter(
         (i) => !(i.unidade_almoxarifado || '').toUpperCase().includes('GERENCIAL')
@@ -787,38 +775,6 @@ INSTRUÇÕES:
       porUnidade[und].qtdItens += 1;
       porUnidade[und].consumo += valSaida;
     });
-
-    // Busca por nome de unidade mencionada (case-insensitive, parcial)
-    const unidadesKeys = Object.keys(porUnidade);
-    const unidadeMencionada = unidadesKeys.find((u) => p.includes(u.toLowerCase()));
-
-    if (unidadeMencionada || p.includes('candiota') || p.includes('mauá') || p.includes('maua') || p.includes('manacapuru')) {
-      const termo =
-        unidadeMencionada ||
-        (p.includes('candiota')
-          ? 'candiota'
-          : p.includes('manacapuru')
-          ? 'manacapuru'
-          : p.includes('mauá') || p.includes('maua')
-          ? 'mau'
-          : null);
-
-      if (termo) {
-        const matches = Object.entries(porUnidade).filter(([und]) =>
-          und.toLowerCase().includes(termo.toLowerCase())
-        );
-        if (matches.length) {
-          let resposta = `### 🏭 Unidades encontradas — ${nomeMesStr}/${anoStr}\n\n`;
-          resposta += `| Unidade | SKUs | Consumo | Saldo |\n| :--- | :---: | :---: | :---: |\n`;
-          matches
-            .sort((a, b) => b[1].saldo - a[1].saldo)
-            .forEach(([und, info]) => {
-              resposta += `| **${und}** | ${formatarNumero(info.qtdItens)} | ${formatarMoeda(info.consumo)} | ${formatarMoeda(info.saldo)} |\n`;
-            });
-          return resposta;
-        }
-      }
-    }
 
     if (p.includes('maior') || p.includes('top')) {
       const top = [...dadosFiltrados]
@@ -873,7 +829,7 @@ INSTRUÇÕES:
       const historico = montarHistoricoConversa();
       const intencaoGerencial = extrairIntencaoGerencial(query);
 
-      const resultadoSQL = await consultarViaSupabaseSQL(
+      const resultadoSQL = await consultarViaBaseSQL(
         query,
         periodo,
         historico,
@@ -909,7 +865,7 @@ INSTRUÇÕES:
         ]);
       } else {
         throw new Error(
-          `Sem dados para ${nomeMesStr}/${anoStr}. Verifique a função executar_consulta_ia no Supabase.`
+          `Sem dados para ${nomeMesStr}/${anoStr}. Verifique se a função de consulta da Base está ativa.`
         );
       }
     } catch (error) {
@@ -941,7 +897,7 @@ INSTRUÇÕES:
       {
         id: Date.now(),
         sender: 'bot',
-        text: 'Histórico e memória limpos. Pode perguntar novamente.',
+        text: 'Histórico e memória limpos. Pode perguntar novamente na Base.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         badge: 'Pronto'
       }
@@ -968,7 +924,7 @@ INSTRUÇÕES:
               <h2 className="text-lg font-bold tracking-wide text-white uppercase">Pergunte ao Estoque</h2>
               {dbConnected ? (
                 <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                  <Database className="w-3 h-3" /> Supabase Ativo
+                  <Database className="w-3 h-3" /> Base Ativa
                 </span>
               ) : loading ? (
                 <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 border border-amber-500/30 text-amber-400">
@@ -986,7 +942,7 @@ INSTRUÇÕES:
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">Busca inteligente • Gerenciais • Memória de chat</p>
+            <p className="text-xs text-gray-400 mt-0.5">Consulta na Base • Busca inteligente • Âmbar Energia</p>
           </div>
         </div>
         <button
@@ -1102,7 +1058,7 @@ INSTRUÇÕES:
             </div>
             <div className="bg-[#131722] border border-gray-800 rounded-2xl rounded-tl-none p-4 text-sm text-gray-300 flex items-center gap-3">
               <RefreshCw className="w-4 h-4 animate-spin text-[#FF8533]" />
-              Consultando base...
+              Consultando a Base...
             </div>
           </div>
         )}
@@ -1119,8 +1075,8 @@ INSTRUÇÕES:
             disabled={isLoading || !isReady}
             placeholder={
               isReady
-                ? 'Ex: valor de Candiota sem gerenciais | estoque atual de Manacapuru'
-                : 'Conectando...'
+                ? 'Ex: valor de Candiota sem gerenciais | estoque atual'
+                : 'Conectando à Base...'
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
           />
@@ -1133,7 +1089,7 @@ INSTRUÇÕES:
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Busca inteligente (TRIM + ILIKE) • Separação operacional/gerencial • Memória até limpar o chat
+          Consulta direta na Base • Memória ativa até limpar o chat • Âmbar Energia
         </p>
       </div>
     </div>
