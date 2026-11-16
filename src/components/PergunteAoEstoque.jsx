@@ -23,7 +23,7 @@ const SUGGESTIONS = [
   'No mês atual, quais são os itens sem valor no estoque?',
   'Quais são os 5 itens com maior valor em estoque?',
   'Resumo do estoque por unidade sem gerenciais',
-  'Qual o valor de Candiota no período atual?'
+  'Itens críticos APL no período atual'
 ];
 
 const GROQ_MODELS = [
@@ -45,20 +45,20 @@ const SCHEMA_BANCO = `
 TABELA 1: painel_estoque
 Colunas:
 - id (int4)
-- mes_referencia (int4)
-- ano_referencia (int4)
+- mes_referencia (int4) -- 1 a 12
+- ano_referencia (int4) -- ex: 2026
 - unidade_almoxarifado (text)
 - codigo_produto (text)
 - nome_produto (text)
-- un (text)
-- ge (text)
-- item_critico (text)
-- localizacao (text)
+- un (text) -- unidade de medida (PC, UN, M, L, KG...)
+- ge (text) -- grupo de estoque: CON, APL, REP
+- item_critico (text) -- 'Sim' ou 'Não'
+- localizacao (text) -- endereço físico / prateleira
 - qtde_saldo_atual (numeric)
 - preco_medio (numeric)
 - valor_saldo_atual (numeric)
 - codigo_local_estoque (int4)
-- nome_local_estoque (text)
+- nome_local_estoque (text) -- Insumo, Obsoleto, Obra, etc.
 - qtde_saida_cons_interno (numeric)
 - valor_saida_cons_interno (numeric)
 - qtde_entrada_compras (numeric)
@@ -123,6 +123,58 @@ Colunas:
 - sigla_empresa (text)
 - segmento_empresa (text)
 - regiao_empresa (text)
+`;
+
+const DICIONARIO_NEGOCIO = `
+DICIONÁRIO DE NEGÓCIO (obrigatório usar ao interpretar a pergunta):
+
+PERÍODO
+- mes_referencia (int 1-12): mês, competência, fechamento, "em janeiro", "mês 01", "jan/26"
+- ano_referencia (int 4 dígitos): ano, exercício, "em 2026", "este ano"
+- Se a pergunta NÃO informar mês/ano → usar o período mais recente informado no contexto
+
+UNIDADE / EMPRESA
+- unidade_almoxarifado: unidade, usina, planta, almoxarifado, filial, site → TRIM() + ILIKE '%termo%'
+- "Sigla": sigla da empresa/usina (ex: CBA, URU, CUI) → ILIKE '%termo%'
+- "nCdEmpresa": código numérico da empresa (ex: 2030) → comparação numérica
+- "Segmento":
+  • Renovável / Solar → ILIKE '%UFV%'
+  • Termelétrica / Térmica → ILIKE '%UTE%'
+  • Hidrelétrica / PCH → ILIKE '%PCH%'
+- "Região": Norte, Nordeste, Centro-Oeste, Sudeste, Sul → ILIKE '%termo%'
+- Gerencial: nome com 'GERENCIAL' é unidade distinta da operacional
+
+PRODUTO / MATERIAL
+- codigo_produto: código, SKU, part number, código SAP → texto com aspas
+- nome_produto: descrição, material, peça, equipamento → ILIKE '%termo%' (pode quebrar palavras)
+- un: unidade de medida (PC, UN, M, L, KG) → ILIKE se vier por extenso
+
+CLASSIFICAÇÃO
+- ge (Grupo de Estoque):
+  • CON / consumo (grupo) → ge ILIKE '%CON%'
+  • APL / aplicação direta → ge ILIKE '%APL%'
+  • REP / reposição → ge ILIKE '%REP%'
+- item_critico: crítico, estratégico, sobressalente crítico
+  • críticos → item_critico ILIKE 'Sim'
+  • não críticos → item_critico ILIKE 'Não'
+
+LOCAL
+- localizacao: endereço físico, prateleira, corredor, rua, estante, gaveta (NÃO é categoria contábil)
+- codigo_local_estoque: código numérico do depósito/categoria
+- nome_local_estoque: Insumo, Obsoleto, Obra, Operacional, Crítico (como categoria de local)
+  • busca direta ILIKE para Insumo/Obsoleto/Obra
+
+SALDOS E MOVIMENTOS (sempre agregar com SUM quando for total)
+- qtde_saldo_atual: quantidade em estoque, saldo físico, "quantas peças", ruptura, sem saldo
+  • zerado/sem saldo → COALESCE(qtde_saldo_atual,0) = 0
+  • com saldo → qtde_saldo_atual > 0
+- preco_medio: preço unitário, custo unitário
+- valor_saldo_atual: valor em estoque, montante financeiro, R$ parado → SUM(valor_saldo_atual)
+- qtde_saida_cons_interno / valor_saida_cons_interno: consumo interno, quanto gastou/usou
+- qtde_entrada_compras / valor_entrada_compras: compras, entradas, volume/valor adquirido
+
+ITENS SEM VALOR FINANCEIRO
+- valor zerado / sem valor em R$ → COALESCE(valor_saldo_atual, 0) = 0
 `;
 
 function MarkdownRenderer({ text }) {
@@ -337,7 +389,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     {
       id: 1,
       sender: 'bot',
-      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base** completa (`painel_estoque` e `painel_inventario`).\n\nBuscas inteligentes: ignoro maiúscula e espaços, e separo unidades **operacionais** de **gerenciais**.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até você limpar o chat.',
+      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base** completa (`painel_estoque` e `painel_inventario`).\n\nEntendo termos como **APL**, **REP**, **crítico**, **consumo**, **gerenciais** e usinas.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até limpar o chat.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       badge: 'Base Conectada'
     }
@@ -616,17 +668,22 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
     let regraGerencial = '';
     if (intencaoGerencial === 'sem_gerenciais') {
-      regraGerencial = `REGRA GERENCIAL: SEM gerenciais. Exclua unidades com 'GERENCIAL' no nome (AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%').`;
+      regraGerencial =
+        "REGRA GERENCIAL: SEM gerenciais. AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'.";
     } else if (intencaoGerencial === 'somente_gerenciais') {
-      regraGerencial = `REGRA GERENCIAL: SOMENTE gerenciais (AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%').`;
+      regraGerencial =
+        "REGRA GERENCIAL: SOMENTE gerenciais. AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%'.";
     } else {
-      regraGerencial = `REGRA GERENCIAL: Se citar usina (Candiota, Mauá, Manacapuru), não misture operacional com gerencial. "Candiota" sozinho prioriza a operacional. Se existirem as duas, mostre separadas.`;
+      regraGerencial =
+        'REGRA GERENCIAL: Usina citada sozinha (ex: Candiota) prioriza operacional (sem GERENCIAL). Se existirem as duas, mostre separadas.';
     }
 
     const promptGeradorSQL = `Você é Especialista Sênior em PostgreSQL da Âmbar Energia.
-Gere UMA consulta SQL SELECT válida.
+Gere UMA consulta SQL SELECT válida para a Base.
 
 ${SCHEMA_BANCO}
+
+${DICIONARIO_NEGOCIO}
 
 HISTÓRICO DA CONVERSA:
 ${historicoConversa}
@@ -638,17 +695,20 @@ PERÍODO:
 
 ${regraGerencial}
 
-REGRAS OBRIGATÓRIAS:
+REGRAS OBRIGATÓRIAS DO SQL:
 1. APENAS SQL puro (SELECT ou WITH). Sem markdown, sem ponto-e-vírgula final.
 2. NUNCA INSERT/UPDATE/DELETE/DROP/ALTER.
 3. Colunas com maiúsculas: "Sigla", "Segmento", "Região", "nCdEmpresa".
-4. NORMALIZAÇÃO: sempre TRIM() + ILIKE em nomes de unidade, produto, segmento, região.
-   Ex: WHERE TRIM(unidade_almoxarifado) ILIKE '%candiota%'
-5. Candiota ≠ Candiota Gerencial. Trate como unidades distintas.
-6. Pergunta sem mês/ano → mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
-7. Itens sem valor: COALESCE(valor_saldo_atual, 0) = 0. COUNT(*) OVER() AS total_encontrado em listagens.
-8. Listagens: LIMIT ${MAX_ITENS_API}.
-9. Aliases em português.`;
+4. NORMALIZAÇÃO de texto: sempre TRIM() + ILIKE em unidade, produto, segmento, região, ge, item_critico quando fizer sentido.
+5. APL/REP/CON → filtrar na coluna ge (ILIKE '%APL%' etc.).
+6. Crítico → item_critico ILIKE 'Sim'.
+7. Consumo → SUM(valor_saida_cons_interno) / SUM(qtde_saida_cons_interno).
+8. Valor em estoque → SUM(valor_saldo_atual).
+9. Sem valor financeiro → COALESCE(valor_saldo_atual,0)=0. Sem saldo físico → COALESCE(qtde_saldo_atual,0)=0.
+10. Candiota ≠ Candiota Gerencial.
+11. Pergunta sem mês/ano → mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
+12. Listagens: LIMIT ${MAX_ITENS_API}. Use COUNT(*) OVER() AS total_encontrado quando listar itens.
+13. Aliases em português.`;
 
     const geracao = await chamarIAEmCascata(
       promptGeradorSQL,
@@ -669,7 +729,7 @@ REGRAS OBRIGATÓRIAS:
       console.warn('Erro 1ª tentativa SQL:', erroBanco.message);
       const correcao = await chamarIAEmCascata(
         promptGeradorSQL,
-        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT. Use TRIM + ILIKE.`,
+        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT. Respeite o dicionário (ge, item_critico, TRIM+ILIKE).`,
         900
       );
       if (correcao) {
@@ -706,14 +766,15 @@ DADOS DA BASE:
 ${JSON.stringify(linhas, null, 2)}
 
 INSTRUÇÕES:
-1. Markdown executivo.
+1. Markdown executivo, claro.
 2. 2+ registros → tabela markdown.
 3. Valores em R$, quantidades com milhar.
 4. Códigos entre crases.
-5. Se citou usina, deixe claro se é operacional, gerencial ou ambos.
-6. JSON vazio → informe que não há registros.
-7. Sem data na pergunta → deixe explícito o período ${String(refMes).padStart(2, '0')}/${refAno}.
-8. Use só os dados retornados.`;
+5. Se citou usina, deixe claro operacional vs gerencial.
+6. Se citou APL/REP/CON/crítico, reflita isso no título/resumo.
+7. JSON vazio → informe que não há registros no critério.
+8. Sem data na pergunta → deixe explícito o período ${String(refMes).padStart(2, '0')}/${refAno}.
+9. Use somente os dados retornados.`;
 
     const formatacao = await chamarIAEmCascata(
       promptFormatador,
@@ -748,6 +809,28 @@ INSTRUÇÕES:
     } else if (intencaoGerencial === 'somente_gerenciais') {
       dadosFiltrados = dadosFiltrados.filter((i) =>
         (i.unidade_almoxarifado || '').toUpperCase().includes('GERENCIAL')
+      );
+    }
+
+    // Filtros de vocabulário no motor local
+    if (p.includes('apl')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.ge || '').toUpperCase().includes('APL')
+      );
+    }
+    if (p.includes('rep') && !p.includes('represent')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.ge || '').toUpperCase().includes('REP')
+      );
+    }
+    if (/\bcon\b/.test(p) || p.includes('grupo con')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.ge || '').toUpperCase().includes('CON')
+      );
+    }
+    if (p.includes('crítico') || p.includes('critico')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.item_critico || '').toLowerCase().includes('sim')
       );
     }
 
@@ -791,9 +874,13 @@ INSTRUÇÕES:
     let resposta = `### 📊 Resumo do Estoque — ${nomeMesStr}/${anoStr}\n\n`;
     if (intencaoGerencial === 'sem_gerenciais') resposta += `_Filtro: sem unidades gerenciais_\n\n`;
     if (intencaoGerencial === 'somente_gerenciais') resposta += `_Filtro: somente unidades gerenciais_\n\n`;
+    if (p.includes('apl')) resposta += `_Filtro: GE APL_\n\n`;
+    if (p.includes('rep') && !p.includes('represent')) resposta += `_Filtro: GE REP_\n\n`;
+    if (p.includes('crítico') || p.includes('critico')) resposta += `_Filtro: itens críticos_\n\n`;
+
     resposta += `• **Valor Total:** ${formatarMoeda(valorTotalEstoque)}\n`;
     resposta += `• **Entradas:** ${formatarMoeda(valorTotalEntradas)}\n`;
-    resposta += `• **Saídas:** ${formatarMoeda(valorTotalSaidas)}\n`;
+    resposta += `• **Saídas (consumo):** ${formatarMoeda(valorTotalSaidas)}\n`;
     resposta += `• **Registros:** ${formatarNumero(dadosFiltrados.length)}\n\n`;
     resposta += `| Unidade | SKUs | Consumo | Saldo |\n| :--- | :---: | :---: | :---: |\n`;
     Object.entries(porUnidade)
@@ -942,7 +1029,9 @@ INSTRUÇÕES:
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">Consulta na Base • Busca inteligente • Âmbar Energia</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Base • APL/REP/Críticos • Busca inteligente • Âmbar Energia
+            </p>
           </div>
         </div>
         <button
@@ -1075,7 +1164,7 @@ INSTRUÇÕES:
             disabled={isLoading || !isReady}
             placeholder={
               isReady
-                ? 'Ex: valor de Candiota sem gerenciais | estoque atual'
+                ? 'Ex: itens críticos APL | Candiota sem gerenciais | consumo atual'
                 : 'Conectando à Base...'
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
@@ -1089,7 +1178,7 @@ INSTRUÇÕES:
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Consulta direta na Base • Memória ativa até limpar o chat • Âmbar Energia
+          Base com dicionário de negócio • Memória até limpar o chat • Âmbar Energia
         </p>
       </div>
     </div>
