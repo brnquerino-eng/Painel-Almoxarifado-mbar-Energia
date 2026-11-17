@@ -4,6 +4,7 @@ import LoadingScreen from './components/LoadingScreen'
 import VisaoGeral from './components/VisaoGeral'
 import PainelInventarios from './components/PainelInventarios'
 import PergunteAoEstoque from './components/PergunteAoEstoque'
+import ResumoEstoque from './components/ResumoEstoque'
 import { useEstoqueData } from './hooks/useEstoqueData'
 import { useInventarioData } from './hooks/useInventarioData'
 
@@ -117,18 +118,7 @@ export default function App() {
               {activeTab === 'pergunte' && (
                 <PergunteAoEstoque data={estoqueData} loading={loadingEstoque} />
               )}
-
-              {activeTab === 'resumo' && (
-                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                  <div className="bg-[#111] p-10 rounded-3xl border border-dashed border-[#2A2A2A] max-w-lg w-full">
-                    <span className="text-4xl mb-4 block">📊</span>
-                    <h2 className="text-xl font-bold text-white mb-2">Resumo Estoque</h2>
-                    <p className="text-gray-500 text-sm">
-                      Visão consolidada de indicadores em construção.
-                    </p>
-                  </div>
-                </div>
-              )}
+              {activeTab === 'resumo' && <ResumoEstoque data={estoqueData} />}
             </div>
           )}
         </main>

@@ -20,10 +20,10 @@ import {
 import { supabase } from '../lib/supabase';
 
 const SUGGESTIONS = [
-  'No mês atual, quais são os itens sem valor no estoque?',
-  'Quais são os 5 itens com maior valor em estoque?',
-  'Resumo do estoque por unidade sem gerenciais',
-  'Itens críticos APL no período atual'
+  'Qual o valor do estoque nos meses 08, 09 e 10 de 2026?',
+  'Valor do estoque do mês 10 somente das ativas',
+  'Me traga o valor do estoque de material crítico',
+  'Quais itens mais consumiram no período atual?'
 ];
 
 const GROQ_MODELS = [
@@ -38,7 +38,7 @@ const GEMINI_MODELS = [
   'gemini-3.6-flash'
 ];
 
-const MAX_ITENS_API = 30;
+const MAX_ITENS_API = 50;
 const MAX_HISTORICO_MSG = 8;
 
 const SCHEMA_BANCO = `
@@ -46,21 +46,21 @@ TABELA 1: painel_estoque
 Colunas:
 - id (int4)
 - mes_referencia (int4) -- 1 a 12
-- ano_referencia (int4) -- ex: 2026
+- ano_referencia (int4)
 - unidade_almoxarifado (text)
 - codigo_produto (text)
 - nome_produto (text)
-- un (text) -- unidade de medida (PC, UN, M, L, KG...)
-- ge (text) -- grupo de estoque: CON, APL, REP
-- item_critico (text) -- 'Sim' ou 'Não'
-- localizacao (text) -- endereço físico / prateleira
+- un (text)
+- ge (text) -- CON, APL, REP
+- item_critico (text) -- valores como 'Sim', 'Não', '0-Sim', etc.
+- localizacao (text)
 - qtde_saldo_atual (numeric)
 - preco_medio (numeric)
 - valor_saldo_atual (numeric)
 - codigo_local_estoque (int4)
-- nome_local_estoque (text) -- Insumo, Obsoleto, Obra, etc.
-- qtde_saida_cons_interno (numeric)
-- valor_saida_cons_interno (numeric)
+- nome_local_estoque (text)
+- qtde_saida_cons_interno (numeric) -- pode vir negativo (saída)
+- valor_saida_cons_interno (numeric) -- pode vir negativo (saída)
 - qtde_entrada_compras (numeric)
 - valor_entrada_compras (numeric)
 - qtde_saida_outras (numeric)
@@ -126,55 +126,51 @@ Colunas:
 `;
 
 const DICIONARIO_NEGOCIO = `
-DICIONÁRIO DE NEGÓCIO (obrigatório usar ao interpretar a pergunta):
+DICIONÁRIO DE NEGÓCIO (obrigatório):
 
 PERÍODO
-- mes_referencia (int 1-12): mês, competência, fechamento, "em janeiro", "mês 01", "jan/26"
-- ano_referencia (int 4 dígitos): ano, exercício, "em 2026", "este ano"
-- Se a pergunta NÃO informar mês/ano → usar o período mais recente informado no contexto
+- mes_referencia (1-12), ano_referencia (ex: 2026)
+- Se NÃO informar data → usar período mais recente do contexto
+- Se informar VÁRIOS meses (ex: "meses 08, 09 e 10", "10, 09 e 08 de 2026"):
+  → filtrar mes_referencia IN (...) AND ano_referencia = ano
+  → agrupar por mes_referencia e devolver comparação em tabela
 
-UNIDADE / EMPRESA
-- unidade_almoxarifado: unidade, usina, planta, almoxarifado, filial, site → TRIM() + ILIKE '%termo%'
-- "Sigla": sigla da empresa/usina (ex: CBA, URU, CUI) → ILIKE '%termo%'
-- "nCdEmpresa": código numérico da empresa (ex: 2030) → comparação numérica
-- "Segmento":
-  • Renovável / Solar → ILIKE '%UFV%'
-  • Termelétrica / Térmica → ILIKE '%UTE%'
-  • Hidrelétrica / PCH → ILIKE '%PCH%'
-- "Região": Norte, Nordeste, Centro-Oeste, Sudeste, Sul → ILIKE '%termo%'
-- Gerencial: nome com 'GERENCIAL' é unidade distinta da operacional
+ATIVAS / OPERACIONAIS
+- "ativas", "somente ativas", "unidades ativas", "só operacionais" =
+  unidades SEM a palavra GERENCIAL no nome
+  → TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'
+- "somente gerenciais" → TRIM(unidade_almoxarifado) ILIKE '%gerencial%'
 
-PRODUTO / MATERIAL
-- codigo_produto: código, SKU, part number, código SAP → texto com aspas
-- nome_produto: descrição, material, peça, equipamento → ILIKE '%termo%' (pode quebrar palavras)
-- un: unidade de medida (PC, UN, M, L, KG) → ILIKE se vier por extenso
+CRÍTICO
+- item_critico pode ser 'Sim', 'Não', '0-Sim', '0-Não', etc.
+- material crítico / item crítico → item_critico ILIKE '%sim%'
+- NÃO use igualdade exata 'Sim'
 
-CLASSIFICAÇÃO
-- ge (Grupo de Estoque):
-  • CON / consumo (grupo) → ge ILIKE '%CON%'
-  • APL / aplicação direta → ge ILIKE '%APL%'
-  • REP / reposição → ge ILIKE '%REP%'
-- item_critico: crítico, estratégico, sobressalente crítico
-  • críticos → item_critico ILIKE 'Sim'
-  • não críticos → item_critico ILIKE 'Não'
+CONSUMO (saída interna)
+- Colunas: qtde_saida_cons_interno, valor_saida_cons_interno
+- Na Base os valores de saída/consumo frequentemente vêm NEGATIVOS
+- Sempre agregar e ordenar com ABS():
+  SUM(ABS(COALESCE(valor_saida_cons_interno,0)))
+  SUM(ABS(COALESCE(qtde_saida_cons_interno,0)))
+- Exibir consumo como valor positivo (quanto foi consumido)
+- "itens que mais consumiram":
+  WHERE ABS(COALESCE(valor_saida_cons_interno,0)) > 0
+     OR ABS(COALESCE(qtde_saida_cons_interno,0)) > 0
+  ORDER BY ABS(COALESCE(valor_saida_cons_interno,0)) DESC
+  LIMIT N
+- NÃO retornar linhas com consumo zero no ranking de maiores consumidores
 
-LOCAL
-- localizacao: endereço físico, prateleira, corredor, rua, estante, gaveta (NÃO é categoria contábil)
-- codigo_local_estoque: código numérico do depósito/categoria
-- nome_local_estoque: Insumo, Obsoleto, Obra, Operacional, Crítico (como categoria de local)
-  • busca direta ILIKE para Insumo/Obsoleto/Obra
+GE / CLASSIFICAÇÃO
+- APL → ge ILIKE '%APL%'
+- REP → ge ILIKE '%REP%'
+- CON (grupo) → ge ILIKE '%CON%'
 
-SALDOS E MOVIMENTOS (sempre agregar com SUM quando for total)
-- qtde_saldo_atual: quantidade em estoque, saldo físico, "quantas peças", ruptura, sem saldo
-  • zerado/sem saldo → COALESCE(qtde_saldo_atual,0) = 0
-  • com saldo → qtde_saldo_atual > 0
-- preco_medio: preço unitário, custo unitário
-- valor_saldo_atual: valor em estoque, montante financeiro, R$ parado → SUM(valor_saldo_atual)
-- qtde_saida_cons_interno / valor_saida_cons_interno: consumo interno, quanto gastou/usou
-- qtde_entrada_compras / valor_entrada_compras: compras, entradas, volume/valor adquirido
-
-ITENS SEM VALOR FINANCEIRO
-- valor zerado / sem valor em R$ → COALESCE(valor_saldo_atual, 0) = 0
+OUTROS
+- unidade_almoxarifado, nome_produto, "Segmento", "Região": TRIM + ILIKE
+- valor em estoque → SUM(valor_saldo_atual)
+- saldo físico zerado → COALESCE(qtde_saldo_atual,0)=0
+- sem valor financeiro → COALESCE(valor_saldo_atual,0)=0
+- Segmento: Solar/Renovável → '%UFV%'; Térmica → '%UTE%'; PCH/Hidro → '%PCH%'
 `;
 
 function MarkdownRenderer({ text }) {
@@ -389,7 +385,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     {
       id: 1,
       sender: 'bot',
-      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base** completa (`painel_estoque` e `painel_inventario`).\n\nEntendo termos como **APL**, **REP**, **crítico**, **consumo**, **gerenciais** e usinas.\nPerguntas sem data usam o **período mais recente**. O histórico fica ativo até limpar o chat.',
+      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base**.\n\nEntendo **vários períodos**, **ativas** (sem gerencial), **críticos**, **APL/REP** e **consumo**.\nPerguntas sem data usam o período mais recente. Histórico ativo até limpar o chat.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       badge: 'Base Conectada'
     }
@@ -437,8 +433,8 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
   }, []);
 
   const formatarMoeda = (v) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
-  const formatarNumero = (v) => new Intl.NumberFormat('pt-BR').format(v || 0);
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(v || 0));
+  const formatarNumero = (v) => new Intl.NumberFormat('pt-BR').format(Math.abs(v || 0));
 
   const handleCopy = (id, text) => {
     navigator.clipboard.writeText(text);
@@ -482,22 +478,23 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes: maiorMes || null, ano: maiorAno || null };
   };
 
-  const extrairPeriodo = (prompt) => {
+  // Extrai um ou vários meses + ano
+  const extrairPeriodos = (prompt) => {
     const p = prompt.toLowerCase();
     const recente = getPeriodoMaisRecente();
-    const meses = {
-      janeiro: 1, jan: 1, '01': 1, '1': 1,
-      fevereiro: 2, fev: 2, '02': 2, '2': 2,
-      março: 3, marco: 3, mar: 3, '03': 3, '3': 3,
-      abril: 4, abr: 4, '04': 4, '4': 4,
-      maio: 5, mai: 5, '05': 5, '5': 5,
-      junho: 6, jun: 6, '06': 6, '6': 6,
-      julho: 7, jul: 7, '07': 7, '7': 7,
-      agosto: 8, ago: 8, '08': 8, '8': 8,
-      setembro: 9, set: 9, '09': 9, '9': 9,
-      outubro: 10, out: 10, '10': 10,
-      novembro: 11, nov: 11, '11': 11,
-      dezembro: 12, dez: 12, '12': 12
+    const mapaMeses = {
+      janeiro: 1, jan: 1,
+      fevereiro: 2, fev: 2,
+      março: 3, marco: 3, mar: 3,
+      abril: 4, abr: 4,
+      maio: 5, mai: 5,
+      junho: 6, jun: 6,
+      julho: 7, jul: 7,
+      agosto: 8, ago: 8,
+      setembro: 9, set: 9,
+      outubro: 10, out: 10,
+      novembro: 11, nov: 11,
+      dezembro: 12, dez: 12
     };
 
     if (
@@ -508,37 +505,58 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       p.includes('último') ||
       p.includes('ultimo')
     ) {
-      return { ...recente, origem: 'periodo_atual' };
-    }
-
-    let mes = null;
-    let ano = null;
-
-    const matchSlash = p.match(/(?:mês|mes)?\s*(\d{1,2})\/(\d{4})/);
-    if (matchSlash) {
       return {
-        mes: parseInt(matchSlash[1], 10),
-        ano: parseInt(matchSlash[2], 10),
-        origem: 'explicito'
+        meses: recente.mes ? [recente.mes] : [],
+        ano: recente.ano,
+        origem: 'periodo_atual'
       };
     }
 
+    let ano = null;
     const matchAno = p.match(/\b(202[0-9])\b/);
     if (matchAno) ano = parseInt(matchAno[1], 10);
 
-    const matchMes = p.match(
-      /mês\s*(\d{1,2})|mes\s*(\d{1,2})|\b(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/
-    );
-    if (matchMes) {
-      const termo = matchMes[1] || matchMes[2] || matchMes[3];
-      if (termo && meses[termo]) mes = meses[termo];
+    // Lista numérica: "10, 09 e 08" / "meses 8, 9 e 10"
+    const mesesNum = [];
+    const reNum = /(?:mês|mes)?\s*(\d{1,2})(?=\s*[,/e]|\s+e\s+|\s*$|\s+de\s+|\s+do\s+)/gi;
+    let m;
+    const textoParaNum = p.replace(/\b(20\d{2})\b/g, ' ');
+    while ((m = reNum.exec(textoParaNum)) !== null) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 12 && !mesesNum.includes(n)) mesesNum.push(n);
     }
 
-    if (mes === null && ano === null) {
-      return { ...recente, origem: 'periodo_atual_padrao' };
+    // Formato 10/2026 isolado
+    const matchSlash = p.match(/(\d{1,2})\s*\/\s*(202[0-9])/);
+    if (matchSlash) {
+      const mesSlash = parseInt(matchSlash[1], 10);
+      const anoSlash = parseInt(matchSlash[2], 10);
+      if (!mesesNum.includes(mesSlash)) mesesNum.push(mesSlash);
+      if (!ano) ano = anoSlash;
     }
 
-    return { mes, ano, origem: 'parcial' };
+    // Nomes de mês
+    Object.entries(mapaMeses).forEach(([nome, num]) => {
+      if (p.includes(nome) && !mesesNum.includes(num)) mesesNum.push(num);
+    });
+
+    if (mesesNum.length === 0 && ano === null) {
+      return {
+        meses: recente.mes ? [recente.mes] : [],
+        ano: recente.ano,
+        origem: 'periodo_atual_padrao'
+      };
+    }
+
+    if (mesesNum.length === 0 && ano !== null) {
+      return { meses: [], ano, origem: 'ano_inteiro' };
+    }
+
+    return {
+      meses: mesesNum.sort((a, b) => a - b),
+      ano: ano || recente.ano,
+      origem: mesesNum.length > 1 ? 'multiplos' : 'explicito'
+    };
   };
 
   const extrairIntencaoGerencial = (prompt) => {
@@ -560,9 +578,17 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       p.includes('não gerencial') ||
       p.includes('nao gerencial') ||
       p.includes('sem as gerenciais') ||
-      p.includes('fora gerencial')
+      p.includes('fora gerencial') ||
+      p.includes('somente das ativas') ||
+      p.includes('somente ativas') ||
+      p.includes('só ativas') ||
+      p.includes('so ativas') ||
+      p.includes('unidades ativas') ||
+      p.includes('empresas ativas') ||
+      p.includes('só operacionais') ||
+      p.includes('somente operacionais')
     ) {
-      return 'sem_gerenciais';
+      return 'sem_gerenciais'; // ativas = sem gerencial
     }
     return 'todos';
   };
@@ -655,65 +681,70 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
 
   const consultarViaBaseSQL = async (
     perguntaUsuario,
-    periodoDetectado,
+    periodos,
     historicoConversa,
     intencaoGerencial
   ) => {
     const periodoRecente = getPeriodoMaisRecente();
-    const refMes = periodoDetectado.mes || periodoRecente.mes;
-    const refAno = periodoDetectado.ano || periodoRecente.ano;
-    const usouPeriodoAtual =
-      periodoDetectado.origem === 'periodo_atual' ||
-      periodoDetectado.origem === 'periodo_atual_padrao';
+    const refAno = periodos.ano || periodoRecente.ano;
+    const refMeses = periodos.meses?.length ? periodos.meses : periodoRecente.mes ? [periodoRecente.mes] : [];
+    const multiplos = refMeses.length > 1;
+
+    const filtroPeriodoSQL = multiplos
+      ? `mes_referencia IN (${refMeses.join(',')}) AND ano_referencia = ${refAno}`
+      : refMeses.length === 1
+      ? `mes_referencia = ${refMeses[0]} AND ano_referencia = ${refAno}`
+      : refAno
+      ? `ano_referencia = ${refAno}`
+      : `ano_referencia = ${periodoRecente.ano} AND mes_referencia = ${periodoRecente.mes}`;
 
     let regraGerencial = '';
     if (intencaoGerencial === 'sem_gerenciais') {
       regraGerencial =
-        "REGRA GERENCIAL: SEM gerenciais. AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'.";
+        "ATIVAS/SEM GERENCIAIS: AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'.";
     } else if (intencaoGerencial === 'somente_gerenciais') {
       regraGerencial =
-        "REGRA GERENCIAL: SOMENTE gerenciais. AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%'.";
+        "SOMENTE GERENCIAIS: AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%'.";
     } else {
       regraGerencial =
-        'REGRA GERENCIAL: Usina citada sozinha (ex: Candiota) prioriza operacional (sem GERENCIAL). Se existirem as duas, mostre separadas.';
+        'Se citar usina sozinha (ex: Candiota), priorize operacional (sem GERENCIAL). Se existirem as duas, mostre separadas.';
     }
 
     const promptGeradorSQL = `Você é Especialista Sênior em PostgreSQL da Âmbar Energia.
-Gere UMA consulta SQL SELECT válida para a Base.
+Gere UMA consulta SQL SELECT válida.
 
 ${SCHEMA_BANCO}
 
 ${DICIONARIO_NEGOCIO}
 
-HISTÓRICO DA CONVERSA:
+HISTÓRICO:
 ${historicoConversa}
 
-PERÍODO:
-- Mais recente na Base: ${periodoRecente.mes}/${periodoRecente.ano}
-- Período desta pergunta: mes_referencia = ${refMes} AND ano_referencia = ${refAno}
-- ${usouPeriodoAtual ? 'Pergunta SEM data → USE o período mais recente.' : 'Use o período da pergunta.'}
+PERÍODO DETECTADO:
+- Ano: ${refAno}
+- Meses: ${refMeses.length ? refMeses.join(', ') : 'não especificado'}
+- Filtro sugerido: ${filtroPeriodoSQL}
+- ${multiplos ? 'MÚLTIPLOS MESES: agrupe por mes_referencia e retorne comparação (GROUP BY mes_referencia).' : 'Um período (ou ano).'}
+- ${periodos.origem?.includes('atual') || periodos.origem === 'periodo_atual_padrao' ? 'Pergunta sem data explícita → use período mais recente.' : ''}
 
 ${regraGerencial}
 
-REGRAS OBRIGATÓRIAS DO SQL:
-1. APENAS SQL puro (SELECT ou WITH). Sem markdown, sem ponto-e-vírgula final.
+REGRAS OBRIGATÓRIAS:
+1. APENAS SQL puro (SELECT/WITH). Sem markdown, sem ; no final.
 2. NUNCA INSERT/UPDATE/DELETE/DROP/ALTER.
-3. Colunas com maiúsculas: "Sigla", "Segmento", "Região", "nCdEmpresa".
-4. NORMALIZAÇÃO de texto: sempre TRIM() + ILIKE em unidade, produto, segmento, região, ge, item_critico quando fizer sentido.
-5. APL/REP/CON → filtrar na coluna ge (ILIKE '%APL%' etc.).
-6. Crítico → item_critico ILIKE 'Sim'.
-7. Consumo → SUM(valor_saida_cons_interno) / SUM(qtde_saida_cons_interno).
-8. Valor em estoque → SUM(valor_saldo_atual).
-9. Sem valor financeiro → COALESCE(valor_saldo_atual,0)=0. Sem saldo físico → COALESCE(qtde_saldo_atual,0)=0.
-10. Candiota ≠ Candiota Gerencial.
-11. Pergunta sem mês/ano → mes_referencia = ${refMes} AND ano_referencia = ${refAno}.
-12. Listagens: LIMIT ${MAX_ITENS_API}. Use COUNT(*) OVER() AS total_encontrado quando listar itens.
-13. Aliases em português.`;
+3. Colunas maiúsculas: "Sigla", "Segmento", "Região", "nCdEmpresa".
+4. TRIM + ILIKE em textos.
+5. Crítico: item_critico ILIKE '%sim%'
+6. Consumo: usar ABS(COALESCE(valor_saida_cons_interno,0)) e ABS(COALESCE(qtde_saida_cons_interno,0))
+7. Ranking de maiores consumidores: filtrar consumo > 0 e ORDER BY ABS(valor) DESC
+8. Ativas: NOT ILIKE '%gerencial%'
+9. Listagens: LIMIT ${MAX_ITENS_API}
+10. Aliases em português.`;
 
     const geracao = await chamarIAEmCascata(
       promptGeradorSQL,
       `Pergunta do usuário: "${perguntaUsuario}"`,
-      900
+      1000
     );
     if (!geracao) return null;
 
@@ -729,8 +760,8 @@ REGRAS OBRIGATÓRIAS DO SQL:
       console.warn('Erro 1ª tentativa SQL:', erroBanco.message);
       const correcao = await chamarIAEmCascata(
         promptGeradorSQL,
-        `SQL anterior falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija e retorne APENAS o SELECT. Respeite o dicionário (ge, item_critico, TRIM+ILIKE).`,
-        900
+        `SQL falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija. Use ABS no consumo, item_critico ILIKE '%sim%', ativas sem gerencial.`,
+        1000
       );
       if (correcao) {
         const sqlCorrigido = extrairSQLPuro(correcao.text);
@@ -750,6 +781,9 @@ REGRAS OBRIGATÓRIAS DO SQL:
     }
 
     const linhas = Array.isArray(dadosBanco) ? dadosBanco : [];
+    const labelPeriodo = multiplos
+      ? `meses ${refMeses.map((m) => String(m).padStart(2, '0')).join(', ')}/${refAno}`
+      : `${String(refMeses[0] || '').padStart(2, '0')}/${refAno}`;
 
     const promptFormatador = `Você é a Assistente Executiva do Almoxarifado Âmbar Energia.
 
@@ -758,48 +792,49 @@ ${historicoConversa}
 
 PERGUNTA: "${perguntaUsuario}"
 SQL: ${sqlGerado}
-PERÍODO: ${String(refMes).padStart(2, '0')}/${refAno}
+PERÍODO: ${labelPeriodo}
 LINHAS: ${linhas.length}
-INTENÇÃO GERENCIAL: ${intencaoGerencial}
+FILTRO ATIVAS/GERENCIAL: ${intencaoGerencial}
 
-DADOS DA BASE:
+DADOS:
 ${JSON.stringify(linhas, null, 2)}
 
 INSTRUÇÕES:
-1. Markdown executivo, claro.
-2. 2+ registros → tabela markdown.
-3. Valores em R$, quantidades com milhar.
-4. Códigos entre crases.
-5. Se citou usina, deixe claro operacional vs gerencial.
-6. Se citou APL/REP/CON/crítico, reflita isso no título/resumo.
-7. JSON vazio → informe que não há registros no critério.
-8. Sem data na pergunta → deixe explícito o período ${String(refMes).padStart(2, '0')}/${refAno}.
-9. Use somente os dados retornados.`;
+1. Markdown executivo.
+2. 2+ linhas → tabela.
+3. Valores monetários em R$ (consumo mostre como positivo = quanto foi consumido).
+4. Se múltiplos meses, tabela comparativa por mês.
+5. Crítico / ativas / APL etc. deixe explícito no título.
+6. JSON vazio → sem registros no critério.
+7. Use só os dados retornados.`;
 
     const formatacao = await chamarIAEmCascata(
       promptFormatador,
       'Formate a resposta executiva.',
-      1800
+      2000
     );
     if (!formatacao) return null;
 
     return {
       texto: formatacao.text,
       sql: sqlGerado,
-      provedor: `Base SQL • ${formatacao.provedor}`
+      provedor: `Base SQL • ${formatacao.provedor}`,
+      labelPeriodo
     };
   };
 
-  const processarConsultaLocal = (pergunta, mes, ano, intencaoGerencial) => {
+  const processarConsultaLocal = (pergunta, periodos, intencaoGerencial) => {
     if (!data?.length) return null;
     const p = pergunta.toLowerCase();
+    const refAno = periodos.ano;
+    const refMeses = periodos.meses || [];
 
     let dadosFiltrados = data.filter((item) => {
       const itemMes = Number(item.mes_referencia);
       const itemAno = Number(item.ano_referencia);
-      const bateMes = mes ? itemMes === mes : true;
-      const bateAno = ano ? itemAno === ano : true;
-      return bateMes && bateAno;
+      const bateAno = refAno ? itemAno === refAno : true;
+      const bateMes = refMeses.length ? refMeses.includes(itemMes) : true;
+      return bateAno && bateMes;
     });
 
     if (intencaoGerencial === 'sem_gerenciais') {
@@ -812,20 +847,14 @@ INSTRUÇÕES:
       );
     }
 
-    // Filtros de vocabulário no motor local
     if (p.includes('apl')) {
       dadosFiltrados = dadosFiltrados.filter((i) =>
         String(i.ge || '').toUpperCase().includes('APL')
       );
     }
-    if (p.includes('rep') && !p.includes('represent')) {
+    if (/\brep\b/.test(p) || p.includes('reposição') || p.includes('reposicao')) {
       dadosFiltrados = dadosFiltrados.filter((i) =>
         String(i.ge || '').toUpperCase().includes('REP')
-      );
-    }
-    if (/\bcon\b/.test(p) || p.includes('grupo con')) {
-      dadosFiltrados = dadosFiltrados.filter((i) =>
-        String(i.ge || '').toUpperCase().includes('CON')
       );
     }
     if (p.includes('crítico') || p.includes('critico')) {
@@ -836,34 +865,94 @@ INSTRUÇÕES:
 
     if (!dadosFiltrados.length) return null;
 
-    const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Todos';
-    const anoStr = ano ? String(ano) : 'Todos';
+    const labelPeriodo =
+      refMeses.length > 1
+        ? `${refMeses.map((m) => String(m).padStart(2, '0')).join(', ')}/${refAno}`
+        : `${String(refMeses[0] || '').padStart(2, '0')}/${refAno}`;
 
-    let valorTotalEstoque = 0;
-    let valorTotalEntradas = 0;
-    let valorTotalSaidas = 0;
+    // Comparativo multi-mês
+    if (refMeses.length > 1 && (p.includes('valor') || p.includes('estoque') || p.includes('compar'))) {
+      const porMes = {};
+      dadosFiltrados.forEach((item) => {
+        const m = Number(item.mes_referencia);
+        if (!porMes[m]) porMes[m] = { saldo: 0, entradas: 0, consumo: 0, qtd: 0 };
+        porMes[m].saldo += Number(item.valor_saldo_atual) || 0;
+        porMes[m].entradas += Number(item.valor_entrada_compras) || 0;
+        porMes[m].consumo += Math.abs(Number(item.valor_saida_cons_interno) || 0);
+        porMes[m].qtd += 1;
+      });
+
+      let resposta = `### 📊 Comparativo de Estoque — ${labelPeriodo}\n\n`;
+      resposta += `| Mês | Registros | Valor Estoque | Entradas | Consumo |\n| :---: | :---: | :---: | :---: | :---: |\n`;
+      Object.keys(porMes)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .forEach((m) => {
+          const x = porMes[m];
+          resposta += `| ${String(m).padStart(2, '0')}/${refAno} | ${formatarNumero(x.qtd)} | ${formatarMoeda(x.saldo)} | ${formatarMoeda(x.entradas)} | ${formatarMoeda(x.consumo)} |\n`;
+        });
+      return resposta;
+    }
+
+    // Top consumidores
+    if (p.includes('consum') && (p.includes('mais') || p.includes('maior') || p.includes('itens'))) {
+      const mapa = {};
+      dadosFiltrados.forEach((item) => {
+        const cod = item.codigo_produto || 'S/C';
+        if (!mapa[cod]) {
+          mapa[cod] = {
+            codigo: cod,
+            nome: item.nome_produto || 'Sem descrição',
+            unidade: item.unidade_almoxarifado,
+            qtd: 0,
+            valor: 0
+          };
+        }
+        mapa[cod].qtd += Math.abs(Number(item.qtde_saida_cons_interno) || 0);
+        mapa[cod].valor += Math.abs(Number(item.valor_saida_cons_interno) || 0);
+      });
+
+      const top = Object.values(mapa)
+        .filter((i) => i.valor > 0 || i.qtd > 0)
+        .sort((a, b) => b.valor - a.valor)
+        .slice(0, MAX_ITENS_API);
+
+      let resposta = `### 📉 Itens que mais consumiram — ${labelPeriodo}\n\n`;
+      if (!top.length) {
+        return `${resposta}Nenhum consumo registrado neste período.`;
+      }
+      resposta += `| # | Código | Material | Unidade | Qtd. Consumo | Valor Consumo |\n| :---: | :--- | :--- | :--- | :---: | :---: |\n`;
+      top.forEach((i, idx) => {
+        resposta += `| ${idx + 1} | \`${i.codigo}\` | ${i.nome} | ${i.unidade} | ${formatarNumero(i.qtd)} | ${formatarMoeda(i.valor)} |\n`;
+      });
+      return resposta;
+    }
+
+    let valorTotal = 0;
+    let valorEntradas = 0;
+    let valorConsumo = 0;
     const porUnidade = {};
 
     dadosFiltrados.forEach((item) => {
-      const valSaldo = Number(item.valor_saldo_atual) || 0;
-      const valEntrada = Number(item.valor_entrada_compras) || 0;
-      const valSaida = Number(item.valor_saida_cons_interno) || 0;
-      valorTotalEstoque += valSaldo;
-      valorTotalEntradas += valEntrada;
-      valorTotalSaidas += valSaida;
+      const saldo = Number(item.valor_saldo_atual) || 0;
+      const entrada = Number(item.valor_entrada_compras) || 0;
+      const consumo = Math.abs(Number(item.valor_saida_cons_interno) || 0);
+      valorTotal += saldo;
+      valorEntradas += entrada;
+      valorConsumo += consumo;
 
       const und = (item.unidade_almoxarifado || 'N/A').trim();
       if (!porUnidade[und]) porUnidade[und] = { saldo: 0, qtdItens: 0, consumo: 0 };
-      porUnidade[und].saldo += valSaldo;
+      porUnidade[und].saldo += saldo;
       porUnidade[und].qtdItens += 1;
-      porUnidade[und].consumo += valSaida;
+      porUnidade[und].consumo += consumo;
     });
 
     if (p.includes('maior') || p.includes('top')) {
       const top = [...dadosFiltrados]
         .sort((a, b) => (Number(b.valor_saldo_atual) || 0) - (Number(a.valor_saldo_atual) || 0))
-        .slice(0, 10);
-      let resposta = `### 🏆 Top 10 — ${nomeMesStr}/${anoStr}\n\n`;
+        .slice(0, Math.min(10, MAX_ITENS_API));
+      let resposta = `### 🏆 Top itens por valor — ${labelPeriodo}\n\n`;
       resposta += `| # | Código | Material | Unidade | Valor |\n| :---: | :--- | :--- | :--- | :---: |\n`;
       top.forEach((i, idx) => {
         resposta += `| ${idx + 1} | \`${i.codigo_produto || 'S/C'}\` | ${i.nome_produto} | ${i.unidade_almoxarifado} | ${formatarMoeda(i.valor_saldo_atual)} |\n`;
@@ -871,16 +960,12 @@ INSTRUÇÕES:
       return resposta;
     }
 
-    let resposta = `### 📊 Resumo do Estoque — ${nomeMesStr}/${anoStr}\n\n`;
-    if (intencaoGerencial === 'sem_gerenciais') resposta += `_Filtro: sem unidades gerenciais_\n\n`;
-    if (intencaoGerencial === 'somente_gerenciais') resposta += `_Filtro: somente unidades gerenciais_\n\n`;
-    if (p.includes('apl')) resposta += `_Filtro: GE APL_\n\n`;
-    if (p.includes('rep') && !p.includes('represent')) resposta += `_Filtro: GE REP_\n\n`;
-    if (p.includes('crítico') || p.includes('critico')) resposta += `_Filtro: itens críticos_\n\n`;
-
-    resposta += `• **Valor Total:** ${formatarMoeda(valorTotalEstoque)}\n`;
-    resposta += `• **Entradas:** ${formatarMoeda(valorTotalEntradas)}\n`;
-    resposta += `• **Saídas (consumo):** ${formatarMoeda(valorTotalSaidas)}\n`;
+    let resposta = `### 📊 Resumo do Estoque — ${labelPeriodo}\n\n`;
+    if (intencaoGerencial === 'sem_gerenciais') resposta += `_Filtro: ativas (sem gerenciais)_\n\n`;
+    if (p.includes('crítico') || p.includes('critico')) resposta += `_Filtro: material crítico_\n\n`;
+    resposta += `• **Valor Total:** ${formatarMoeda(valorTotal)}\n`;
+    resposta += `• **Entradas:** ${formatarMoeda(valorEntradas)}\n`;
+    resposta += `• **Consumo:** ${formatarMoeda(valorConsumo)}\n`;
     resposta += `• **Registros:** ${formatarNumero(dadosFiltrados.length)}\n\n`;
     resposta += `| Unidade | SKUs | Consumo | Saldo |\n| :--- | :---: | :---: | :---: |\n`;
     Object.entries(porUnidade)
@@ -909,16 +994,18 @@ INSTRUÇÕES:
     setIsLoading(true);
 
     try {
-      const periodo = extrairPeriodo(query);
-      const { mes, ano } = periodo;
-      const nomeMesStr = mes ? String(mes).padStart(2, '0') : 'Histórico';
-      const anoStr = ano ? String(ano) : 'Completo';
+      const periodos = extrairPeriodos(query);
       const historico = montarHistoricoConversa();
       const intencaoGerencial = extrairIntencaoGerencial(query);
 
+      const labelPeriodo =
+        periodos.meses?.length > 1
+          ? `${periodos.meses.map((m) => String(m).padStart(2, '0')).join(', ')}/${periodos.ano}`
+          : `${String(periodos.meses?.[0] || '').padStart(2, '0')}/${periodos.ano}`;
+
       const resultadoSQL = await consultarViaBaseSQL(
         query,
-        periodo,
+        periodos,
         historico,
         intencaoGerencial
       );
@@ -932,13 +1019,13 @@ INSTRUÇÕES:
             text: resultadoSQL.texto,
             sql: resultadoSQL.sql,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            badge: `${nomeMesStr}/${anoStr} • ${resultadoSQL.provedor}`
+            badge: `${resultadoSQL.labelPeriodo || labelPeriodo} • ${resultadoSQL.provedor}`
           }
         ]);
         return;
       }
 
-      const local = processarConsultaLocal(query, mes, ano, intencaoGerencial);
+      const local = processarConsultaLocal(query, periodos, intencaoGerencial);
       if (local) {
         setMessages((prev) => [
           ...prev,
@@ -947,12 +1034,12 @@ INSTRUÇÕES:
             sender: 'bot',
             text: local,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            badge: `${nomeMesStr}/${anoStr} • Motor Local`
+            badge: `${labelPeriodo} • Motor Local`
           }
         ]);
       } else {
         throw new Error(
-          `Sem dados para ${nomeMesStr}/${anoStr}. Verifique se a função de consulta da Base está ativa.`
+          `Sem dados para ${labelPeriodo}. Verifique a função de consulta da Base.`
         );
       }
     } catch (error) {
@@ -1030,7 +1117,7 @@ INSTRUÇÕES:
               )}
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
-              Base • APL/REP/Críticos • Busca inteligente • Âmbar Energia
+              Multi-período • Ativas • Críticos • Consumo • Âmbar Energia
             </p>
           </div>
         </div>
@@ -1164,7 +1251,7 @@ INSTRUÇÕES:
             disabled={isLoading || !isReady}
             placeholder={
               isReady
-                ? 'Ex: itens críticos APL | Candiota sem gerenciais | consumo atual'
+                ? 'Ex: estoque meses 08,09,10/2026 | ativas | críticos | quem mais consumiu'
                 : 'Conectando à Base...'
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
@@ -1178,7 +1265,7 @@ INSTRUÇÕES:
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Base com dicionário de negócio • Memória até limpar o chat • Âmbar Energia
+          Até {MAX_ITENS_API} itens • Multi-período • Consumo em valor absoluto • Âmbar Energia
         </p>
       </div>
     </div>
