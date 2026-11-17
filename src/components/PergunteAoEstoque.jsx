@@ -52,15 +52,15 @@ Colunas:
 - nome_produto (text)
 - un (text)
 - ge (text) -- CON, APL, REP
-- item_critico (text) -- valores como 'Sim', 'Não', '0-Sim', etc.
-- localizacao (text)
+- item_critico (text) -- 'Sim', 'Não', '0-Sim', etc.
+- localizacao (text) -- endereço físico
 - qtde_saldo_atual (numeric)
 - preco_medio (numeric)
 - valor_saldo_atual (numeric)
 - codigo_local_estoque (int4)
-- nome_local_estoque (text)
-- qtde_saida_cons_interno (numeric) -- pode vir negativo (saída)
-- valor_saida_cons_interno (numeric) -- pode vir negativo (saída)
+- nome_local_estoque (text) -- Insumo, Obsoleto, Obra, etc.
+- qtde_saida_cons_interno (numeric) -- pode ser negativo
+- valor_saida_cons_interno (numeric) -- pode ser negativo
 - qtde_entrada_compras (numeric)
 - valor_entrada_compras (numeric)
 - qtde_saida_outras (numeric)
@@ -126,51 +126,46 @@ Colunas:
 `;
 
 const DICIONARIO_NEGOCIO = `
-DICIONÁRIO DE NEGÓCIO (obrigatório):
+DICIONÁRIO DE NEGÓCIO (mapa de significados — NÃO aplicar filtro automaticamente):
+
+REGRA DE OURO:
+- Só aplique filtro de APL, REP, CON, crítico, ativas, gerenciais, insumos, obsoletos, obra, etc.
+  SE o usuário mencionar explicitamente o termo (ou sinônimo claro) na pergunta atual ou no histórico recente.
+- Se a pergunta for genérica (ex: "valor do estoque nos meses 08, 09 e 10"),
+  consulte a BASE COMPLETA do período, SEM esses filtros.
+- NÃO coloque no título "Crítico", "Ativas", "APL" se o usuário não pediu.
 
 PERÍODO
-- mes_referencia (1-12), ano_referencia (ex: 2026)
-- Se NÃO informar data → usar período mais recente do contexto
-- Se informar VÁRIOS meses (ex: "meses 08, 09 e 10", "10, 09 e 08 de 2026"):
-  → filtrar mes_referencia IN (...) AND ano_referencia = ano
-  → agrupar por mes_referencia e devolver comparação em tabela
+- mes_referencia (1-12), ano_referencia
+- Sem data → período mais recente do contexto
+- Vários meses ("08, 09 e 10", "meses 1 a 6") → mes_referencia IN (...) GROUP BY mes_referencia
 
-ATIVAS / OPERACIONAIS
-- "ativas", "somente ativas", "unidades ativas", "só operacionais" =
-  unidades SEM a palavra GERENCIAL no nome
-  → TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'
-- "somente gerenciais" → TRIM(unidade_almoxarifado) ILIKE '%gerencial%'
-
-CRÍTICO
-- item_critico pode ser 'Sim', 'Não', '0-Sim', '0-Não', etc.
-- material crítico / item crítico → item_critico ILIKE '%sim%'
-- NÃO use igualdade exata 'Sim'
-
-CONSUMO (saída interna)
-- Colunas: qtde_saida_cons_interno, valor_saida_cons_interno
-- Na Base os valores de saída/consumo frequentemente vêm NEGATIVOS
-- Sempre agregar e ordenar com ABS():
-  SUM(ABS(COALESCE(valor_saida_cons_interno,0)))
-  SUM(ABS(COALESCE(qtde_saida_cons_interno,0)))
-- Exibir consumo como valor positivo (quanto foi consumido)
-- "itens que mais consumiram":
-  WHERE ABS(COALESCE(valor_saida_cons_interno,0)) > 0
-     OR ABS(COALESCE(qtde_saida_cons_interno,0)) > 0
-  ORDER BY ABS(COALESCE(valor_saida_cons_interno,0)) DESC
-  LIMIT N
-- NÃO retornar linhas com consumo zero no ranking de maiores consumidores
-
-GE / CLASSIFICAÇÃO
+QUANDO O USUÁRIO CITAR O TERMO → use a regra:
+- ativas / unidades ativas / só operacionais → TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'
+- gerenciais / só gerenciais → TRIM(unidade_almoxarifado) ILIKE '%gerencial%'
+- crítico / material crítico → item_critico ILIKE '%sim%'   (pega 'Sim', '0-Sim', etc.)
 - APL → ge ILIKE '%APL%'
-- REP → ge ILIKE '%REP%'
-- CON (grupo) → ge ILIKE '%CON%'
+- REP / reposição → ge ILIKE '%REP%'
+- CON (grupo de estoque) → ge ILIKE '%CON%'
+- insumos → nome_local_estoque ILIKE '%insumo%'
+- obsoletos → nome_local_estoque ILIKE '%obsoleto%'
+- obra → nome_local_estoque ILIKE '%obra%'
+- solar / renovável / UFV → "Segmento" ILIKE '%UFV%'
+- térmica / termelétrica / UTE → "Segmento" ILIKE '%UTE%'
+- PCH / hidrelétrica → "Segmento" ILIKE '%PCH%'
+
+CONSUMO (só quando a pergunta for sobre consumo)
+- qtde_saida_cons_interno / valor_saida_cons_interno podem ser NEGATIVOS na Base
+- Use ABS() na agregação e ordenação
+- Exiba consumo como valor positivo (montante consumido)
+- "itens que mais consumiram": filtrar consumo > 0, ORDER BY ABS(valor) DESC, LIMIT N
 
 OUTROS
-- unidade_almoxarifado, nome_produto, "Segmento", "Região": TRIM + ILIKE
+- unidade / usina / produto / região: TRIM + ILIKE
 - valor em estoque → SUM(valor_saldo_atual)
-- saldo físico zerado → COALESCE(qtde_saldo_atual,0)=0
+- sem saldo físico → COALESCE(qtde_saldo_atual,0)=0
 - sem valor financeiro → COALESCE(valor_saldo_atual,0)=0
-- Segmento: Solar/Renovável → '%UFV%'; Térmica → '%UTE%'; PCH/Hidro → '%PCH%'
+- localização = endereço físico (prateleira), não confundir com nome_local_estoque
 `;
 
 function MarkdownRenderer({ text }) {
@@ -385,7 +380,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     {
       id: 1,
       sender: 'bot',
-      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base**.\n\nEntendo **vários períodos**, **ativas** (sem gerencial), **críticos**, **APL/REP** e **consumo**.\nPerguntas sem data usam o período mais recente. Histórico ativo até limpar o chat.',
+      text: 'Olá! Sou a assistente do **Almoxarifado Âmbar Energia**, conectada à **Base**.\n\nConsultas genéricas consideram **tudo** do período. Filtros (ativas, crítico, APL, insumos…) só entram se você pedir.\nHistórico ativo até limpar o chat.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       badge: 'Base Conectada'
     }
@@ -478,7 +473,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     return { mes: maiorMes || null, ano: maiorAno || null };
   };
 
-  // Extrai um ou vários meses + ano
   const extrairPeriodos = (prompt) => {
     const p = prompt.toLowerCase();
     const recente = getPeriodoMaisRecente();
@@ -516,7 +510,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     const matchAno = p.match(/\b(202[0-9])\b/);
     if (matchAno) ano = parseInt(matchAno[1], 10);
 
-    // Lista numérica: "10, 09 e 08" / "meses 8, 9 e 10"
     const mesesNum = [];
     const reNum = /(?:mês|mes)?\s*(\d{1,2})(?=\s*[,/e]|\s+e\s+|\s*$|\s+de\s+|\s+do\s+)/gi;
     let m;
@@ -526,7 +519,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       if (n >= 1 && n <= 12 && !mesesNum.includes(n)) mesesNum.push(n);
     }
 
-    // Formato 10/2026 isolado
     const matchSlash = p.match(/(\d{1,2})\s*\/\s*(202[0-9])/);
     if (matchSlash) {
       const mesSlash = parseInt(matchSlash[1], 10);
@@ -535,7 +527,6 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       if (!ano) ano = anoSlash;
     }
 
-    // Nomes de mês
     Object.entries(mapaMeses).forEach(([nome, num]) => {
       if (p.includes(nome) && !mesesNum.includes(num)) mesesNum.push(num);
     });
@@ -559,6 +550,7 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     };
   };
 
+  // Só detecta intenção se o termo aparecer de fato
   const extrairIntencaoGerencial = (prompt) => {
     const p = prompt.toLowerCase();
     if (
@@ -588,9 +580,9 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
       p.includes('só operacionais') ||
       p.includes('somente operacionais')
     ) {
-      return 'sem_gerenciais'; // ativas = sem gerencial
+      return 'sem_gerenciais';
     }
-    return 'todos';
+    return 'nenhum'; // padrão: não filtrar
   };
 
   const consultarGroqAPI = async (promptSistema, perguntaUsuario, maxTokens = 1500) => {
@@ -701,13 +693,13 @@ export default function PergunteAoEstoque({ data = [], loading = false }) {
     let regraGerencial = '';
     if (intencaoGerencial === 'sem_gerenciais') {
       regraGerencial =
-        "ATIVAS/SEM GERENCIAIS: AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'.";
+        "O usuário pediu ATIVAS/SEM GERENCIAIS → aplique: AND TRIM(unidade_almoxarifado) NOT ILIKE '%gerencial%'.";
     } else if (intencaoGerencial === 'somente_gerenciais') {
       regraGerencial =
-        "SOMENTE GERENCIAIS: AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%'.";
+        "O usuário pediu SOMENTE GERENCIAIS → aplique: AND TRIM(unidade_almoxarifado) ILIKE '%gerencial%'.";
     } else {
       regraGerencial =
-        'Se citar usina sozinha (ex: Candiota), priorize operacional (sem GERENCIAL). Se existirem as duas, mostre separadas.';
+        'O usuário NÃO pediu filtro de ativas/gerenciais → NÃO filtre por gerencial. Considere todas as unidades.';
     }
 
     const promptGeradorSQL = `Você é Especialista Sênior em PostgreSQL da Âmbar Energia.
@@ -723,23 +715,21 @@ ${historicoConversa}
 PERÍODO DETECTADO:
 - Ano: ${refAno}
 - Meses: ${refMeses.length ? refMeses.join(', ') : 'não especificado'}
-- Filtro sugerido: ${filtroPeriodoSQL}
-- ${multiplos ? 'MÚLTIPLOS MESES: agrupe por mes_referencia e retorne comparação (GROUP BY mes_referencia).' : 'Um período (ou ano).'}
-- ${periodos.origem?.includes('atual') || periodos.origem === 'periodo_atual_padrao' ? 'Pergunta sem data explícita → use período mais recente.' : ''}
+- Filtro de período: ${filtroPeriodoSQL}
+- ${multiplos ? 'MÚLTIPLOS MESES: GROUP BY mes_referencia e compare.' : ''}
 
 ${regraGerencial}
 
 REGRAS OBRIGATÓRIAS:
-1. APENAS SQL puro (SELECT/WITH). Sem markdown, sem ; no final.
+1. APENAS SQL puro (SELECT/WITH). Sem markdown, sem ; final.
 2. NUNCA INSERT/UPDATE/DELETE/DROP/ALTER.
 3. Colunas maiúsculas: "Sigla", "Segmento", "Região", "nCdEmpresa".
-4. TRIM + ILIKE em textos.
-5. Crítico: item_critico ILIKE '%sim%'
-6. Consumo: usar ABS(COALESCE(valor_saida_cons_interno,0)) e ABS(COALESCE(qtde_saida_cons_interno,0))
-7. Ranking de maiores consumidores: filtrar consumo > 0 e ORDER BY ABS(valor) DESC
-8. Ativas: NOT ILIKE '%gerencial%'
-9. Listagens: LIMIT ${MAX_ITENS_API}
-10. Aliases em português.`;
+4. REGRA DE OURO DOS FILTROS: só filtre por APL, REP, CON, crítico, insumos, obsoletos, obra, segmento, ativas/gerenciais SE o usuário mencionou o termo na pergunta. Pergunta genérica = BASE COMPLETA do período.
+5. Crítico (quando pedido): item_critico ILIKE '%sim%'
+6. Consumo (quando pedido): ABS(COALESCE(valor_saida_cons_interno,0)) e ABS(COALESCE(qtde_saida_cons_interno,0)); ranking sem zeros.
+7. Listagens: LIMIT ${MAX_ITENS_API}
+8. Aliases em português.
+9. TRIM + ILIKE em textos de nome/unidade.`;
 
     const geracao = await chamarIAEmCascata(
       promptGeradorSQL,
@@ -760,7 +750,7 @@ REGRAS OBRIGATÓRIAS:
       console.warn('Erro 1ª tentativa SQL:', erroBanco.message);
       const correcao = await chamarIAEmCascata(
         promptGeradorSQL,
-        `SQL falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija. Use ABS no consumo, item_critico ILIKE '%sim%', ativas sem gerencial.`,
+        `SQL falhou.\nSQL:\n${sqlGerado}\nErro:\n${erroBanco.message}\n\nCorrija. Não invente filtros (APL/crítico/ativas) se o usuário não pediu.`,
         1000
       );
       if (correcao) {
@@ -794,19 +784,18 @@ PERGUNTA: "${perguntaUsuario}"
 SQL: ${sqlGerado}
 PERÍODO: ${labelPeriodo}
 LINHAS: ${linhas.length}
-FILTRO ATIVAS/GERENCIAL: ${intencaoGerencial}
 
 DADOS:
 ${JSON.stringify(linhas, null, 2)}
 
 INSTRUÇÕES:
-1. Markdown executivo.
+1. Markdown executivo, fiel aos dados.
 2. 2+ linhas → tabela.
-3. Valores monetários em R$ (consumo mostre como positivo = quanto foi consumido).
-4. Se múltiplos meses, tabela comparativa por mês.
-5. Crítico / ativas / APL etc. deixe explícito no título.
-6. JSON vazio → sem registros no critério.
-7. Use só os dados retornados.`;
+3. Valores em R$; consumo como positivo (montante consumido).
+4. Múltiplos meses → tabela comparativa por mês.
+5. NÃO invente no título "Crítico", "Ativas", "APL", "Insumos" etc. se a pergunta não pediu esses filtros.
+6. JSON vazio → informe que não há registros.
+7. Use somente os dados retornados.`;
 
     const formatacao = await chamarIAEmCascata(
       promptFormatador,
@@ -837,6 +826,7 @@ INSTRUÇÕES:
       return bateAno && bateMes;
     });
 
+    // Filtros só se o termo existir na pergunta
     if (intencaoGerencial === 'sem_gerenciais') {
       dadosFiltrados = dadosFiltrados.filter(
         (i) => !(i.unidade_almoxarifado || '').toUpperCase().includes('GERENCIAL')
@@ -862,6 +852,16 @@ INSTRUÇÕES:
         String(i.item_critico || '').toLowerCase().includes('sim')
       );
     }
+    if (p.includes('insumo')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.nome_local_estoque || '').toLowerCase().includes('insumo')
+      );
+    }
+    if (p.includes('obsoleto')) {
+      dadosFiltrados = dadosFiltrados.filter((i) =>
+        String(i.nome_local_estoque || '').toLowerCase().includes('obsoleto')
+      );
+    }
 
     if (!dadosFiltrados.length) return null;
 
@@ -870,7 +870,6 @@ INSTRUÇÕES:
         ? `${refMeses.map((m) => String(m).padStart(2, '0')).join(', ')}/${refAno}`
         : `${String(refMeses[0] || '').padStart(2, '0')}/${refAno}`;
 
-    // Comparativo multi-mês
     if (refMeses.length > 1 && (p.includes('valor') || p.includes('estoque') || p.includes('compar'))) {
       const porMes = {};
       dadosFiltrados.forEach((item) => {
@@ -894,7 +893,6 @@ INSTRUÇÕES:
       return resposta;
     }
 
-    // Top consumidores
     if (p.includes('consum') && (p.includes('mais') || p.includes('maior') || p.includes('itens'))) {
       const mapa = {};
       dadosFiltrados.forEach((item) => {
@@ -918,9 +916,7 @@ INSTRUÇÕES:
         .slice(0, MAX_ITENS_API);
 
       let resposta = `### 📉 Itens que mais consumiram — ${labelPeriodo}\n\n`;
-      if (!top.length) {
-        return `${resposta}Nenhum consumo registrado neste período.`;
-      }
+      if (!top.length) return `${resposta}Nenhum consumo registrado neste período.`;
       resposta += `| # | Código | Material | Unidade | Qtd. Consumo | Valor Consumo |\n| :---: | :--- | :--- | :--- | :---: | :---: |\n`;
       top.forEach((i, idx) => {
         resposta += `| ${idx + 1} | \`${i.codigo}\` | ${i.nome} | ${i.unidade} | ${formatarNumero(i.qtd)} | ${formatarMoeda(i.valor)} |\n`;
@@ -1038,9 +1034,7 @@ INSTRUÇÕES:
           }
         ]);
       } else {
-        throw new Error(
-          `Sem dados para ${labelPeriodo}. Verifique a função de consulta da Base.`
-        );
+        throw new Error(`Sem dados para ${labelPeriodo}. Verifique a função de consulta da Base.`);
       }
     } catch (error) {
       console.error(error);
@@ -1117,7 +1111,7 @@ INSTRUÇÕES:
               )}
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
-              Multi-período • Ativas • Críticos • Consumo • Âmbar Energia
+              Padrão = base completa • Filtros só se você pedir • Âmbar Energia
             </p>
           </div>
         </div>
@@ -1251,7 +1245,7 @@ INSTRUÇÕES:
             disabled={isLoading || !isReady}
             placeholder={
               isReady
-                ? 'Ex: estoque meses 08,09,10/2026 | ativas | críticos | quem mais consumiu'
+                ? 'Ex: valor do estoque 08,09,10/2026 | ativas | críticos | quem mais consumiu'
                 : 'Conectando à Base...'
             }
             className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none disabled:opacity-50"
@@ -1265,7 +1259,7 @@ INSTRUÇÕES:
           </button>
         </div>
         <p className="mt-2 text-[11px] text-center text-gray-500">
-          Até {MAX_ITENS_API} itens • Multi-período • Consumo em valor absoluto • Âmbar Energia
+          Sem termo especial = base completa do período • Filtros só sob demanda • Âmbar Energia
         </p>
       </div>
     </div>
