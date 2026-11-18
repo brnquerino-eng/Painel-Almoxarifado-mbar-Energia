@@ -116,7 +116,7 @@ function formatarVariacaoKpi(diffVal, pctVal) {
 }
 
 // ============================================================================
-// SUBCOMPONENTE DE CARD KPI COM LUZES INDIVIDUAIS E TRAVA DE APRESENTAÇÃO
+// SUBCOMPONENTE DE CARD KPI COM LUZES INDIVIDUAIS E TRAVA DE DESTAQUE
 // ============================================================================
 
 function KpiCard({
@@ -190,8 +190,9 @@ function KpiCard({
             </div>
           )}
           <span
-            className="text-[10px] font-bold uppercase tracking-[0.16em] transition-colors"
-            style={{ color: isActive ? '#ffffff' : cor }}
+            className={`text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+              isActive ? 'text-white' : 'text-[#8c9ba5]'
+            }`}
           >
             {titulo}
           </span>
@@ -251,7 +252,7 @@ export default function ResumoEstoque({ data = [] }) {
   const [unidadesSel, setUnidadesSel] = useState([])
   const [buscaTabela, setBuscaTabela] = useState('')
 
-  // Estado de Card Travado para Apresentação
+  // Estado de Card Travado para Destaque
   const [lockedCard, setLockedCard] = useState(null)
 
   // Estado de Tela Cheia da Tabela
@@ -1017,7 +1018,7 @@ export default function ResumoEstoque({ data = [] }) {
               Painel Gerencial Âmbar Energia
             </div>
             <div className="text-xs text-[#8c9ba5] font-medium">
-              Filtros de Competência e Dimensões Corporativas (clique em qualquer card para destacar na apresentação)
+              Filtros de Competência e Dimensões Corporativas (clique em qualquer card para destacar)
             </div>
           </div>
 
