@@ -16,6 +16,50 @@ const MAPA_MESES = {
 const MAPA_TIPOS = { '0-Não': 'Geral', '1-Sim': 'Rotativo' }
 const MAPA_TIPOS_INV = Object.fromEntries(Object.entries(MAPA_TIPOS).map(([k, v]) => [v, k]))
 
+// Lista canônica de empresas para a tabela Resumo Anual.
+// Se preenchida, SEMPRE exibe essas empresas (zeradas quando não houver inventário no ano).
+// Se vazia [], usa automaticamente todas as empresas presentes na base de dados.
+const EMPRESAS_FIXAS = [
+  'Anamã',
+  'Anori',
+  'Aparecida',
+  'Araucária',
+  'Araucária Gerencial',
+  'Caapiranga',
+  'Candiota',
+  'Candiota Gerencial',
+  'Codajás',
+  'Cruzeiro do Sul',
+  'Cuiabá',
+  'Cuiabá Gerencial',
+  'Cuiabá II',
+  'Distrito',
+  'Feijó',
+  'Floresta',
+  'Gasocidente',
+  'Gasocidente Gerencial',
+  'Goiânia II',
+  'Japiim',
+  'Jaraqui',
+  'Lages',
+  'Manacapuru',
+  'Mauá',
+  'Monte C. Sucuba',
+  'Monte Cristo',
+  'Norte Flu. Gerencial',
+  'Norte Fluminense',
+  'Pirarucu',
+  'Poraquê',
+  'Santa Cruz',
+  'Solar Saltinho',
+  'Solar Taubaté',
+  'Tambaqui',
+  'Tarauacá',
+  'Tucunaré',
+  'Uruguaiana',
+  'Uruguaiana Gerencial',
+]
+
 function limparId(val) {
   try { return String(parseInt(Number(val), 10)) } 
   catch { return String(val).trim() }
@@ -396,26 +440,53 @@ export default function PainelInventarios({ data = [] }) {
   }, [anoSel])
 
   // Consolidação da Tabela Resumo por Empresa vinculada SOMENTE ao Ano (dfMaster, sem filtro mensal)
+  // Empresas FIXAS: sempre listadas; sem inventário no ano => zera métricas.
   // Qtde Itens = Quantidade de SKUs únicos
   const { linhasEmpresaResumo, totaisEmpresaResumo } = useMemo(() => {
     const emptyTotais = { rotativos: 0, geral: 0, total: 0, qtdeSkus: 0, valor: 0, acuraciaMedia: 100 }
-    if (!dfMaster.length) return { linhasEmpresaResumo: [], totaisEmpresaResumo: emptyTotais }
+
+    // Base canônica de empresas (lista manual OU todas as empresas da base)
+    let empresasCanonicas = EMPRESAS_FIXAS.length
+      ? [...EMPRESAS_FIXAS]
+      : [...(listasMaster.empresas || [])]
+
+    // Se o filtro global de Empresa estiver ativo, respeita a seleção
+    if (empresaSel.length) {
+      const setSel = new Set(empresaSel)
+      empresasCanonicas = empresasCanonicas.filter((e) => setSel.has(e))
+      // Garante que empresas selecionadas (mesmo sem histórico) apareçam
+      empresaSel.forEach((e) => {
+        if (!empresasCanonicas.includes(e)) empresasCanonicas.push(e)
+      })
+    }
+
+    empresasCanonicas = [...new Set(empresasCanonicas.filter(Boolean))].sort((a, b) =>
+      String(a).localeCompare(String(b), 'pt-BR')
+    )
+
+    const makeEmpty = (emp) => ({
+      empresa: emp,
+      idsRotativos: new Set(),
+      idsGeral: new Set(),
+      idsTotal: new Set(),
+      skusSet: new Set(),
+      valor: 0,
+      divergAbs: 0,
+    })
 
     const grupos = {}
+    for (const emp of empresasCanonicas) {
+      grupos[emp] = makeEmpty(emp)
+    }
+
     const skusGlobaisSet = new Set()
 
     dfMaster.forEach((r) => {
       const emp = r.empresa_nome || r.unidade || 'SEM EMPRESA'
+      // Só consolida se a empresa estiver na lista canônica (ou se a lista estiver vazia e veio da base)
       if (!grupos[emp]) {
-        grupos[emp] = {
-          empresa: emp,
-          idsRotativos: new Set(),
-          idsGeral: new Set(),
-          idsTotal: new Set(),
-          skusSet: new Set(),
-          valor: 0,
-          divergAbs: 0,
-        }
+        // Empresa presente no ano filtrado mas fora da lista fixa: inclui mesmo assim
+        grupos[emp] = makeEmpty(emp)
       }
       const uid = limparId(r.id_inventario)
       grupos[emp].idsTotal.add(uid)
@@ -435,7 +506,16 @@ export default function PainelInventarios({ data = [] }) {
       grupos[emp].divergAbs += Math.abs(divVal)
     })
 
-    const linhas = Object.values(grupos).map((g) => {
+    // Ordem: canônicas primeiro (alfabética), depois eventuais extras
+    const ordem = [
+      ...empresasCanonicas,
+      ...Object.keys(grupos).filter((e) => !empresasCanonicas.includes(e)).sort((a, b) =>
+        String(a).localeCompare(String(b), 'pt-BR')
+      ),
+    ]
+
+    const linhas = ordem.map((emp) => {
+      const g = grupos[emp]
       const acuraciaMedia = g.valor > 0
         ? Math.max(0, (1 - g.divergAbs / g.valor) * 100)
         : (g.divergAbs === 0 ? 100 : 0)
@@ -451,19 +531,22 @@ export default function PainelInventarios({ data = [] }) {
       }
     })
 
+    const comDados = linhas.filter((r) => r.total > 0)
     const totais = {
       rotativos: linhas.reduce((acc, r) => acc + r.rotativos, 0),
       geral: linhas.reduce((acc, r) => acc + r.geral, 0),
       total: linhas.reduce((acc, r) => acc + r.total, 0),
       qtdeSkus: skusGlobaisSet.size,
       valor: linhas.reduce((acc, r) => acc + r.valor, 0),
-      acuraciaMedia: linhas.length > 0
-        ? linhas.reduce((acc, r) => acc + r.acuraciaMedia, 0) / linhas.length
+      // Acurácia média só das empresas que de fato inventariaram (evita inflar com 100% dos zeros)
+      acuraciaMedia: comDados.length > 0
+        ? comDados.reduce((acc, r) => acc + r.acuraciaMedia, 0) / comDados.length
         : 100,
     }
 
+    if (!linhas.length) return { linhasEmpresaResumo: [], totaisEmpresaResumo: emptyTotais }
     return { linhasEmpresaResumo: linhas, totaisEmpresaResumo: totais }
-  }, [dfMaster])
+  }, [dfMaster, listasMaster.empresas, empresaSel])
 
   const linhasEmpresaExibidas = useMemo(() => {
     const q = buscaEmpresaResumo.trim().toUpperCase()
