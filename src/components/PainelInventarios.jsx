@@ -38,6 +38,17 @@ const getMesAtualTag = () => {
   return formatMesAno(String(dataDeHoje.getMonth() + 1), String(dataDeHoje.getFullYear()))
 }
 
+// Formatação monetária inteira sem casas decimais (padrão ResumoEstoque)
+function fmtBRLInt(val) {
+  const num = Math.round(Number(val) || 0)
+  return num.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })
+}
+
 const PLOT_LAYOUT = {
   paper_bgcolor: 'rgba(0,0,0,0)',
   plot_bgcolor: 'rgba(0,0,0,0)',
@@ -70,6 +81,12 @@ export default function PainelInventarios({ data = [] }) {
   const [selAcuraciaCard, setSelAcuraciaCard] = useState(null)
   const [selDivergenciaKey, setSelDivergenciaKey] = useState(null)
 
+  // Estados da Tabela Resumo Anual por Empresa (padrão ResumoEstoque)
+  const [buscaEmpresaResumo, setBuscaEmpresaResumo] = useState('')
+  const [tabelaEmpresaTelaCheia, setTabelaEmpresaTelaCheia] = useState(false)
+  const [sortEmpresaCol, setSortEmpresaCol] = useState('total')
+  const [sortEmpresaDir, setSortEmpresaDir] = useState('desc')
+
   // Suporte global para a tecla ESC (fecha modal, gaveta de detalhamentos e limpa seleções)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -77,6 +94,7 @@ export default function PainelInventarios({ data = [] }) {
         setIsModalOpen(false)
         setModalUnidadesSel([])
         setModalSearch('')
+        setTabelaEmpresaTelaCheia(false)
         setExpanded(false)
         setSelEmpresaRow(null)
         setSelResumoRow(null)
@@ -111,7 +129,7 @@ export default function PainelInventarios({ data = [] }) {
     if (listasMaster.anos.length && anoSel.length === 0) setAnoSel([listasMaster.anos[0]])
   }, [listasMaster.anos, anoSel.length])
 
-  // 2. dfMaster aplica os filtros selecionados
+  // 2. dfMaster aplica os filtros globais (Empresa e Ano)
   const dfMaster = useMemo(() => {
     let df = data.filter((r) => r.id_inventario && String(r.id_inventario).trim() !== '' && String(r.id_inventario).toLowerCase() !== 'none')
     if (empresaSel.length) df = df.filter((r) => empresaSel.includes(r.empresa_nome))
@@ -368,6 +386,134 @@ export default function PainelInventarios({ data = [] }) {
       valPerdas, diffLiquida, acuraciaItens, acuraciaValor, acuraciaLiquida, qtdeLocaisEstoque, locaisContados
     }
   }, [dfInv])
+
+  // Label do Ano selecionado para o cabeçalho da Tabela Resumo Anual
+  const periodoAnoLabel = useMemo(() => {
+    if (!anoSel || anoSel.length === 0) return 'TODOS OS ANOS'
+    return [...anoSel].sort((a, b) => Number(a) - Number(b)).join(', ')
+  }, [anoSel])
+
+  // Consolidação da Tabela Resumo por Empresa vinculada SOMENTE ao Ano (dfMaster, sem filtro mensal)
+  // Qtde Itens = Quantidade de SKUs únicos
+  const { linhasEmpresaResumo, totaisEmpresaResumo } = useMemo(() => {
+    const emptyTotais = { rotativos: 0, geral: 0, total: 0, qtdeSkus: 0, valor: 0, acuraciaMedia: 100 }
+    if (!dfMaster.length) return { linhasEmpresaResumo: [], totaisEmpresaResumo: emptyTotais }
+
+    const grupos = {}
+    const skusGlobaisSet = new Set()
+
+    dfMaster.forEach((r) => {
+      const emp = r.empresa_nome || r.unidade || 'SEM EMPRESA'
+      if (!grupos[emp]) {
+        grupos[emp] = {
+          empresa: emp,
+          idsRotativos: new Set(),
+          idsGeral: new Set(),
+          idsTotal: new Set(),
+          skusSet: new Set(),
+          valor: 0,
+          divergAbs: 0,
+        }
+      }
+      const uid = limparId(r.id_inventario)
+      grupos[emp].idsTotal.add(uid)
+      if (isRotativo(r.tipo_inventario)) grupos[emp].idsRotativos.add(uid)
+      else grupos[emp].idsGeral.add(uid)
+
+      const sku = r.codigo_produto || r.codigo
+      if (sku != null && String(sku).trim() !== '') {
+        const skuNorm = String(sku).trim()
+        grupos[emp].skusSet.add(skuNorm)
+        skusGlobaisSet.add(skuNorm)
+      }
+
+      const valCong = r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0
+      const divVal = r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0
+      grupos[emp].valor += valCong
+      grupos[emp].divergAbs += Math.abs(divVal)
+    })
+
+    const linhas = Object.values(grupos).map((g) => {
+      const acuraciaMedia = g.valor > 0
+        ? Math.max(0, (1 - g.divergAbs / g.valor) * 100)
+        : (g.divergAbs === 0 ? 100 : 0)
+
+      return {
+        empresa: g.empresa,
+        rotativos: g.idsRotativos.size,
+        geral: g.idsGeral.size,
+        total: g.idsTotal.size,
+        qtdeSkus: g.skusSet.size,
+        valor: g.valor,
+        acuraciaMedia,
+      }
+    })
+
+    const totais = {
+      rotativos: linhas.reduce((acc, r) => acc + r.rotativos, 0),
+      geral: linhas.reduce((acc, r) => acc + r.geral, 0),
+      total: linhas.reduce((acc, r) => acc + r.total, 0),
+      qtdeSkus: skusGlobaisSet.size,
+      valor: linhas.reduce((acc, r) => acc + r.valor, 0),
+      acuraciaMedia: linhas.length > 0
+        ? linhas.reduce((acc, r) => acc + r.acuraciaMedia, 0) / linhas.length
+        : 100,
+    }
+
+    return { linhasEmpresaResumo: linhas, totaisEmpresaResumo: totais }
+  }, [dfMaster])
+
+  const linhasEmpresaExibidas = useMemo(() => {
+    const q = buscaEmpresaResumo.trim().toUpperCase()
+    const filtradas = q
+      ? linhasEmpresaResumo.filter((l) => l.empresa.toUpperCase().includes(q))
+      : linhasEmpresaResumo
+
+    return [...filtradas].sort((a, b) => {
+      const va = a[sortEmpresaCol]
+      const vb = b[sortEmpresaCol]
+      if (typeof va === 'string') {
+        return sortEmpresaDir === 'asc' ? va.localeCompare(vb, 'pt-BR') : vb.localeCompare(va, 'pt-BR')
+      }
+      return sortEmpresaDir === 'asc' ? va - vb : vb - va
+    })
+  }, [linhasEmpresaResumo, buscaEmpresaResumo, sortEmpresaCol, sortEmpresaDir])
+
+  const handleSortEmpresa = useCallback((col) => {
+    if (sortEmpresaCol === col) {
+      setSortEmpresaDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortEmpresaCol(col)
+      setSortEmpresaDir(col === 'empresa' ? 'asc' : 'desc')
+    }
+  }, [sortEmpresaCol])
+
+  const exportarExcelResumoEmpresa = useCallback(() => {
+    if (!linhasEmpresaExibidas.length) return
+    const wsData = linhasEmpresaExibidas.map((r) => ({
+      'Empresa': r.empresa,
+      'Inventários Rotativos': r.rotativos,
+      'Inventários Geral': r.geral,
+      'Total Inventários': r.total,
+      'Qtde Itens (SKUs)': r.qtdeSkus,
+      'Valor (R$)': Math.round(r.valor),
+      'Acurácia média (%)': Number(r.acuraciaMedia.toFixed(2)),
+    }))
+    wsData.push({
+      'Empresa': 'TOTAL GERAL',
+      'Inventários Rotativos': totaisEmpresaResumo.rotativos,
+      'Inventários Geral': totaisEmpresaResumo.geral,
+      'Total Inventários': totaisEmpresaResumo.total,
+      'Qtde Itens (SKUs)': totaisEmpresaResumo.qtdeSkus,
+      'Valor (R$)': Math.round(totaisEmpresaResumo.valor),
+      'Acurácia média (%)': Number(totaisEmpresaResumo.acuraciaMedia.toFixed(2)),
+    })
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(wsData)
+    XLSX.utils.book_append_sheet(wb, ws, 'Resumo Anual por Empresa')
+    const sufixoAno = anoSel.length ? anoSel.join('-') : 'Todos_Anos'
+    XLSX.writeFile(wb, `Resumo_Anual_Inventarios_Empresa_${sufixoAno}.xlsx`)
+  }, [linhasEmpresaExibidas, totaisEmpresaResumo, anoSel])
 
   const prevMetrics = useMemo(() => {
     if (!chartEvolucao.x.length) return { acuFis: 0, acuFin: 0, acuLiq: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Anterior', hasData: false }
@@ -785,6 +931,126 @@ export default function PainelInventarios({ data = [] }) {
 
   const getCor = (val) => val >= 95 ? '#2ecc71' : val >= 90 ? '#f58220' : '#e74c3c'
   const getStatusConf = (val) => val >= 95 ? 'EXCELENTE' : val >= 90 ? 'ATENÇÃO' : 'CRÍTICO'
+
+  // Configuração da Tabela Resumo Anual por Empresa (estilo idêntico ao ResumoEstoque)
+  const colunasEmpresaResumo = [
+    { key: 'empresa', label: 'Empresa', align: 'left', sticky: true },
+    { key: 'rotativos', label: 'Inventários Rotativos', align: 'right' },
+    { key: 'geral', label: 'Inventários Geral', align: 'right' },
+    { key: 'total', label: 'Total Inventários', align: 'right', isTotalCol: true },
+    { key: 'qtdeSkus', label: 'Qtde Itens (SKUs)', align: 'right' },
+    { key: 'valor', label: 'Valor (R$)', align: 'right' },
+    { key: 'acuraciaMedia', label: 'Acurácia média', align: 'right' },
+  ]
+
+  const renderTabelaEmpresaResumo = () => (
+    <table className="w-full border-collapse text-left text-xs">
+      <thead className="sticky top-0 z-20 bg-[#121212] text-[10px] uppercase tracking-[0.14em] text-[#8c9ba5]">
+        <tr>
+          {colunasEmpresaResumo.map((col) => (
+            <th
+              key={col.key}
+              onClick={() => handleSortEmpresa(col.key)}
+              className={`cursor-pointer select-none whitespace-nowrap border-b border-[#2A2A2A] px-3.5 py-3 font-bold transition hover:text-[#f58220] ${
+                col.align === 'right' ? 'text-right' : 'text-left'
+              } ${
+                col.sticky
+                  ? 'sticky left-0 z-30 bg-[#121212] shadow-[2px_0_6px_rgba(0,0,0,0.6)]'
+                  : ''
+              } ${
+                col.isTotalCol
+                  ? 'bg-[#26160c] text-[#f58220]'
+                  : 'text-[#c5d0db]'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1">
+                {col.label}
+                {sortEmpresaCol === col.key && (
+                  <span className="text-[#f58220]">
+                    {sortEmpresaDir === 'asc' ? '▲' : '▼'}
+                  </span>
+                )}
+              </span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+
+      <tbody className="divide-y divide-[#222222]">
+        {linhasEmpresaExibidas.length === 0 ? (
+          <tr>
+            <td
+              colSpan={colunasEmpresaResumo.length}
+              className="py-10 text-center text-sm text-[#8c9ba5]"
+            >
+              Nenhum dado encontrado para os filtros selecionados.
+            </td>
+          </tr>
+        ) : (
+          linhasEmpresaExibidas.map((row) => (
+            <tr
+              key={row.empresa}
+              className="transition-colors hover:bg-[#1e1e1e]"
+            >
+              <td className="sticky left-0 z-10 whitespace-nowrap bg-[#0c0c0c] px-3.5 py-2.5 font-semibold text-white shadow-[2px_0_6px_rgba(0,0,0,0.6)]">
+                {row.empresa}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtInt(row.rotativos)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtInt(row.geral)}
+              </td>
+              <td className="whitespace-nowrap bg-[#f58220]/10 px-3.5 py-2.5 text-right font-mono font-bold text-[#f58220]">
+                {fmtInt(row.total)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtInt(row.qtdeSkus)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.valor)}
+              </td>
+              <td
+                className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono font-bold"
+                style={{ color: getCor(row.acuraciaMedia) }}
+              >
+                {row.acuraciaMedia.toFixed(2).replace('.', ',')}%
+              </td>
+            </tr>
+          ))
+        )}
+      </tbody>
+
+      {/* LINHA DE TOTAL GERAL FIXA NO RODAPÉ EM TOM LARANJA */}
+      {linhasEmpresaExibidas.length > 0 && (
+        <tfoot className="sticky bottom-0 z-20 bg-[#26160c] font-bold text-white shadow-[0_-2px_10px_rgba(0,0,0,0.75)]">
+          <tr>
+            <td className="sticky left-0 z-30 whitespace-nowrap border-t-2 border-[#f58220] bg-[#26160c] px-3.5 py-3 text-left tracking-wider text-[#f58220]">
+              TOTAL GERAL
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtInt(totaisEmpresaResumo.rotativos)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtInt(totaisEmpresaResumo.geral)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] bg-[#361e0f] px-3.5 py-3 text-right font-mono text-[#ff9638]">
+              {fmtInt(totaisEmpresaResumo.total)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtInt(totaisEmpresaResumo.qtdeSkus)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisEmpresaResumo.valor)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {totaisEmpresaResumo.acuraciaMedia.toFixed(2).replace('.', ',')}%
+            </td>
+          </tr>
+        </tfoot>
+      )}
+    </table>
+  )
 
   const corAcuFis = getCor(stats.acuraciaItens)
   const corAcuFin = getCor(stats.acuraciaValor)
@@ -1307,6 +1573,156 @@ export default function PainelInventarios({ data = [] }) {
         </div>
 
       </div>
+
+      {/* --- TABELA RESUMO ANUAL POR EMPRESA (VINCULADA SOMENTE AO ANO) --- */}
+      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] overflow-hidden relative transition-all duration-300 hover:border-accent/50">
+        <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+
+        <div className="flex flex-col gap-3 border-b border-[#2A2A2A] p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between bg-[#161616]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0 border border-[#f58220]/30">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
+                Resumo Anual por Empresa — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
+              </h3>
+              <p className="text-[11px] text-[#8c9ba5] mt-0.5">
+                Consolidado anual pelo filtro de Ano (independente do mês selecionado). Clique nos cabeçalhos para ordenar.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <svg
+                className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8c9ba5]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={buscaEmpresaResumo}
+                onChange={(e) => setBuscaEmpresaResumo(e.target.value)}
+                placeholder="Filtrar empresa..."
+                className="rounded-lg border border-[#2A2A2A] bg-[#080808] pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8c9ba5] focus:border-accent focus:outline-none transition-colors"
+              />
+            </div>
+
+            <button
+              onClick={() => setTabelaEmpresaTelaCheia(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"
+            >
+              <svg
+                className="w-3.5 h-3.5 group-hover:scale-110 transition-transform"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              <span>Expandir Tabela</span>
+            </button>
+
+            <button
+              onClick={exportarExcelResumoEmpresa}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Exportar Excel</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[540px] overflow-auto custom-scrollbar overscroll-contain bg-[#0c0c0c]">
+          {renderTabelaEmpresaResumo()}
+        </div>
+      </div>
+
+      {/* --- MODAL TELA CHEIA DA TABELA RESUMO ANUAL POR EMPRESA --- */}
+      {tabelaEmpresaTelaCheia && (
+        <FullScreenPortal onClose={() => setTabelaEmpresaTelaCheia(false)}>
+          <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col backdrop-blur-sm animate-fade-in">
+            <div className="flex flex-wrap justify-between items-center gap-3 px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shrink-0 shadow-xl">
+              <div className="flex items-center gap-3">
+                <svg
+                  className="w-6 h-6 text-accent drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">
+                  Resumo Anual por Empresa — {periodoAnoLabel} (Tela Cheia)
+                </h2>
+                <span className="text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
+                  {linhasEmpresaExibidas.length} empresas
+                </span>
+              </div>
+
+              <div className="flex gap-3 items-center">
+                <button
+                  onClick={exportarExcelResumoEmpresa}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span>Baixar Base Excel</span>
+                </button>
+
+                <button
+                  onClick={() => setTabelaEmpresaTelaCheia(false)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span>Fechar Janela</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="flex-1 relative">
+                <svg
+                  className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Buscar empresa pelo nome..."
+                  value={buscaEmpresaResumo}
+                  onChange={(e) => setBuscaEmpresaResumo(e.target.value)}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-accent text-xs transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="flex-grow overflow-hidden p-4 sm:p-6 bg-[#080808]">
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] overflow-auto custom-scrollbar shadow-2xl h-full">
+                {renderTabelaEmpresaResumo()}
+              </div>
+            </div>
+          </div>
+        </FullScreenPortal>
+      )}
 
       {/* MODAL EM TELA CHEIA */}
       {isModalOpen && (
