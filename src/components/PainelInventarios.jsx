@@ -441,9 +441,10 @@ export default function PainelInventarios({ data = [] }) {
 
   // Consolidação da Tabela Resumo por Empresa vinculada SOMENTE ao Ano (dfMaster, sem filtro mensal)
   // Empresas FIXAS: sempre listadas; sem inventário no ano => zera métricas.
-  // Qtde Itens = Quantidade de SKUs únicos
+  // Qtde Linhas = soma de todas as linhas contadas nos inventários do ano
+  // Valor = soma de saldo_anterior_val (valor congelado) de cada linha
   const { linhasEmpresaResumo, totaisEmpresaResumo } = useMemo(() => {
-    const emptyTotais = { rotativos: 0, geral: 0, total: 0, qtdeSkus: 0, valor: 0, acuraciaMedia: 100 }
+    const emptyTotais = { rotativos: 0, geral: 0, total: 0, qtdeSkus: 0, valor: 0, acuraciaMedia: null }
 
     // Base canônica de empresas (lista manual OU todas as empresas da base)
     let empresasCanonicas = EMPRESAS_FIXAS.length
@@ -469,8 +470,8 @@ export default function PainelInventarios({ data = [] }) {
       idsRotativos: new Set(),
       idsGeral: new Set(),
       idsTotal: new Set(),
-      skusSet: new Set(),
-      valor: 0,
+      qtdeLinhas: 0, // soma de todas as linhas contadas nos inventários do ano
+      valor: 0,      // soma de saldo_anterior_val (valor congelado) de cada linha
       divergAbs: 0,
     })
 
@@ -479,13 +480,10 @@ export default function PainelInventarios({ data = [] }) {
       grupos[emp] = makeEmpty(emp)
     }
 
-    const skusGlobaisSet = new Set()
-
     dfMaster.forEach((r) => {
       const emp = r.empresa_nome || r.unidade || 'SEM EMPRESA'
-      // Só consolida se a empresa estiver na lista canônica (ou se a lista estiver vazia e veio da base)
+      // Empresa presente no ano filtrado mas fora da lista fixa: inclui mesmo assim
       if (!grupos[emp]) {
-        // Empresa presente no ano filtrado mas fora da lista fixa: inclui mesmo assim
         grupos[emp] = makeEmpty(emp)
       }
       const uid = limparId(r.id_inventario)
@@ -493,17 +491,14 @@ export default function PainelInventarios({ data = [] }) {
       if (isRotativo(r.tipo_inventario)) grupos[emp].idsRotativos.add(uid)
       else grupos[emp].idsGeral.add(uid)
 
-      const sku = r.codigo_produto || r.codigo
-      if (sku != null && String(sku).trim() !== '') {
-        const skuNorm = String(sku).trim()
-        grupos[emp].skusSet.add(skuNorm)
-        skusGlobaisSet.add(skuNorm)
-      }
+      // Cada linha do inventário conta como 1 item contado
+      grupos[emp].qtdeLinhas += 1
 
-      const valCong = r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0
+      // Valor congelado = saldo_anterior_val (soma de todos os inventários/meses do ano)
+      const valCong = Number(r.saldo_anterior_val) || 0
       const divVal = r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0
       grupos[emp].valor += valCong
-      grupos[emp].divergAbs += Math.abs(divVal)
+      grupos[emp].divergAbs += Math.abs(Number(divVal) || 0)
     })
 
     // Ordem: canônicas primeiro (alfabética), depois eventuais extras
@@ -516,32 +511,37 @@ export default function PainelInventarios({ data = [] }) {
 
     const linhas = ordem.map((emp) => {
       const g = grupos[emp]
-      const acuraciaMedia = g.valor > 0
-        ? Math.max(0, (1 - g.divergAbs / g.valor) * 100)
-        : (g.divergAbs === 0 ? 100 : 0)
+      const totalInv = g.idsTotal.size
+      // Sem inventário no ano => sem acurácia (não entra na média)
+      let acuraciaMedia = null
+      if (totalInv > 0) {
+        acuraciaMedia = g.valor > 0
+          ? Math.max(0, (1 - g.divergAbs / g.valor) * 100)
+          : (g.divergAbs === 0 ? 100 : 0)
+      }
 
       return {
         empresa: g.empresa,
         rotativos: g.idsRotativos.size,
         geral: g.idsGeral.size,
-        total: g.idsTotal.size,
-        qtdeSkus: g.skusSet.size,
-        valor: g.valor,
+        total: totalInv,
+        qtdeSkus: g.qtdeLinhas, // soma de linhas contadas em todos os inventários do ano
+        valor: g.valor,         // soma de saldo_anterior_val
         acuraciaMedia,
       }
     })
 
-    const comDados = linhas.filter((r) => r.total > 0)
+    const comAcuracia = linhas.filter((r) => r.acuraciaMedia != null)
     const totais = {
       rotativos: linhas.reduce((acc, r) => acc + r.rotativos, 0),
       geral: linhas.reduce((acc, r) => acc + r.geral, 0),
       total: linhas.reduce((acc, r) => acc + r.total, 0),
-      qtdeSkus: skusGlobaisSet.size,
+      qtdeSkus: linhas.reduce((acc, r) => acc + r.qtdeSkus, 0), // soma das linhas de todas as empresas
       valor: linhas.reduce((acc, r) => acc + r.valor, 0),
-      // Acurácia média só das empresas que de fato inventariaram (evita inflar com 100% dos zeros)
-      acuraciaMedia: comDados.length > 0
-        ? comDados.reduce((acc, r) => acc + r.acuraciaMedia, 0) / comDados.length
-        : 100,
+      // Média só das empresas que inventariaram no ano
+      acuraciaMedia: comAcuracia.length > 0
+        ? comAcuracia.reduce((acc, r) => acc + r.acuraciaMedia, 0) / comAcuracia.length
+        : null,
     }
 
     if (!linhas.length) return { linhasEmpresaResumo: [], totaisEmpresaResumo: emptyTotais }
@@ -557,6 +557,12 @@ export default function PainelInventarios({ data = [] }) {
     return [...filtradas].sort((a, b) => {
       const va = a[sortEmpresaCol]
       const vb = b[sortEmpresaCol]
+      // Nulls (sem inventário) sempre no fim
+      const aNull = va == null
+      const bNull = vb == null
+      if (aNull && bNull) return 0
+      if (aNull) return 1
+      if (bNull) return -1
       if (typeof va === 'string') {
         return sortEmpresaDir === 'asc' ? va.localeCompare(vb, 'pt-BR') : vb.localeCompare(va, 'pt-BR')
       }
@@ -580,18 +586,18 @@ export default function PainelInventarios({ data = [] }) {
       'Inventários Rotativos': r.rotativos,
       'Inventários Geral': r.geral,
       'Total Inventários': r.total,
-      'Qtde Itens (SKUs)': r.qtdeSkus,
+      'Qtde Linhas': r.qtdeSkus,
       'Valor (R$)': Math.round(r.valor),
-      'Acurácia média (%)': Number(r.acuraciaMedia.toFixed(2)),
+      'Acurácia média (%)': r.acuraciaMedia != null ? Number(r.acuraciaMedia.toFixed(2)) : null,
     }))
     wsData.push({
       'Empresa': 'TOTAL GERAL',
       'Inventários Rotativos': totaisEmpresaResumo.rotativos,
       'Inventários Geral': totaisEmpresaResumo.geral,
       'Total Inventários': totaisEmpresaResumo.total,
-      'Qtde Itens (SKUs)': totaisEmpresaResumo.qtdeSkus,
+      'Qtde Linhas': totaisEmpresaResumo.qtdeSkus,
       'Valor (R$)': Math.round(totaisEmpresaResumo.valor),
-      'Acurácia média (%)': Number(totaisEmpresaResumo.acuraciaMedia.toFixed(2)),
+      'Acurácia média (%)': totaisEmpresaResumo.acuraciaMedia != null ? Number(totaisEmpresaResumo.acuraciaMedia.toFixed(2)) : null,
     })
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(wsData)
@@ -1023,7 +1029,7 @@ export default function PainelInventarios({ data = [] }) {
     { key: 'rotativos', label: 'Inventários Rotativos', align: 'right' },
     { key: 'geral', label: 'Inventários Geral', align: 'right' },
     { key: 'total', label: 'Total Inventários', align: 'right', isTotalCol: true },
-    { key: 'qtdeSkus', label: 'Qtde Itens (SKUs)', align: 'right' },
+    { key: 'qtdeSkus', label: 'Qtde Linhas', align: 'right' },
     { key: 'valor', label: 'Valor (R$)', align: 'right' },
     { key: 'acuraciaMedia', label: 'Acurácia média', align: 'right' },
   ]
@@ -1097,9 +1103,11 @@ export default function PainelInventarios({ data = [] }) {
               </td>
               <td
                 className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono font-bold"
-                style={{ color: getCor(row.acuraciaMedia) }}
+                style={{ color: row.acuraciaMedia != null ? getCor(row.acuraciaMedia) : '#8c9ba5' }}
               >
-                {row.acuraciaMedia.toFixed(2).replace('.', ',')}%
+                {row.acuraciaMedia != null
+                  ? `${row.acuraciaMedia.toFixed(2).replace('.', ',')}%`
+                  : '—'}
               </td>
             </tr>
           ))
@@ -1129,7 +1137,9 @@ export default function PainelInventarios({ data = [] }) {
               {fmtBRLInt(totaisEmpresaResumo.valor)}
             </td>
             <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
-              {totaisEmpresaResumo.acuraciaMedia.toFixed(2).replace('.', ',')}%
+              {totaisEmpresaResumo.acuraciaMedia != null
+                ? `${totaisEmpresaResumo.acuraciaMedia.toFixed(2).replace('.', ',')}%`
+                : '—'}
             </td>
           </tr>
         </tfoot>
