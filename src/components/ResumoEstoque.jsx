@@ -1,28 +1,28 @@
-import React, { useMemo, useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  Cell,
-} from 'recharts'
+import React, { useMemo, useState, useEffect, useCallback } from 'react'
+import Plot from 'react-plotly.js'
 import {
   aplicarLentesIndependentes,
   parseNumber,
   normUnidade,
 } from '../hooks/useVisaoGeralData'
 import { fmtValorCurto } from '../utils/format'
+import { FullScreenPortal } from './FullScreenPortal.jsx'
+import { CyberMultiSelect } from './CyberMultiSelect.jsx'
 
 // ============================================================================
-// CONSTANTES E HELPERS DE NORMALIZAÇÃO (FIÉIS AO SCRIPT PYTHON)
+// CONSTANTES E HELPERS DE NORMALIZAÇÃO
 // ============================================================================
+
+const PLOT_LAYOUT = {
+  paper_bgcolor: 'rgba(0,0,0,0)',
+  plot_bgcolor: 'rgba(0,0,0,0)',
+  font: { color: '#8c9ba5', family: 'Inter' },
+  margin: { l: 10, r: 10, t: 40, b: 45 },
+  showlegend: false,
+  hovermode: 'closest',
+  dragmode: false,
+  autosize: true,
+}
 
 const MESES_ORDEM = [
   { num: 1, nome: 'Janeiro', abr: 'JAN' },
@@ -116,46 +116,124 @@ function formatarVariacaoKpi(diffVal, pctVal) {
 }
 
 // ============================================================================
-// SUBCOMPONENTE DE CARD KPI REUTILIZÁVEL
+// SUBCOMPONENTE DE CARD KPI COM LUZES INDIVIDUAIS E TRAVA DE APRESENTAÇÃO
 // ============================================================================
 
-function KpiCard({ titulo, valor, diffVal, pctVal, subtitulo, destaque = false, compacto = false }) {
+function KpiCard({
+  id,
+  titulo,
+  valor,
+  diffVal,
+  pctVal,
+  subtitulo,
+  icon,
+  cor = '#f58220',
+  isLocked = false,
+  hasAnyLock = false,
+  onToggleLock,
+  compacto = false,
+}) {
   const varInfo = formatarVariacaoKpi(diffVal, pctVal)
+  const [hovered, setHovered] = useState(false)
+  const isActive = isLocked || hovered
 
   return (
     <div
-      className={`rounded-xl border bg-[#0D0F12] p-4 shadow-md transition ${
-        destaque ? 'border-[#CC5500]/60' : 'border-slate-800'
-      }`}
+      data-kpi-card="true"
+      onClick={() => onToggleLock && onToggleLock(id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        borderColor: isActive ? cor : '#2A2A2A',
+        borderTopColor: isActive ? cor : '#383838',
+        boxShadow: isActive
+          ? `0 18px 42px ${cor}33, inset 0 1px 0 ${cor}55`
+          : '0 10px 30px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.06)',
+        background: isActive
+          ? `linear-gradient(180deg, ${cor}18 0%, #161616 72%)`
+          : '#161616',
+      }}
+      className={`cursor-pointer select-none border rounded-2xl p-4 transition-all duration-300 relative overflow-hidden ${
+        isActive ? '-translate-y-0.5' : ''
+      } ${hasAnyLock && !isLocked ? 'opacity-45 hover:opacity-95' : 'opacity-100'}`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-1.5">
+      {/* Linha superior iluminada na cor individual do card */}
+      <div
+        className="absolute top-0 left-1/4 right-1/4 h-[1px] pointer-events-none transition-opacity duration-300"
+        style={{
+          opacity: isActive ? 0.95 : 0.35,
+          background: `linear-gradient(90deg, transparent, ${cor}, transparent)`,
+        }}
+      />
+
+      {/* Ponto de luz ambiente sutil no canto superior direito */}
+      <div
+        className="absolute -top-10 -right-10 w-28 h-28 rounded-full blur-2xl pointer-events-none transition-opacity duration-300"
+        style={{
+          backgroundColor: cor,
+          opacity: isActive ? 0.22 : 0.06,
+        }}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-1.5 relative z-10">
+        <div className="flex items-center gap-2">
+          {icon && (
+            <div
+              className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 shadow-inner border transition-colors"
+              style={{
+                backgroundColor: `${cor}1f`,
+                color: cor,
+                borderColor: `${cor}4d`,
+              }}
+            >
+              {icon}
+            </div>
+          )}
+          <span
+            className="text-[10px] font-bold uppercase tracking-[0.16em] transition-colors"
+            style={{ color: isActive ? '#ffffff' : cor }}
+          >
+            {titulo}
+          </span>
+        </div>
+
+        {/* Badge de Variação: VERMELHO quando sobe (▲), VERDE quando cai (▼) */}
         <span
-          className={`text-[11px] font-semibold uppercase tracking-wider ${
-            destaque ? 'text-[#ff7b29]' : 'text-slate-400'
-          }`}
-        >
-          {titulo}
-        </span>
-        <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+          className={`rounded-md px-2 py-0.5 text-[10px] font-bold font-mono border ${
             varInfo.isUp
-              ? 'bg-amber-500/15 text-amber-400'
+              ? 'bg-[#e74c3c]/15 text-[#e74c3c] border-[#e74c3c]/35'
               : varInfo.isDown
-              ? 'bg-emerald-500/15 text-emerald-400'
-              : 'bg-slate-800 text-slate-400'
+              ? 'bg-[#2ecc71]/15 text-[#2ecc71] border-[#2ecc71]/35'
+              : 'bg-[#1a1a1a] text-[#8c9ba5] border-[#2A2A2A]'
           }`}
         >
           {varInfo.texto}
         </span>
       </div>
+
       <div
-        className={`mt-2.5 font-bold text-white ${
-          compacto ? 'text-xl' : 'text-2xl'
+        className={`mt-3 font-black text-white tracking-tight relative z-10 ${
+          compacto ? 'text-lg lg:text-xl' : 'text-xl lg:text-2xl'
         }`}
       >
         {fmtBRLInt(valor)}
       </div>
-      <div className="mt-1 text-xs text-slate-400">{subtitulo}</div>
+
+      <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-[#8c9ba5] font-medium relative z-10">
+        <span>{subtitulo}</span>
+        {isLocked && (
+          <span
+            className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border"
+            style={{
+              color: cor,
+              borderColor: `${cor}55`,
+              backgroundColor: `${cor}18`,
+            }}
+          >
+            Em Foco
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -165,13 +243,16 @@ function KpiCard({ titulo, valor, diffVal, pctVal, subtitulo, destaque = false, 
 // ============================================================================
 
 export default function ResumoEstoque({ data = [] }) {
-  // Estados de Filtro
+  // Estados de Filtro (padrão CyberMultiSelect igual ao VisaoGeral)
   const [anoSel, setAnoSel] = useState('')
   const [mesSel, setMesSel] = useState('')
-  const [segmentoSel, setSegmentoSel] = useState('TODOS')
-  const [regiaoSel, setRegiaoSel] = useState('TODAS')
-  const [unidadeSel, setUnidadeSel] = useState('TODAS')
+  const [segmentosSel, setSegmentosSel] = useState([])
+  const [regioesSel, setRegioesSel] = useState([])
+  const [unidadesSel, setUnidadesSel] = useState([])
   const [buscaTabela, setBuscaTabela] = useState('')
+
+  // Estado de Card Travado para Apresentação
+  const [lockedCard, setLockedCard] = useState(null)
 
   // Estado de Tela Cheia da Tabela
   const [tabelaTelaCheia, setTabelaTelaCheia] = useState(false)
@@ -180,20 +261,46 @@ export default function ResumoEstoque({ data = [] }) {
   const [sortCol, setSortCol] = useState('estoqueTotal')
   const [sortDir, setSortDir] = useState('desc')
 
-  // Tecla ESC sai da tela cheia e trava scroll do body enquanto expandida
+  const handleToggleLockCard = useCallback((cardId) => {
+    setLockedCard((prev) => (prev === cardId ? null : cardId))
+  }, [])
+
+  // Destravar card ao clicar fora dos cards ou apertar ESC
+  useEffect(() => {
+    if (!lockedCard) return
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('[data-kpi-card="true"]')) {
+        setLockedCard(null)
+      }
+    }
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') setLockedCard(null)
+    }
+    window.addEventListener('mousedown', handleOutsideClick)
+    window.addEventListener('keydown', handleEsc)
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick)
+      window.removeEventListener('keydown', handleEsc)
+    }
+  }, [lockedCard])
+
+  // Fechar FullScreenPortal com ESC
   useEffect(() => {
     if (!tabelaTelaCheia) return
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') setTabelaTelaCheia(false)
+    const handleKeyDown = (e) => {
+      if (e.key !== 'Escape') return
+      if (document.querySelector('[data-cyber-open="true"]')) return
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        e.preventDefault()
+        active.blur()
+        return
+      }
+      e.preventDefault()
+      setTabelaTelaCheia(false)
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.body.style.overflow = prevOverflow
-      window.removeEventListener('keydown', onKeyDown)
-    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [tabelaTelaCheia])
 
   // --------------------------------------------------------------------------
@@ -236,13 +343,11 @@ export default function ResumoEstoque({ data = [] }) {
         segmento,
         regiao,
         saldoVal,
-        // Flags cheias
         isObs,
         isObraRaw,
         isCritRaw,
         isInsRaw,
         isOpRaw,
-        // Flags líquidas da tabela
         isObraCritico,
         isInsumoCritico,
         isObraLiquido,
@@ -308,6 +413,17 @@ export default function ResumoEstoque({ data = [] }) {
     }
   }, [registrosProcessados])
 
+  const handleResetFiltros = useCallback(() => {
+    setSegmentosSel([])
+    setRegioesSel([])
+    setUnidadesSel([])
+    setBuscaTabela('')
+    setLockedCard(null)
+    if (anosDisponiveis.length > 0) {
+      setAnoSel(String(anosDisponiveis[0]))
+    }
+  }, [anosDisponiveis])
+
   // --------------------------------------------------------------------------
   // 3. CÁLCULO PRINCIPAL: MÊS ATUAL, MÊS ANTERIOR, TABELA POR UNIDADE E SÉRIES
   // --------------------------------------------------------------------------
@@ -351,11 +467,11 @@ export default function ResumoEstoque({ data = [] }) {
         estoqueAtiva: 0,
         estoqueGerencial: 0,
         estoqueTotal: 0,
-        critico: 0,
         obsoleto: 0,
-        obra: 0,
-        obraCritico: 0,
+        critico: 0,
         insumoCritico: 0,
+        obraCritico: 0,
+        obra: 0,
         spareParts: 0,
       },
       evolucaoMensal: [],
@@ -370,17 +486,20 @@ export default function ResumoEstoque({ data = [] }) {
     const prevMes = mesNum === 1 ? 12 : mesNum - 1
     const prevAno = mesNum === 1 ? anoNum - 1 : anoNum
 
+    const setSeg = segmentosSel.length > 0 ? new Set(segmentosSel) : null
+    const setReg = regioesSel.length > 0 ? new Set(regioesSel) : null
+    const setUni = unidadesSel.length > 0 ? new Set(unidadesSel) : null
+
     const passDimensoes = (r) => {
-      if (segmentoSel !== 'TODOS' && r.segmento !== segmentoSel) return false
-      if (regiaoSel !== 'TODAS' && r.regiao !== regiaoSel) return false
-      if (unidadeSel !== 'TODAS' && r.unidadeBase !== unidadeSel) return false
+      if (setSeg && !setSeg.has(r.segmento)) return false
+      if (setReg && !setReg.has(r.regiao)) return false
+      if (setUni && !setUni.has(r.unidadeBase)) return false
       return true
     }
 
     const mapUnidadesAtual = new Map()
     const mapEvolucao = new Map()
 
-    // Acumuladores do mês anterior (Ativa, Gerencial, Total + 5 lentes cheias na base inteira)
     let totAtivaPrev = 0
     let totGerencialPrev = 0
     let totEstoquePrev = 0
@@ -390,7 +509,6 @@ export default function ResumoEstoque({ data = [] }) {
     let totInsumoCheioPrev = 0
     let totSparePartsCheioPrev = 0
 
-    // Acumuladores do mês atual para os 5 cards (lentes cheias na base inteira: Ativa + Gerencial)
     let totCriticoCheio = 0
     let totObsoletoCheio = 0
     let totObraCheio = 0
@@ -452,11 +570,11 @@ export default function ResumoEstoque({ data = [] }) {
             estoqueAtiva: 0,
             estoqueGerencial: 0,
             estoqueTotal: 0,
-            critico: 0,
             obsoleto: 0,
-            obra: 0,
-            obraCritico: 0,
+            critico: 0,
             insumoCritico: 0,
+            obraCritico: 0,
+            obra: 0,
           }
           mapUnidadesAtual.set(r.unidadeBase, row)
         }
@@ -482,21 +600,21 @@ export default function ResumoEstoque({ data = [] }) {
       estoqueAtiva: 0,
       estoqueGerencial: 0,
       estoqueTotal: 0,
-      critico: 0,
       obsoleto: 0,
-      obra: 0,
-      obraCritico: 0,
+      critico: 0,
       insumoCritico: 0,
+      obraCritico: 0,
+      obra: 0,
       spareParts: 0,
     }
 
     for (const row of mapUnidadesAtual.values()) {
       const somaEspecial =
-        row.critico +
         row.obsoleto +
-        row.obra +
+        row.critico +
+        row.insumoCritico +
         row.obraCritico +
-        row.insumoCritico
+        row.obra
       const spareParts = Math.max(0, row.estoqueAtiva - somaEspecial)
 
       const itemFinal = {
@@ -506,11 +624,11 @@ export default function ResumoEstoque({ data = [] }) {
         estoqueAtiva: row.estoqueAtiva,
         estoqueGerencial: row.estoqueGerencial,
         estoqueTotal: row.estoqueTotal,
-        critico: row.critico,
         obsoleto: row.obsoleto,
-        obra: row.obra,
-        obraCritico: row.obraCritico,
+        critico: row.critico,
         insumoCritico: row.insumoCritico,
+        obraCritico: row.obraCritico,
+        obra: row.obra,
         spareParts,
       }
 
@@ -519,11 +637,11 @@ export default function ResumoEstoque({ data = [] }) {
       totais.estoqueAtiva += itemFinal.estoqueAtiva
       totais.estoqueGerencial += itemFinal.estoqueGerencial
       totais.estoqueTotal += itemFinal.estoqueTotal
-      totais.critico += itemFinal.critico
       totais.obsoleto += itemFinal.obsoleto
-      totais.obra += itemFinal.obra
-      totais.obraCritico += itemFinal.obraCritico
+      totais.critico += itemFinal.critico
       totais.insumoCritico += itemFinal.insumoCritico
+      totais.obraCritico += itemFinal.obraCritico
+      totais.obra += itemFinal.obra
       totais.spareParts += itemFinal.spareParts
     }
 
@@ -547,11 +665,7 @@ export default function ResumoEstoque({ data = [] }) {
     const top10 = [...linhas]
       .sort((a, b) => b.estoqueTotal - a.estoqueTotal)
       .slice(0, 10)
-      .map((u) => ({
-        unidade: u.unidade,
-        estoqueTotal: Math.round(u.estoqueTotal),
-        criticoTotal: Math.round(u.critico + u.obraCritico + u.insumoCritico),
-      }))
+      .reverse()
 
     const infoMesAtual = MESES_ORDEM.find((m) => m.num === mesNum)
     const labelPeriodo = `${infoMesAtual ? infoMesAtual.nome : mesNum}/${anoNum}`
@@ -589,7 +703,7 @@ export default function ResumoEstoque({ data = [] }) {
       top10Pareto: top10,
       periodoLabelAtual: labelPeriodo,
     }
-  }, [registrosProcessados, anoSel, mesSel, segmentoSel, regiaoSel, unidadeSel])
+  }, [registrosProcessados, anoSel, mesSel, segmentosSel, regioesSel, unidadesSel])
 
   // --------------------------------------------------------------------------
   // 4. FILTRO DE BUSCA E ORDENAÇÃO DA TABELA
@@ -620,7 +734,7 @@ export default function ResumoEstoque({ data = [] }) {
   }
 
   // --------------------------------------------------------------------------
-  // 5. EXPORTAÇÃO CSV (VALORES INTEIROS SEM CENTAVOS)
+  // 5. EXPORTAÇÃO CSV NA SEQUÊNCIA DE COLUNAS
   // --------------------------------------------------------------------------
   const exportarCSV = () => {
     const headers = [
@@ -628,11 +742,11 @@ export default function ResumoEstoque({ data = [] }) {
       'Estoque Ativa (R$)',
       'Estoque Gerencial (R$)',
       'Estoque Total (R$)',
-      'Crítico (R$)',
       'Obsoleto (R$)',
-      'Obra (R$)',
-      'Obra-Crítico (R$)',
+      'Crítico (R$)',
       'Insumo-Crítico (R$)',
+      'Obra-Crítico (R$)',
+      'Obra (R$)',
       'Spare Parts (R$)',
     ]
 
@@ -643,11 +757,11 @@ export default function ResumoEstoque({ data = [] }) {
       fmtIntCsv(r.estoqueAtiva),
       fmtIntCsv(r.estoqueGerencial),
       fmtIntCsv(r.estoqueTotal),
-      fmtIntCsv(r.critico),
       fmtIntCsv(r.obsoleto),
-      fmtIntCsv(r.obra),
-      fmtIntCsv(r.obraCritico),
+      fmtIntCsv(r.critico),
       fmtIntCsv(r.insumoCritico),
+      fmtIntCsv(r.obraCritico),
+      fmtIntCsv(r.obra),
       fmtIntCsv(r.spareParts),
     ])
 
@@ -656,11 +770,11 @@ export default function ResumoEstoque({ data = [] }) {
       fmtIntCsv(totaisTabela.estoqueAtiva),
       fmtIntCsv(totaisTabela.estoqueGerencial),
       fmtIntCsv(totaisTabela.estoqueTotal),
-      fmtIntCsv(totaisTabela.critico),
       fmtIntCsv(totaisTabela.obsoleto),
-      fmtIntCsv(totaisTabela.obra),
-      fmtIntCsv(totaisTabela.obraCritico),
+      fmtIntCsv(totaisTabela.critico),
       fmtIntCsv(totaisTabela.insumoCritico),
+      fmtIntCsv(totaisTabela.obraCritico),
+      fmtIntCsv(totaisTabela.obra),
       fmtIntCsv(totaisTabela.spareParts),
     ])
 
@@ -677,247 +791,245 @@ export default function ResumoEstoque({ data = [] }) {
   }
 
   // --------------------------------------------------------------------------
-  // BLOCO DA TABELA (RENDERIZADO NORMALMENTE OU VIA PORTAL EM TELA CHEIA REAL)
+  // CONFIGURAÇÃO DA TABELA
   // --------------------------------------------------------------------------
   const colunas = [
     { key: 'unidade', label: 'Unidade', align: 'left', sticky: true },
-    { key: 'estoqueAtiva', label: '(R$) Estoque Ativa', align: 'right' },
-    { key: 'estoqueGerencial', label: '(R$) Estoque Gerencial', align: 'right' },
-    { key: 'estoqueTotal', label: '(R$) Estoque Total', align: 'right', isTotalCol: true },
-    { key: 'critico', label: '(R$) Crítico', align: 'right' },
-    { key: 'obsoleto', label: '(R$) Obsoleto', align: 'right' },
-    { key: 'obra', label: '(R$) Obra', align: 'right' },
-    { key: 'obraCritico', label: '(R$) Obra-Crítico', align: 'right' },
-    { key: 'insumoCritico', label: '(R$) Insumo-Crítico', align: 'right' },
-    { key: 'spareParts', label: '(R$) Spare Parts', align: 'right' },
+    { key: 'estoqueAtiva', label: 'Estoque Ativa (R$)', align: 'right' },
+    { key: 'estoqueGerencial', label: 'Estoque Gerencial (R$)', align: 'right' },
+    { key: 'estoqueTotal', label: 'Estoque Total (R$)', align: 'right', isTotalCol: true },
+    { key: 'obsoleto', label: 'Obsoleto (R$)', align: 'right' },
+    { key: 'critico', label: 'Crítico (R$)', align: 'right' },
+    { key: 'insumoCritico', label: 'Insumo-Crítico (R$)', align: 'right' },
+    { key: 'obraCritico', label: 'Obra-Crítico (R$)', align: 'right' },
+    { key: 'obra', label: 'Obra (R$)', align: 'right' },
+    { key: 'spareParts', label: 'Spare Parts (R$)', align: 'right' },
   ]
 
-  const conteudoTabela = (
-    <div
-      className={
-        tabelaTelaCheia
-          ? 'fixed inset-0 z-[9999] flex h-screen w-screen flex-col bg-[#080808] p-3 sm:p-5'
-          : 'rounded-xl border border-slate-800 bg-[#0D0F12] shadow-lg'
-      }
-    >
-      {/* CABEÇALHO DA TABELA */}
-      <div
-        className={`flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between ${
-          tabelaTelaCheia ? 'rounded-t-xl border-x border-t bg-[#0D0F12]' : ''
-        }`}
-      >
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-            Detalhamento Mensal por Unidade — {periodoLabelAtual.toUpperCase()} ({linhasExibidas.length} unidades)
-          </h3>
-          <p className="text-xs text-slate-400">
-            Clique nos cabeçalhos para ordenar. Obra-Crítico e Insumo-Crítico já deduzidos do Crítico e Obra.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={buscaTabela}
-            onChange={(e) => setBuscaTabela(e.target.value)}
-            placeholder="Filtrar unidade..."
-            className="rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-[#CC5500] focus:outline-none"
-          />
-
-          <button
-            onClick={() => setTabelaTelaCheia((prev) => !prev)}
-            title={tabelaTelaCheia ? 'Sair da tela cheia (ESC)' : 'Expandir tabela em tela cheia'}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-[#CC5500] hover:text-white"
-          >
-            {tabelaTelaCheia ? (
-              <>
-                <svg className="h-3.5 w-3.5 text-[#ff7b29]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                </svg>
-                Recolher Tela
-              </>
-            ) : (
-              <>
-                <svg className="h-3.5 w-3.5 text-[#ff7b29]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                </svg>
-                Expandir Tabela
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={exportarCSV}
-            className="rounded-lg bg-[#CC5500] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#e05e00]"
-          >
-            Exportar Excel (CSV)
-          </button>
-        </div>
-      </div>
-
-      {/* CORPO COM SCROLL */}
-      <div
-        className={
-          tabelaTelaCheia
-            ? 'flex-1 overflow-auto rounded-b-xl border-x border-b border-slate-800 bg-[#0D0F12]'
-            : 'max-h-[540px] overflow-auto'
-        }
-      >
-        <table className="w-full border-collapse text-left text-xs">
-          <thead className="sticky top-0 z-20 bg-[#14171C] text-[11px] uppercase tracking-wider text-slate-300">
-            <tr>
-              {colunas.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => handleSort(col.key)}
-                  className={`cursor-pointer select-none whitespace-nowrap border-b border-slate-800 px-3 py-2.5 font-semibold transition hover:text-[#ff7b29] ${
-                    col.align === 'right' ? 'text-right' : 'text-left'
-                  } ${
-                    col.sticky
-                      ? 'sticky left-0 z-30 bg-[#14171C] shadow-[2px_0_5px_rgba(0,0,0,0.4)]'
-                      : ''
-                  } ${
-                    col.isTotalCol
-                      ? 'bg-[#261409] text-[#ff7b29]'
-                      : 'text-slate-200'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {col.label}
-                    {sortCol === col.key && (
-                      <span className="text-[#ff7b29]">
-                        {sortDir === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
+  const renderTabela = () => (
+    <table className="w-full border-collapse text-left text-xs">
+      <thead className="sticky top-0 z-20 bg-[#121212] text-[10px] uppercase tracking-[0.14em] text-[#8c9ba5]">
+        <tr>
+          {colunas.map((col) => (
+            <th
+              key={col.key}
+              onClick={() => handleSort(col.key)}
+              className={`cursor-pointer select-none whitespace-nowrap border-b border-[#2A2A2A] px-3.5 py-3 font-bold transition hover:text-[#f58220] ${
+                col.align === 'right' ? 'text-right' : 'text-left'
+              } ${
+                col.sticky
+                  ? 'sticky left-0 z-30 bg-[#121212] shadow-[2px_0_6px_rgba(0,0,0,0.6)]'
+                  : ''
+              } ${
+                col.isTotalCol
+                  ? 'bg-[#26160c] text-[#f58220]'
+                  : 'text-[#c5d0db]'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1">
+                {col.label}
+                {sortCol === col.key && (
+                  <span className="text-[#f58220]">
+                    {sortDir === 'asc' ? '▲' : '▼'}
                   </span>
-                </th>
-              ))}
+                )}
+              </span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+
+      <tbody className="divide-y divide-[#222222]">
+        {linhasExibidas.length === 0 ? (
+          <tr>
+            <td
+              colSpan={colunas.length}
+              className="py-10 text-center text-sm text-[#8c9ba5]"
+            >
+              Nenhum dado encontrado para os filtros selecionados.
+            </td>
+          </tr>
+        ) : (
+          linhasExibidas.map((row) => (
+            <tr
+              key={row.unidade}
+              className="transition-colors hover:bg-[#1e1e1e]"
+            >
+              <td className="sticky left-0 z-10 whitespace-nowrap bg-[#0c0c0c] px-3.5 py-2.5 font-semibold text-white shadow-[2px_0_6px_rgba(0,0,0,0.6)]">
+                {row.unidade}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.estoqueAtiva)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.estoqueGerencial)}
+              </td>
+              <td className="whitespace-nowrap bg-[#f58220]/10 px-3.5 py-2.5 text-right font-mono font-bold text-[#f58220]">
+                {fmtBRLInt(row.estoqueTotal)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.obsoleto)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.critico)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.insumoCritico)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.obraCritico)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.obra)}
+              </td>
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
+                {fmtBRLInt(row.spareParts)}
+              </td>
             </tr>
-          </thead>
+          ))
+        )}
+      </tbody>
 
-          <tbody className="divide-y divide-slate-800/70">
-            {linhasExibidas.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={colunas.length}
-                  className="py-8 text-center text-sm text-slate-400"
-                >
-                  Nenhum dado encontrado para os filtros selecionados.
-                </td>
-              </tr>
-            ) : (
-              linhasExibidas.map((row) => (
-                <tr
-                  key={row.unidade}
-                  className="transition-colors hover:bg-slate-800/40"
-                >
-                  <td className="sticky left-0 z-10 whitespace-nowrap bg-[#0D0F12] px-3 py-2 font-semibold text-white shadow-[2px_0_5px_rgba(0,0,0,0.4)]">
-                    {row.unidade}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.estoqueAtiva)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.estoqueGerencial)}
-                  </td>
-                  <td className="whitespace-nowrap bg-[#CC5500]/10 px-3 py-2 text-right font-mono font-bold text-[#ff7b29]">
-                    {fmtBRLInt(row.estoqueTotal)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.critico)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.obsoleto)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.obra)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.obraCritico)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.insumoCritico)}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-white">
-                    {fmtBRLInt(row.spareParts)}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-
-          {/* LINHA DE TOTAL GERAL FIXA NO RODAPÉ EM TOM LARANJA */}
-          {linhasExibidas.length > 0 && (
-            <tfoot className="sticky bottom-0 z-20 bg-[#261409] font-bold text-white shadow-[0_-2px_8px_rgba(0,0,0,0.65)]">
-              <tr>
-                <td className="sticky left-0 z-30 whitespace-nowrap border-t-2 border-[#CC5500] bg-[#261409] px-3 py-2.5 text-left text-[#ff7b29]">
-                  TOTAL GERAL
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.estoqueAtiva)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.estoqueGerencial)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] bg-[#361b0b] px-3 py-2.5 text-right font-mono text-[#ff8c42]">
-                  {fmtBRLInt(totaisTabela.estoqueTotal)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.critico)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.obsoleto)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.obra)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.obraCritico)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.insumoCritico)}
-                </td>
-                <td className="whitespace-nowrap border-t-2 border-[#CC5500] px-3 py-2.5 text-right font-mono text-orange-100">
-                  {fmtBRLInt(totaisTabela.spareParts)}
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </div>
+      {/* LINHA DE TOTAL GERAL FIXA NO RODAPÉ EM TOM LARANJA */}
+      {linhasExibidas.length > 0 && (
+        <tfoot className="sticky bottom-0 z-20 bg-[#26160c] font-bold text-white shadow-[0_-2px_10px_rgba(0,0,0,0.75)]">
+          <tr>
+            <td className="sticky left-0 z-30 whitespace-nowrap border-t-2 border-[#f58220] bg-[#26160c] px-3.5 py-3 text-left tracking-wider text-[#f58220]">
+              TOTAL GERAL
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.estoqueAtiva)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.estoqueGerencial)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] bg-[#361e0f] px-3.5 py-3 text-right font-mono text-[#ff9638]">
+              {fmtBRLInt(totaisTabela.estoqueTotal)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.obsoleto)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.critico)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.insumoCritico)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.obraCritico)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.obra)}
+            </td>
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+              {fmtBRLInt(totaisTabela.spareParts)}
+            </td>
+          </tr>
+        </tfoot>
+      )}
+    </table>
   )
 
   const calcShare = (parte) =>
-    kpis.estoqueTotal > 0 ? `${((parte / kpis.estoqueTotal) * 100).toFixed(1)}% do estoque total` : '0,0% do estoque total'
+    kpis.estoqueTotal > 0
+      ? `${((parte / kpis.estoqueTotal) * 100).toFixed(1)}% do estoque total`
+      : '0,0% do estoque total'
+
+  // Dados e ticks dinâmicos para os gráficos Plotly
+  const { maxEvolucao, ticksY, ticksYText } = useMemo(() => {
+    const maxVal = Math.max(...evolucaoMensal.map((d) => d.estoqueTotal), 10)
+    const teto = Math.ceil(maxVal / 200000000) * 200000000 || 800000000
+    const step = teto / 4
+    const vals = [0, step, step * 2, step * 3, teto]
+    const texts = vals.map((v) =>
+      v === 0 ? 'R$ 0,00' : `R$ ${(v / 1000000).toFixed(1).replace('.', ',')}M`
+    )
+    return { maxEvolucao: teto, ticksY: vals, ticksYText: texts }
+  }, [evolucaoMensal])
+
+  const maxPareto = useMemo(
+    () => Math.max(...top10Pareto.map((d) => d.estoqueTotal), 1),
+    [top10Pareto]
+  )
+
+  const mesAtivoAbrev = useMemo(() => {
+    const info = MESES_ORDEM.find((m) => m.num === Number(mesSel))
+    return info ? `${info.abr}/${String(anoSel).slice(-2)}` : ''
+  }, [mesSel, anoSel])
 
   return (
-    <div className="space-y-5 pb-8 text-slate-100">
-      {/* CABEÇALHO E BARRA DE FILTROS */}
-      <div className="rounded-xl border border-slate-800 bg-[#0D0F12] p-4 shadow-lg">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
+      {/* Sobrescreve o cursor de mira/cruz do Plotly para mãozinha (pointer) nos dois gráficos */}
+      <style>{`
+        .resumo-plotly-pointer .nsewdrag,
+        .resumo-plotly-pointer .drag,
+        .resumo-plotly-pointer .cursor-crosshair,
+        .resumo-plotly-pointer svg {
+          cursor: pointer !important;
+        }
+      `}</style>
+
+      {/* --- CABEÇALHO GLOBAL --- */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 mt-2 px-1">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#2a1610] border border-[#f58220]/30 flex items-center justify-center text-[#f58220] shadow-inner shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#CC5500]" />
-              <h2 className="text-lg font-bold tracking-wide text-white">
-                RESUMO EXECUTIVO DE ESTOQUE — {periodoLabelAtual.toUpperCase()}
-              </h2>
+            <h1 className="text-lg lg:text-xl font-black text-white tracking-wider uppercase drop-shadow-sm">
+              RESUMO EXECUTIVO DE ESTOQUE — {periodoLabelAtual.toUpperCase()}
+            </h1>
+            <span className="text-[10px] text-accent tracking-widest uppercase font-bold">
+              Consolidação Ativa vs. Gerencial e Abertura Operacional por Unidade
+            </span>
+          </div>
+        </div>
+
+        <button
+          onClick={handleResetFiltros}
+          className="group relative flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#f58220]/20 to-transparent hover:from-[#f58220]/30 border border-[#f58220]/30 hover:border-[#f58220] transition-all duration-300 overflow-hidden shadow-[0_0_10px_rgba(245,130,32,0.1)] hover:shadow-[0_0_20px_rgba(245,130,32,0.3)] whitespace-nowrap self-start lg:self-auto"
+        >
+          <div className="absolute inset-0 bg-[#f58220]/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
+          <svg
+            className="w-3.5 h-3.5 text-[#f58220] relative z-10 group-hover:-rotate-180 transition-transform duration-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-white relative z-10">
+            Restaurar Padrão
+          </span>
+        </button>
+      </div>
+
+      {/* --- PAINEL DE FILTROS --- */}
+      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-5 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative transition-all duration-300 hover:border-accent/50">
+        <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="shrink-0">
+            <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-0.5">
+              Painel Gerencial Âmbar Energia
             </div>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Consolidação Ativa vs. Gerencial e abertura por categoria operacional (Crítico, Obsoleto, Obra, Insumo e Spare Parts)
-            </p>
+            <div className="text-xs text-[#8c9ba5] font-medium">
+              Filtros de Competência e Dimensões Corporativas (clique em qualquer card para destacar na apresentação)
+            </div>
           </div>
 
-          {/* FILTROS */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex flex-col">
-              <label className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <div className="flex flex-row flex-wrap items-end justify-start xl:justify-end gap-3 z-30">
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">
                 Ano
               </label>
               <select
                 value={anoSel}
                 onChange={(e) => setAnoSel(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-medium text-white focus:border-[#CC5500] focus:outline-none"
+                className="bg-[#0c0c0c] border border-[#2A2A2A] hover:border-accent/50 focus:border-accent rounded-lg px-3 py-2 text-xs font-semibold text-white focus:outline-none transition-colors"
               >
                 {anosDisponiveis.map((a) => (
                   <option key={a} value={a}>
@@ -927,14 +1039,14 @@ export default function ResumoEstoque({ data = [] }) {
               </select>
             </div>
 
-            <div className="flex flex-col">
-              <label className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <div>
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">
                 Mês Referência
               </label>
               <select
                 value={mesSel}
                 onChange={(e) => setMesSel(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-medium text-white focus:border-[#CC5500] focus:outline-none"
+                className="bg-[#0c0c0c] border border-[#2A2A2A] hover:border-accent/50 focus:border-accent rounded-lg px-3 py-2 text-xs font-semibold text-white focus:outline-none transition-colors"
               >
                 {mesesDisponiveis.map((m) => (
                   <option key={m.num} value={m.num}>
@@ -944,246 +1056,542 @@ export default function ResumoEstoque({ data = [] }) {
               </select>
             </div>
 
-            <div className="flex flex-col">
-              <label className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <div className="min-w-[140px]">
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">
                 Segmento
               </label>
-              <select
-                value={segmentoSel}
-                onChange={(e) => setSegmentoSel(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-medium text-white focus:border-[#CC5500] focus:outline-none"
-              >
-                <option value="TODOS">Todos os Segmentos</option>
-                {segmentosOpcoes.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <CyberMultiSelect
+                options={segmentosOpcoes}
+                selected={segmentosSel}
+                onChange={setSegmentosSel}
+                placeholder={
+                  segmentosSel.length === 0 || segmentosSel.length === segmentosOpcoes.length
+                    ? 'Todos'
+                    : segmentosSel.length === 1
+                    ? segmentosSel[0]
+                    : `${segmentosSel.length} Sel.`
+                }
+              />
             </div>
 
-            <div className="flex flex-col">
-              <label className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <div className="min-w-[140px]">
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">
                 Região
               </label>
-              <select
-                value={regiaoSel}
-                onChange={(e) => setRegiaoSel(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-medium text-white focus:border-[#CC5500] focus:outline-none"
-              >
-                <option value="TODAS">Todas as Regiões</option>
-                {regioesOpcoes.map((reg) => (
-                  <option key={reg} value={reg}>
-                    {reg}
-                  </option>
-                ))}
-              </select>
+              <CyberMultiSelect
+                options={regioesOpcoes}
+                selected={regioesSel}
+                onChange={setRegioesSel}
+                placeholder={
+                  regioesSel.length === 0 || regioesSel.length === regioesOpcoes.length
+                    ? 'Todas'
+                    : regioesSel.length === 1
+                    ? regioesSel[0]
+                    : `${regioesSel.length} Sel.`
+                }
+              />
             </div>
 
-            <div className="flex flex-col">
-              <label className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Unidade
+            <div className="min-w-[175px]">
+              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 block">
+                Usina / Unidade
               </label>
-              <select
-                value={unidadeSel}
-                onChange={(e) => setUnidadeSel(e.target.value)}
-                className="max-w-[200px] rounded-lg border border-slate-700 bg-[#14171C] px-3 py-1.5 text-xs font-medium text-white focus:border-[#CC5500] focus:outline-none"
-              >
-                <option value="TODAS">Todas ({unidadesOpcoes.length})</option>
-                {unidadesOpcoes.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
+              <CyberMultiSelect
+                options={unidadesOpcoes}
+                selected={unidadesSel}
+                onChange={setUnidadesSel}
+                placeholder={
+                  unidadesSel.length === 0 || unidadesSel.length === unidadesOpcoes.length
+                    ? `Todas (${unidadesOpcoes.length})`
+                    : unidadesSel.length === 1
+                    ? unidadesSel[0]
+                    : `${unidadesSel.length} Selecionadas`
+                }
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* FILEIRA 1: 3 CARDS PRINCIPAIS (ATIVA, GERENCIAL, TOTAL) */}
+      {/* --- FILEIRA 1: ESTOQUE TOTAL CONSOLIDADO | ESTOQUE ATIVA | ESTOQUE GERENCIAL --- */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <KpiCard
-          titulo="Estoque Ativa"
-          valor={kpis.estoqueAtiva}
-          diffVal={kpis.varAtivaDiff}
-          pctVal={kpis.varAtivaPct}
-          subtitulo={calcShare(kpis.estoqueAtiva)}
-        />
-        <KpiCard
-          titulo="Estoque Gerencial"
-          valor={kpis.estoqueGerencial}
-          diffVal={kpis.varGerencialDiff}
-          pctVal={kpis.varGerencialPct}
-          subtitulo={calcShare(kpis.estoqueGerencial)}
-        />
-        <KpiCard
+          id="total"
           titulo="Estoque Total Consolidado"
           valor={kpis.estoqueTotal}
           diffVal={kpis.varTotalDiff}
           pctVal={kpis.varTotalPct}
           subtitulo={`Consolidado Ativa + Gerencial (${linhasTabela.length} unidades)`}
-          destaque
+          cor="#f58220"
+          isLocked={lockedCard === 'total'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
+          icon={
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          }
+        />
+        <KpiCard
+          id="ativa"
+          titulo="Estoque Ativa"
+          valor={kpis.estoqueAtiva}
+          diffVal={kpis.varAtivaDiff}
+          pctVal={kpis.varAtivaPct}
+          subtitulo={calcShare(kpis.estoqueAtiva)}
+          cor="#38bdf8"
+          isLocked={lockedCard === 'ativa'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
+          icon={
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          }
+        />
+        <KpiCard
+          id="gerencial"
+          titulo="Estoque Gerencial"
+          valor={kpis.estoqueGerencial}
+          diffVal={kpis.varGerencialDiff}
+          pctVal={kpis.varGerencialPct}
+          subtitulo={calcShare(kpis.estoqueGerencial)}
+          cor="#6366f1"
+          isLocked={lockedCard === 'gerencial'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
+          icon={
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          }
         />
       </div>
 
-      {/* FILEIRA 2: 5 CARDS DAS CATEGORIAS (LENTES CHEIAS NA BASE INTEIRA) */}
+      {/* --- FILEIRA 2: 5 CARDS DAS CATEGORIAS COM LUZES PRÓPRIAS --- */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <KpiCard
+          id="critico"
           titulo="Estoque Crítico"
           valor={kpis.criticoCheio}
           diffVal={kpis.varCriticoDiff}
           pctVal={kpis.varCriticoPct}
           subtitulo={calcShare(kpis.criticoCheio)}
+          cor="#e74c3c"
+          isLocked={lockedCard === 'critico'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
           compacto
         />
         <KpiCard
+          id="obsoleto"
           titulo="Estoque Obsoleto"
           valor={kpis.obsoletoCheio}
           diffVal={kpis.varObsoletoDiff}
           pctVal={kpis.varObsoletoPct}
           subtitulo={calcShare(kpis.obsoletoCheio)}
+          cor="#9b59b6"
+          isLocked={lockedCard === 'obsoleto'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
           compacto
         />
         <KpiCard
+          id="obra"
           titulo="Estoque Obra"
           valor={kpis.obraCheio}
           diffVal={kpis.varObraDiff}
           pctVal={kpis.varObraPct}
           subtitulo={calcShare(kpis.obraCheio)}
+          cor="#1abc9c"
+          isLocked={lockedCard === 'obra'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
           compacto
         />
         <KpiCard
+          id="insumo"
           titulo="Estoque Insumo"
           valor={kpis.insumoCheio}
           diffVal={kpis.varInsumoDiff}
           pctVal={kpis.varInsumoPct}
           subtitulo={calcShare(kpis.insumoCheio)}
+          cor="#f1c40f"
+          isLocked={lockedCard === 'insumo'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
           compacto
         />
         <KpiCard
-          titulo="Spare Parts"
+          id="spareParts"
+          titulo="Estoque Spare Parts"
           valor={kpis.sparePartsCheio}
           diffVal={kpis.varSparePartsDiff}
           pctVal={kpis.varSparePartsPct}
           subtitulo={calcShare(kpis.sparePartsCheio)}
+          cor="#3498db"
+          isLocked={lockedCard === 'spareParts'}
+          hasAnyLock={Boolean(lockedCard)}
+          onToggleLock={handleToggleLockCard}
           compacto
         />
       </div>
 
-      {/* TABELA DETALHAMENTO MENSAL POR UNIDADE (PORTAL QUANDO EM TELA CHEIA) */}
-      {tabelaTelaCheia ? createPortal(conteudoTabela, document.body) : conteudoTabela}
+      {/* --- TABELA DETALHAMENTO MENSAL POR UNIDADE --- */}
+      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] overflow-hidden relative transition-all duration-300 hover:border-accent/50">
+        <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
-      {/* GRÁFICOS INFERIORES COMPACTOS (EVOLUÇÃO MENSAL + PARETO TOP 10) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* GRÁFICO 1: EVOLUÇÃO MENSAL NO ANO */}
-        <div className="rounded-xl border border-slate-800 bg-[#0D0F12] p-4 shadow-md">
-          <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-200">
-            Evolução Mensal do Estoque ({anoSel})
-          </h4>
-          <div className="h-[240px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={evolucaoMensal}
-                margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+        <div className="flex flex-col gap-3 border-b border-[#2A2A2A] p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between bg-[#161616]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0 border border-[#f58220]/30">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
+                Detalhamento Mensal por Unidade — {periodoLabelAtual.toUpperCase()} ({linhasExibidas.length} unidades)
+              </h3>
+              <p className="text-[11px] text-[#8c9ba5] mt-0.5">
+                Clique nos cabeçalhos para ordenar. Obra-Crítico e Insumo-Crítico já deduzidos do Crítico e Obra.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <svg
+                className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8c9ba5]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
               >
-                <defs>
-                  <linearGradient id="gradEstoqueTotal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#CC5500" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#CC5500" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                <YAxis
-                  tickFormatter={(v) => fmtValorCurto(v)}
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
-                  width={70}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#14171C',
-                    borderColor: '#334155',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value) => fmtBRLInt(value)}
-                />
-                <Legend wrapperStyle={{ fontSize: '11px' }} />
-                <Area
-                  type="monotone"
-                  dataKey="estoqueTotal"
-                  name="Estoque Total"
-                  stroke="#CC5500"
-                  strokeWidth={2.5}
-                  fill="url(#gradEstoqueTotal)"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="estoqueAtiva"
-                  name="Estoque Ativa"
-                  stroke="#38bdf8"
-                  strokeWidth={1.8}
-                  fill="transparent"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={buscaTabela}
+                onChange={(e) => setBuscaTabela(e.target.value)}
+                placeholder="Filtrar unidade..."
+                className="rounded-lg border border-[#2A2A2A] bg-[#080808] pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8c9ba5] focus:border-accent focus:outline-none transition-colors"
+              />
+            </div>
+
+            <button
+              onClick={() => setTabelaTelaCheia(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"
+            >
+              <svg
+                className="w-3.5 h-3.5 group-hover:scale-110 transition-transform"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              <span>Expandir Tabela</span>
+            </button>
+
+            <button
+              onClick={exportarCSV}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Exportar Excel</span>
+            </button>
           </div>
         </div>
 
-        {/* GRÁFICO 2: TOP 10 UNIDADES (ESTOQUE TOTAL VS CRÍTICO) */}
-        <div className="rounded-xl border border-slate-800 bg-[#0D0F12] p-4 shadow-md">
-          <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-200">
-            Top 10 Unidades por Valor de Estoque ({periodoLabelAtual})
-          </h4>
-          <div className="h-[240px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={top10Pareto}
-                layout="vertical"
-                margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-                <XAxis
-                  type="number"
-                  tickFormatter={(v) => fmtValorCurto(v)}
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="unidade"
-                  width={125}
-                  tick={{ fill: '#cbd5e1', fontSize: 10 }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#14171C',
-                    borderColor: '#334155',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value) => fmtBRLInt(value)}
-                />
-                <Legend wrapperStyle={{ fontSize: '11px' }} />
-                <Bar
-                  dataKey="estoqueTotal"
-                  name="Estoque Total"
-                  fill="#CC5500"
-                  radius={[0, 4, 4, 0]}
+        <div className="max-h-[540px] overflow-auto custom-scrollbar overscroll-contain bg-[#0c0c0c]">
+          {renderTabela()}
+        </div>
+      </div>
+
+      {/* --- MODAL TELA CHEIA (FULLSCREENPORTAL) --- */}
+      {tabelaTelaCheia && (
+        <FullScreenPortal onClose={() => setTabelaTelaCheia(false)}>
+          <div className="fixed inset-0 z-[99999] bg-[#080808] flex flex-col backdrop-blur-sm animate-fade-in">
+            <div className="flex flex-wrap justify-between items-center gap-3 px-6 py-4 bg-[#121212] border-b border-[#2A2A2A] shrink-0 shadow-xl">
+              <div className="flex items-center gap-3">
+                <svg
+                  className="w-6 h-6 text-accent drop-shadow-[0_0_10px_rgba(245,130,32,0.8)]"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
                 >
-                  {top10Pareto.map((_, idx) => (
-                    <Cell key={idx} fill={idx === 0 ? '#ff6600' : '#CC5500'} />
-                  ))}
-                </Bar>
-                <Bar
-                  dataKey="criticoTotal"
-                  name="Parcela Crítica"
-                  fill="#f43f5e"
-                  radius={[0, 4, 4, 0]}
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <h2 className="text-base font-bold text-white uppercase tracking-wider">
+                  Detalhamento Mensal por Unidade — {periodoLabelAtual.toUpperCase()} (Tela Cheia)
+                </h2>
+                <span className="text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
+                  {linhasExibidas.length} unidades
+                </span>
+              </div>
+
+              <div className="flex gap-3 items-center">
+                <button
+                  onClick={exportarCSV}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(46,204,113,0.15)] hover:shadow-[0_0_20px_rgba(46,204,113,0.3)] transform hover:-translate-y-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span>Baixar Base Excel</span>
+                </button>
+
+                <button
+                  onClick={() => setTabelaTelaCheia(false)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span>Fechar Janela</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 px-6 py-3 bg-[#161616] border-b border-[#2A2A2A] shrink-0">
+              <div className="w-full sm:w-72">
+                <CyberMultiSelect
+                  options={unidadesOpcoes}
+                  selected={unidadesSel}
+                  onChange={setUnidadesSel}
+                  placeholder="Filtrar por Unidades"
                 />
-              </BarChart>
-            </ResponsiveContainer>
+              </div>
+              <div className="flex-1 relative">
+                <svg
+                  className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-[#8c9ba5]"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Buscar unidade pelo nome..."
+                  value={buscaTabela}
+                  onChange={(e) => setBuscaTabela(e.target.value)}
+                  className="w-full bg-[#080808] border border-[#2a2a2a] text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-accent text-xs transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="flex-grow overflow-hidden p-4 sm:p-6 bg-[#080808]">
+              <div className="border border-[#2A2A2A] rounded-xl bg-[#0c0c0c] overflow-auto custom-scrollbar shadow-2xl h-full">
+                {renderTabela()}
+              </div>
+            </div>
           </div>
+        </FullScreenPortal>
+      )}
+
+      {/* --- GRÁFICOS INFERIORES NO PADRÃO PLOTLY DO VISÃO GERAL --- */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 resumo-plotly-pointer">
+        {/* GRÁFICO 1: EVOLUÇÃO MENSAL (DUAS LINHAS: TOTAL + ATIVA, SEM CAIXINHAS FIXAS, TOOLTIP UNIFICADO) */}
+        <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]">
+          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+          <div className="flex items-center gap-2.5 mb-2">
+            <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">
+              Evolução Mensal do Estoque ({anoSel})
+            </span>
+          </div>
+
+          {evolucaoMensal.length > 0 ? (
+            <Plot
+              data={[
+                {
+                  name: 'Estoque Total',
+                  x: evolucaoMensal.map((d) => d.label),
+                  y: evolucaoMensal.map((d) => d.estoqueTotal),
+                  type: 'scatter',
+                  mode: 'lines+markers',
+                  line: { color: '#f58220', width: 2.8, shape: 'spline', smoothing: 1.2 },
+                  marker: {
+                    size: evolucaoMensal.map((d) => (d.label === mesAtivoAbrev ? 9 : 5)),
+                    color: '#080808',
+                    line: { color: '#f58220', width: 2.2 },
+                  },
+                  fill: 'tozeroy',
+                  fillgradient: {
+                    type: 'vertical',
+                    colorscale: [
+                      ['0', 'rgba(245,130,32,0.32)'],
+                      ['1', 'rgba(245,130,32,0.02)'],
+                    ],
+                  },
+                  fillcolor: 'rgba(245,130,32,0.14)',
+                  customdata: evolucaoMensal.map((d) => fmtBRLInt(d.estoqueTotal)),
+                  hovertemplate:
+                    '<span style="color:#f58220; font-weight:700;">Estoque Total : %{customdata}</span><extra></extra>',
+                  cliponaxis: false,
+                },
+                {
+                  name: 'Estoque Ativa',
+                  x: evolucaoMensal.map((d) => d.label),
+                  y: evolucaoMensal.map((d) => d.estoqueAtiva),
+                  type: 'scatter',
+                  mode: 'lines+markers',
+                  line: { color: '#38bdf8', width: 2.5, shape: 'spline', smoothing: 1.2 },
+                  marker: {
+                    size: evolucaoMensal.map((d) => (d.label === mesAtivoAbrev ? 9 : 5)),
+                    color: '#080808',
+                    line: { color: '#38bdf8', width: 2.2 },
+                  },
+                  customdata: evolucaoMensal.map((d) => fmtBRLInt(d.estoqueAtiva)),
+                  hovertemplate:
+                    '<span style="color:#38bdf8; font-weight:700;">Estoque Ativa : %{customdata}</span><extra></extra>',
+                  cliponaxis: false,
+                },
+              ]}
+              layout={{
+                ...PLOT_LAYOUT,
+                height: 295,
+                margin: { l: 68, r: 18, t: 18, b: 58 },
+                showlegend: true,
+                legend: {
+                  orientation: 'h',
+                  x: 0.5,
+                  xanchor: 'center',
+                  y: -0.22,
+                  font: { size: 11, color: '#cbd5e1', family: 'Inter' },
+                  bgcolor: 'rgba(0,0,0,0)',
+                },
+                hovermode: 'x unified',
+                hoverlabel: {
+                  bgcolor: 'rgba(18, 22, 28, 0.96)',
+                  bordercolor: '#334155',
+                  font: { color: '#ffffff', size: 12, family: 'Inter' },
+                },
+                xaxis: {
+                  type: 'category',
+                  showgrid: true,
+                  gridcolor: 'rgba(255,255,255,0.06)',
+                  griddash: 'dot',
+                  zeroline: false,
+                  linecolor: '#2A2A2A',
+                  tickmode: 'array',
+                  tickvals: evolucaoMensal.map((d) => d.label),
+                  ticktext: evolucaoMensal.map((d) =>
+                    d.label === mesAtivoAbrev
+                      ? `<span style="color: #f58220; font-weight: 900;">• ${d.label} •</span>`
+                      : d.label
+                  ),
+                  tickpad: 8,
+                  automargin: true,
+                  spikemode: 'across',
+                  spikesnap: 'cursor',
+                  spikecolor: '#94a3b8',
+                  spikethickness: 1,
+                  spikedash: 'solid',
+                },
+                yaxis: {
+                  showgrid: true,
+                  gridcolor: 'rgba(255,255,255,0.06)',
+                  griddash: 'dot',
+                  zeroline: false,
+                  linecolor: '#2A2A2A',
+                  tickmode: 'array',
+                  tickvals: ticksY,
+                  ticktext: ticksYText,
+                  tickfont: { size: 10, color: '#8c9ba5', family: 'Inter' },
+                  range: [0, maxEvolucao * 1.05],
+                },
+              }}
+              config={{ displayModeBar: false, responsive: true }}
+              style={{ width: '100%', minHeight: 270 }}
+              useResizeHandler
+            />
+          ) : (
+            <p className="text-[#8c9ba5] text-sm text-center py-12">Sem dados para o ano selecionado.</p>
+          )}
+        </div>
+
+        {/* GRÁFICO 2: TOP 10 UNIDADES POR ESTOQUE TOTAL (SEM CAIXINHA AO PASSAR O MOUSE) */}
+        <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.85)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_35px_rgba(245,130,32,0.18)]">
+          <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
+          <div className="flex items-center gap-2.5 mb-2">
+            <div className="w-7 h-7 rounded-lg bg-[#262014] flex items-center justify-center text-accent shadow-inner shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-[0.2em] text-[#8c9ba5] uppercase">
+              Top 10 Unidades por Estoque Total ({periodoLabelAtual})
+            </span>
+          </div>
+
+          {top10Pareto.length > 0 ? (
+            <Plot
+              data={[
+                {
+                  type: 'bar',
+                  orientation: 'h',
+                  y: top10Pareto.map((d) => d.unidade),
+                  x: top10Pareto.map((d) => d.estoqueTotal),
+                  cliponaxis: false,
+                  textposition: 'outside',
+                  text: top10Pareto.map((d) => {
+                    const pct =
+                      kpis.estoqueTotal > 0
+                        ? ((d.estoqueTotal / kpis.estoqueTotal) * 100).toFixed(1)
+                        : '0.0'
+                    return `<span style="color:#ffffff;">${fmtValorCurto(d.estoqueTotal)}</span> <span style="color:#f58220; font-weight:800;">[ ${pct}% ]</span>`
+                  }),
+                  textfont: { size: 10, family: 'Inter', weight: 600 },
+                  marker: {
+                    color: '#f58220',
+                    line: { color: '#080808', width: 1 },
+                  },
+                  hoverinfo: 'none',
+                },
+              ]}
+              layout={{
+                ...PLOT_LAYOUT,
+                hovermode: false,
+                bargap: 0.38,
+                height: 295,
+                margin: { l: 115, r: 95, t: 10, b: 10 },
+                xaxis: {
+                  showgrid: false,
+                  showticklabels: false,
+                  zeroline: false,
+                  range: [0, maxPareto * 1.35],
+                },
+                yaxis: {
+                  showgrid: true,
+                  gridcolor: '#2A2A2A',
+                  tickmode: 'array',
+                  tickvals: top10Pareto.map((d) => d.unidade),
+                  ticktext: top10Pareto.map(
+                    (d) => `<span style="color:#d1d8df;">${d.unidade}&nbsp;&nbsp;</span>`
+                  ),
+                  ticklen: 0,
+                  tickpad: 8,
+                  automargin: true,
+                },
+              }}
+              config={{ displayModeBar: false, responsive: true }}
+              style={{ width: '100%', minHeight: 270 }}
+              useResizeHandler
+            />
+          ) : (
+            <p className="text-[#8c9ba5] text-sm text-center py-12">Sem dados para o período selecionado.</p>
+          )}
         </div>
       </div>
     </div>
