@@ -889,14 +889,54 @@ export default function PainelInventarios({ data = [] }) {
 </body>
 </html>`
 
-    const win = window.open('', '_blank', 'noopener,noreferrer,width=1400,height=900')
-    if (!win) {
-      alert('Permita pop-ups para exportar o PDF.')
-      return
+    // Não usar noopener: com noopener o browser devolve null e não dá para escrever o HTML.
+    // Fallback 1: Blob URL (mais estável). Fallback 2: iframe oculto + print.
+    const openPdf = () => {
+      try {
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const win = window.open(url, '_blank')
+        if (win) {
+          // Revoga depois de carregar (evita vazamento de blob)
+          setTimeout(() => URL.revokeObjectURL(url), 60_000)
+          return true
+        }
+        URL.revokeObjectURL(url)
+      } catch (_) { /* continua para iframe */ }
+
+      try {
+        const iframe = document.createElement('iframe')
+        iframe.setAttribute('title', 'Exportar PDF Resumo Anual')
+        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;'
+        document.body.appendChild(iframe)
+        const doc = iframe.contentWindow?.document
+        if (!doc) {
+          document.body.removeChild(iframe)
+          return false
+        }
+        doc.open()
+        doc.write(html)
+        doc.close()
+        // Aguarda layout antes de imprimir
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus()
+            iframe.contentWindow?.print()
+          } finally {
+            setTimeout(() => {
+              if (iframe.parentNode) document.body.removeChild(iframe)
+            }, 1000)
+          }
+        }, 400)
+        return true
+      } catch (_) {
+        return false
+      }
     }
-    win.document.open()
-    win.document.write(html)
-    win.document.close()
+
+    if (!openPdf()) {
+      alert('Não foi possível abrir o PDF. Permita pop-ups para este site e tente novamente.')
+    }
   }, [linhasEmpresaExibidas, totaisEmpresaResumo, periodoAnoLabel, acuraciaAnual])
 
   const prevMetrics = useMemo(() => {
