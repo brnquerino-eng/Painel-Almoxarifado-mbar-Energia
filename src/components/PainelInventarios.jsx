@@ -554,6 +554,34 @@ export default function PainelInventarios({ data = [] }) {
     return { linhasEmpresaResumo: linhas, totaisEmpresaResumo: totais }
   }, [dfMaster, listasMaster.empresas, empresaSel])
 
+  // Acurácias ANUAIS — consolidado de todas as linhas do ano (mesmo critério do painel mensal)
+  const acuraciaAnual = useMemo(() => {
+    const empty = { acuraciaItens: null, acuraciaValor: null, acuraciaLiquida: null, hasData: false }
+    if (!dfMaster.length) return empty
+
+    const getQtdDiv = (r) => r.diferenca_consolidada ?? r.diferenca_qtd ?? r.qtd_diferenca ?? r.diff_qtd ?? 0
+    const getValDiv = (r) => r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0
+
+    const totalLinhas = dfMaster.length
+    const itensDivergentes = dfMaster.filter((r) => Math.abs(getQtdDiv(r)) > 0 || Math.abs(getValDiv(r)) !== 0).length
+    const acuraciaItens = totalLinhas > 0 ? ((totalLinhas - itensDivergentes) / totalLinhas) * 100 : 100
+
+    const valCongelado = dfMaster.reduce((s, r) => s + (Number(r.saldo_anterior_val) || 0), 0)
+    const divergAbs = dfMaster.reduce((s, r) => s + Math.abs(Number(getValDiv(r)) || 0), 0)
+    const acuraciaValor = valCongelado > 0
+      ? Math.max(0, (1 - divergAbs / valCongelado) * 100)
+      : (divergAbs === 0 ? 100 : 0)
+
+    const valSobras = dfMaster.filter((r) => getValDiv(r) > 0).reduce((s, r) => s + getValDiv(r), 0)
+    const valPerdas = dfMaster.filter((r) => getValDiv(r) < 0).reduce((s, r) => s + getValDiv(r), 0)
+    const diffLiquida = valSobras + valPerdas
+    const acuraciaLiquida = valCongelado > 0
+      ? Math.max(0, (1 - Math.abs(diffLiquida) / valCongelado) * 100)
+      : (diffLiquida === 0 ? 100 : 0)
+
+    return { acuraciaItens, acuraciaValor, acuraciaLiquida, hasData: true }
+  }, [dfMaster])
+
   const linhasEmpresaExibidas = useMemo(() => {
     const q = buscaEmpresaResumo.trim().toUpperCase()
     const filtradas = q
@@ -611,6 +639,265 @@ export default function PainelInventarios({ data = [] }) {
     const sufixoAno = anoSel.length ? anoSel.join('-') : 'Todos_Anos'
     XLSX.writeFile(wb, `Resumo_Anual_Inventarios_Empresa_${sufixoAno}.xlsx`)
   }, [linhasEmpresaExibidas, totaisEmpresaResumo, anoSel])
+
+  const exportarPdfResumoEmpresa = useCallback(() => {
+    if (!linhasEmpresaExibidas.length) return
+
+    const fmtNum = (n) => Number(n || 0).toLocaleString('pt-BR')
+    const fmtMoney = (n) => Math.round(Number(n) || 0).toLocaleString('pt-BR', {
+      style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0,
+    })
+    const fmtAcu = (n) => (n == null ? '—' : `${Number(n).toFixed(2).replace('.', ',')}%`)
+    const dataGeracao = new Date().toLocaleString('pt-BR')
+
+    const rowsHtml = linhasEmpresaExibidas.map((r, idx) => {
+      const bg = idx % 2 === 0 ? '#ffffff' : '#f3f6fb'
+      const acu = r.acuraciaMedia
+      const acuColor = acu == null ? '#64748b' : acu >= 95 ? '#15803d' : acu >= 90 ? '#c2410c' : '#b91c1c'
+      return `
+      <tr style="background:${bg};">
+        <td class="td-left">${r.empresa}</td>
+        <td>${fmtNum(r.rotativos)}</td>
+        <td>${fmtNum(r.geral)}</td>
+        <td class="td-strong">${fmtNum(r.total)}</td>
+        <td>${fmtNum(r.qtdeSkus)}</td>
+        <td>${fmtMoney(r.valor)}</td>
+        <td style="color:${acuColor};font-weight:700;">${fmtAcu(acu)}</td>
+      </tr>`
+    }).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Resumo Anual por Empresa — ${periodoAnoLabel}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page { padding: 8px 10px 12px; }
+    h1 {
+      margin: 0 0 2px;
+      font-size: 20px;
+      font-weight: 800;
+      color: #0f172a;
+      letter-spacing: -0.01em;
+    }
+    .subtitle {
+      margin: 0 0 12px;
+      font-size: 11px;
+      color: #64748b;
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 10px;
+      border: 1px solid #cbd5e1;
+    }
+    .kpi {
+      padding: 10px 12px 12px;
+      color: #fff;
+      min-height: 72px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .kpi-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      opacity: 0.95;
+      margin-bottom: 6px;
+      text-transform: none;
+    }
+    .kpi-value {
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.15;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-c0 { background: #0f2744; }
+    .kpi-c1 { background: #2563eb; }
+    .kpi-c2 { background: #06b6d4; }
+    .kpi-c3 { background: #f59e0b; }
+    .kpi-c4 { background: #16a34a; }
+
+    .acus {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      border: 1px solid #cbd5e1;
+    }
+    .acu {
+      padding: 10px 12px;
+      color: #fff;
+    }
+    .acu-label { font-size: 10px; font-weight: 700; opacity: 0.95; margin-bottom: 4px; }
+    .acu-value { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .acu-c0 { background: #1d4ed8; }
+    .acu-c1 { background: #7c3aed; }
+    .acu-c2 { background: #0f766e; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10px;
+      border: 1px solid #94a3b8;
+    }
+    thead th {
+      background: #0f2744;
+      color: #ffffff;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 7px 8px;
+      text-align: right;
+      border-right: 1px solid #1e3a5f;
+    }
+    thead th:first-child { text-align: left; }
+    thead th:last-child { border-right: none; }
+    td {
+      padding: 5px 8px;
+      text-align: right;
+      border-bottom: 1px solid #e2e8f0;
+      border-right: 1px solid #e2e8f0;
+      font-variant-numeric: tabular-nums;
+      color: #0f172a;
+    }
+    td:last-child { border-right: none; }
+    .td-left { text-align: left; font-weight: 600; color: #0f172a; }
+    .td-strong { font-weight: 800; color: #0f172a; }
+    tfoot td {
+      background: #0f2744;
+      color: #ffffff;
+      font-weight: 800;
+      padding: 7px 8px;
+      border-top: 2px solid #0f2744;
+      border-right: 1px solid #1e3a5f;
+      text-align: right;
+    }
+    tfoot td:first-child { text-align: left; letter-spacing: 0.04em; }
+    tfoot td:last-child { border-right: none; }
+    .footer {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #64748b;
+    }
+    @media print {
+      body { background: #fff; }
+      .page { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Resumo Anual por Empresa — ${periodoAnoLabel}</h1>
+    <p class="subtitle">
+      Inventários · Âmbar Energia · ${linhasEmpresaExibidas.length} empresas ·
+      “—” = sem inventário no ano · Gerado em ${dataGeracao}
+    </p>
+
+    <div class="kpis">
+      <div class="kpi kpi-c0">
+        <div class="kpi-label">Total inventários</div>
+        <div class="kpi-value">${fmtNum(totaisEmpresaResumo.total)}</div>
+      </div>
+      <div class="kpi kpi-c1">
+        <div class="kpi-label">Inventários geral</div>
+        <div class="kpi-value">${fmtNum(totaisEmpresaResumo.geral)}</div>
+      </div>
+      <div class="kpi kpi-c2">
+        <div class="kpi-label">Inventários rotativos</div>
+        <div class="kpi-value">${fmtNum(totaisEmpresaResumo.rotativos)}</div>
+      </div>
+      <div class="kpi kpi-c3">
+        <div class="kpi-label">Qtde SKUs (linhas)</div>
+        <div class="kpi-value">${fmtNum(totaisEmpresaResumo.qtdeSkus)}</div>
+      </div>
+      <div class="kpi kpi-c4">
+        <div class="kpi-label">Valor total</div>
+        <div class="kpi-value">${fmtMoney(totaisEmpresaResumo.valor)}</div>
+      </div>
+    </div>
+
+    <div class="acus">
+      <div class="acu acu-c0">
+        <div class="acu-label">Acurácia financeira (bruta)</div>
+        <div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaValor)}</div>
+      </div>
+      <div class="acu acu-c1">
+        <div class="acu-label">Acurácia financeira (líquida)</div>
+        <div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaLiquida)}</div>
+      </div>
+      <div class="acu acu-c2">
+        <div class="acu-label">Acurácia física (itens)</div>
+        <div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaItens)}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Empresa</th>
+          <th>Inv. rotativos</th>
+          <th>Inv. geral</th>
+          <th>Total inv.</th>
+          <th>Qtde SKUs</th>
+          <th>Valor (R$)</th>
+          <th>Acurácia média</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot>
+        <tr>
+          <td>TOTAL</td>
+          <td>${fmtNum(totaisEmpresaResumo.rotativos)}</td>
+          <td>${fmtNum(totaisEmpresaResumo.geral)}</td>
+          <td>${fmtNum(totaisEmpresaResumo.total)}</td>
+          <td>${fmtNum(totaisEmpresaResumo.qtdeSkus)}</td>
+          <td>${fmtMoney(totaisEmpresaResumo.valor)}</td>
+          <td>${fmtAcu(totaisEmpresaResumo.acuraciaMedia)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="footer">
+      <span>Âmbar Energia — Gestão e Fechamento Executivo de Inventários</span>
+      <span>Consolidado anual (independente do mês do gráfico mestre)</span>
+    </div>
+  </div>
+  <script>
+    window.onload = function () {
+      setTimeout(function () { window.print(); }, 250);
+    };
+  </script>
+</body>
+</html>`
+
+    const win = window.open('', '_blank', 'noopener,noreferrer,width=1400,height=900')
+    if (!win) {
+      alert('Permita pop-ups para exportar o PDF.')
+      return
+    }
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+  }, [linhasEmpresaExibidas, totaisEmpresaResumo, periodoAnoLabel, acuraciaAnual])
 
   const prevMetrics = useMemo(() => {
     if (!chartEvolucao.x.length) return { acuFis: 0, acuFin: 0, acuLiq: 0, taxaDiv: 0, impBruto: 0, impLiq: 0, label: 'Anterior', hasData: false }
@@ -1779,6 +2066,26 @@ export default function PainelInventarios({ data = [] }) {
             </div>
 
             <button
+              onClick={exportarExcelResumoEmpresa}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Exportar Excel</span>
+            </button>
+
+            <button
+              onClick={exportarPdfResumoEmpresa}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <span>Exportar PDF</span>
+            </button>
+
+            <button
               onClick={() => setTabelaEmpresaTelaCheia(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"
             >
@@ -1792,16 +2099,6 @@ export default function PainelInventarios({ data = [] }) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
               </svg>
               <span>Expandir Tabela</span>
-            </button>
-
-            <button
-              onClick={exportarExcelResumoEmpresa}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span>Exportar Excel</span>
             </button>
           </div>
         </div>
@@ -1881,6 +2178,112 @@ export default function PainelInventarios({ data = [] }) {
               <div className="text-[10px] text-[#666] mt-1">Saldo anterior val · ano</div>
             </div>
           </div>
+
+          {/* Medidores de acurácia ANUAL (mesmo critério do mensal, consolidado do ano) */}
+          <div className="mt-4 pt-3 border-t border-[#2A2A2A]">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase">Acurácia anual</span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
+                {periodoAnoLabel}
+              </span>
+              <span className="text-[10px] text-[#8c9ba5]">Consolidado de todas as linhas do ano</span>
+            </div>
+            {acuraciaAnual.hasData ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  {
+                    key: 'bruta',
+                    title: 'Acurácia financeira (bruta)',
+                    desc: 'Impacto financeiro absoluto no saldo contábil (ano).',
+                    value: acuraciaAnual.acuraciaValor,
+                    icon: (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    ),
+                  },
+                  {
+                    key: 'liquida',
+                    title: 'Acurácia financeira (líquida)',
+                    desc: 'Impacto financeiro real compensado (ano).',
+                    value: acuraciaAnual.acuraciaLiquida,
+                    icon: (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    ),
+                  },
+                  {
+                    key: 'fisica',
+                    title: 'Acurácia física (itens)',
+                    desc: 'Precisão da contagem física linha a linha (ano).',
+                    value: acuraciaAnual.acuraciaItens,
+                    icon: (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    ),
+                  },
+                ].map((card) => {
+                  const cor = getCor(card.value)
+                  return (
+                    <div
+                      key={card.key}
+                      className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-4 flex flex-col sm:flex-row items-center gap-3 shadow-inner hover:border-accent/30 transition-all"
+                    >
+                      <div className="flex-1 w-full min-w-0 text-center sm:text-left">
+                        <div className="flex items-center justify-center sm:justify-start gap-2 mb-1.5">
+                          <div
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg shadow-inner border shrink-0"
+                            style={{ backgroundColor: `${cor}15`, color: cor, borderColor: `${cor}40` }}
+                          >
+                            {card.icon}
+                          </div>
+                          <h4 className="text-[11px] font-black tracking-[0.08em] text-white uppercase leading-tight">
+                            {card.title}
+                          </h4>
+                        </div>
+                        <p className="text-[10px] text-muted leading-relaxed mb-2">{card.desc}</p>
+                        <div
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold border shadow-sm"
+                          style={{ backgroundColor: `${cor}15`, borderColor: `${cor}35`, color: cor }}
+                        >
+                          <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: cor }} />
+                          <span>CONFIABILIDADE: {getStatusConf(card.value)}</span>
+                        </div>
+                      </div>
+                      <div className="w-[110px] h-[110px] shrink-0 flex items-center justify-center pointer-events-none">
+                        <Plot
+                          data={[{
+                            type: 'pie',
+                            values: [card.value, Math.max(0, 100 - card.value)],
+                            hole: DONUT_HOLE,
+                            sort: false,
+                            direction: 'clockwise',
+                            rotation: 90,
+                            textinfo: 'none',
+                            hoverinfo: 'none',
+                            marker: { colors: [cor, '#2A2A2A'], line: { width: 0 } },
+                          }]}
+                          layout={{
+                            ...DONUT_LAYOUT,
+                            height: 110,
+                            annotations: [{
+                              text: `${card.value.toFixed(2)}%`,
+                              font: { size: 14, color: cor, family: 'Inter', weight: 900 },
+                              showarrow: false,
+                              x: 0.5,
+                              y: 0.5,
+                            }],
+                          }}
+                          config={{ displayModeBar: false, responsive: true }}
+                          style={{ width: '100%', maxWidth: '110px' }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-6 text-center text-[11px] text-muted">
+                Sem inventários no ano selecionado para calcular acurácia.
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="max-h-[540px] overflow-auto custom-scrollbar overscroll-contain bg-[#0c0c0c]">
@@ -1920,6 +2323,16 @@ export default function PainelInventarios({ data = [] }) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
                   <span>Baixar Base Excel</span>
+                </button>
+
+                <button
+                  onClick={exportarPdfResumoEmpresa}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-[0_0_15px_rgba(231,76,60,0.15)] hover:shadow-[0_0_20px_rgba(231,76,60,0.3)] transform hover:-translate-y-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  <span>Exportar PDF</span>
                 </button>
 
                 <button
