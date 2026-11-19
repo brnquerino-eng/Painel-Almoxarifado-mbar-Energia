@@ -635,7 +635,7 @@ export default function PainelInventarios({ data = [] }) {
     })
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(wsData)
-    XLSX.utils.book_append_sheet(wb, ws, 'Resumo Anual por Empresa')
+    XLSX.utils.book_append_sheet(wb, ws, 'Resumo Anual Inventario')
     const sufixoAno = anoSel.length ? anoSel.join('-') : 'Todos_Anos'
     XLSX.writeFile(wb, `Resumo_Anual_Inventarios_Empresa_${sufixoAno}.xlsx`)
   }, [linhasEmpresaExibidas, totaisEmpresaResumo, anoSel])
@@ -982,141 +982,9 @@ export default function PainelInventarios({ data = [] }) {
     return { acuFis, acuFin, acuLiq, taxaDiv, impBruto, impLiq, label: prevMonthLabel, hasData: true }
   }, [dfMaster, chartEvolucao.x, mesClicado])
 
-  const handleExportExcel = useCallback(() => {
-    if (!dfPainel || dfPainel.length === 0) return alert("Nenhum dado para exportar!");
-    
-    const wsData = dfPainel.map(row => ({
-      'Empresa / Unidade': row.empresa_nome || row.unidade || '—',
-      'Nº Inventário': limparId(row.id_inventario),
-      'Tipo': row.tipo_inventario || '—',
-      'Mês Referência': formatMesAno(row.mes_referencia, row.ano_referencia),
-      'Código SKU': row.codigo_produto || row.codigo || '—',
-      'Nome do Produto': row.nome_produto ?? row.descricao_produto ?? '—',
-      'Qtde Sistema': row.saldo_anterior_consolidado ?? row.saldo_anterior ?? 0,
-      'Qtde Físico': row.inventario_consolidado ?? row.quantidade_contada ?? 0,
-      'Divergência (Qtde)': row.diferenca_consolidada ?? row.diferenca_qtd ?? 0,
-      'Preço Médio (R$)': row.custo_unitario ?? row.preco_medio ?? 0,
-      'Divergência (R$)': row.diferenca_val ?? row.val_diferenca ?? 0
-    }));
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, 'Relatório Geral');
-    XLSX.writeFile(wb, `Inventarios_Geral_${mesClicado || 'Completo'}.xlsx`);
-  }, [dfPainel, mesClicado]);
 
-  const handleExportPDF = useCallback(() => window.print(), []);
 
-  const handleExportWord = useCallback(() => {
-    const dataAtual = new Date().toLocaleDateString('pt-BR');
-    
-    const html = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-      <head><meta charset='utf-8'><title>Relatório de Inventários</title></head>
-      <body style="font-family: Arial, sans-serif;">
-        <h1 style="color: #f58220;">Relatório Executivo de Inventários - Âmbar Energia</h1>
-        <p><strong>Período Analisado:</strong> ${mesClicado || 'Todo o Histórico'}</p>
-        <p><strong>Data de Geração:</strong> ${dataAtual}</p>
-        <hr/>
-        <h3>Resumo da Conciliação</h3>
-        <ul>
-          <li><strong>Total de Inventários:</strong> ${stats.totalInvs} (Finalizados: ${stats.finalizadosCount})</li>
-          <li><strong>Acurácia Física (Itens):</strong> ${stats.acuraciaItens.toFixed(2)}%</li>
-          <li><strong>Acurácia Financeira (Bruta):</strong> ${stats.acuraciaValor.toFixed(2)}%</li>
-          <li><strong>Acurácia Financeira (Líquida):</strong> ${stats.acuraciaLiquida.toFixed(2)}%</li>
-          <li><strong>Valor Congelado (Contábil):</strong> ${fmtBRL(stats.valCongelado)}</li>
-          <li><strong>Diferença Líquida Total:</strong> ${fmtBRL(stats.diffLiquida)}</li>
-        </ul>
-        <hr/>
-        <p><em>Relatório gerado automaticamente pelo Painel Gerencial.</em></p>
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Relatorio_Executivo_${mesClicado ? mesClicado.replace('/','-') : 'Geral'}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [stats, mesClicado]);
-
-  const handleExportPPTX = useCallback(() => {
-    const pres = new pptxgen();
-    pres.author = 'Painel Gerencial - Âmbar Energia';
-    pres.company = 'Âmbar Energia';
-    pres.title = 'Relatório de Inventários';
-    pres.layout = 'LAYOUT_16x9';
-
-    const slideCapa = pres.addSlide();
-    slideCapa.background = { color: '161616' };
-    slideCapa.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '10%', h: '100%', fill: { color: 'f58220' } }); 
-    
-    slideCapa.addText('ÂMBAR ENERGIA', { 
-      x: 1, y: 1.8, w: '80%', color: 'f58220', fontSize: 44, bold: true, align: 'center', fontFace: 'Arial' 
-    });
-    slideCapa.addText('FECHAMENTO DE ESTOQUE GERENCIAL', { 
-      x: 1, y: 2.8, w: '80%', color: 'FFFFFF', fontSize: 26, align: 'center', fontFace: 'Arial' 
-    });
-    slideCapa.addText(`COMPILADO: ${mesClicado ? mesClicado.toUpperCase() : 'HISTÓRICO COMPLETO'}`, { 
-      x: 1, y: 3.5, w: '80%', color: '8c9ba5', fontSize: 16, align: 'center', fontFace: 'Arial', bold: true
-    });
-
-    const slideResumo = pres.addSlide();
-    slideResumo.background = { color: 'F5F5F5' };
-    slideResumo.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
-    slideResumo.addText(`VISÃO GERAL CONSOLIDADA - ${mesClicado || 'GERAL'}`, { 
-      x: 0.2, y: 0.1, w: '90%', h: 0.6, color: 'FFFFFF', fontSize: 20, bold: true, fontFace: 'Arial' 
-    });
-
-    slideResumo.addText([
-      { text: 'Resumo da Conciliação de Inventários\n', options: { fontSize: 18, bold: true, color: '161616' } },
-      { text: `\n• Acurácia Física (Itens): ${stats.acuraciaItens.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
-      { text: `• Acurácia Financeira Bruta: ${stats.acuraciaValor.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
-      { text: `• Acurácia Financeira Líquida: ${stats.acuraciaLiquida.toFixed(2)}%\n`, options: { fontSize: 14, color: '333333' } },
-      { text: `• Total de SKUs Contados: ${fmtInt(stats.skusContados)}\n`, options: { fontSize: 14, color: '333333' } },
-      { text: `• Valor Congelado (Sistema): ${fmtBRL(stats.valCongelado)}\n`, options: { fontSize: 14, color: '333333' } },
-      { text: `• Diferença Líquida: ${fmtBRL(stats.diffLiquida)}`, options: { fontSize: 14, color: stats.diffLiquida < 0 ? 'e74c3c' : '2ecc71', bold: true } }
-    ], { x: 0.5, y: 1.2, w: '80%', h: 3.5 });
-
-    empresasDisponiveis.forEach(emp => {
-      const slideEmp = pres.addSlide();
-      slideEmp.background = { color: 'FFFFFF' };
-
-      slideEmp.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: '161616' } });
-      slideEmp.addText(`PERFORMANCE ALMOXARIFADO - ${emp.toUpperCase()}`, { 
-        x: 0.2, y: 0.1, w: '90%', h: 0.6, color: 'f58220', fontSize: 20, bold: true, fontFace: 'Arial' 
-      });
-
-      const dadosEmp = dfInv.filter(r => r.empresa_nome === emp || r.unidade === emp);
-      const valCongeladoEmp = dadosEmp.reduce((s, r) => s + (r.saldo_anterior_val || r.valor_congelado || r.val_congelado || r.saldo_anterior || r.vl_saldo_anterior || 0), 0);
-      const skusEmp = new Set(dadosEmp.map(r => r.codigo_produto).filter(Boolean)).size;
-
-      const valSobrasEmp = dadosEmp.filter(r => (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0) > 0).reduce((s, r) => s + (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0), 0);
-      const valPerdasEmp = dadosEmp.filter(r => (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0) < 0).reduce((s, r) => s + (r.diferenca_val ?? r.val_diferenca ?? r.diff_val ?? 0), 0);
-      const diffLiquidaEmp = valSobrasEmp + valPerdasEmp;
-
-      slideEmp.addText('INDICADORES DE FECHAMENTO', { x: 0.5, y: 1.2, w: 4, h: 0.5, color: '161616', fontSize: 16, bold: true });
-      
-      slideEmp.addText(`Unidade Analisada: ${emp}`, { x: 0.5, y: 1.8, w: 8, color: '555555', fontSize: 14, bold: true });
-      slideEmp.addText(`Total de SKUs: ${fmtInt(skusEmp)}`, { x: 0.5, y: 2.2, w: 4, color: '333333', fontSize: 14 });
-      slideEmp.addText(`Valor do Estoque (Congelado): ${fmtBRL(valCongeladoEmp)}`, { x: 0.5, y: 2.6, w: 6, color: '333333', fontSize: 14 });
-      
-      slideEmp.addText(`Sobras (Entradas Físicas): ${fmtBRL(valSobrasEmp)}`, { x: 0.5, y: 3.2, w: 6, color: '2ecc71', fontSize: 14, bold: true });
-      slideEmp.addText(`Perdas (Consumo/Divergência): ${fmtBRL(valPerdasEmp)}`, { x: 0.5, y: 3.6, w: 6, color: 'e74c3c', fontSize: 14, bold: true });
-      
-      slideEmp.addShape(pres.shapes.LINE, { x: 0.5, y: 4.0, w: 8, h: 0, line: { color: 'E0E0E0', width: 1 } });
-      
-      slideEmp.addText(`Resultado Líquido do Inventário: ${fmtBRL(diffLiquidaEmp)}`, { 
-        x: 0.5, y: 4.2, w: 8, color: diffLiquidaEmp < 0 ? 'e74c3c' : '2ecc71', fontSize: 16, bold: true 
-      });
-    });
-
-    const nomeArquivo = `Apresentacao_Inventarios_${mesClicado ? mesClicado.replace('/','-' ) : 'Geral'}.pptx`;
-    pres.writeFile({ fileName: nomeArquivo });
-  }, [stats, empresasDisponiveis, dfInv, mesClicado]);
 
   const toggleInv = useCallback((emp, uid, checked) => setActiveIds((prev) => ({ ...prev, [`${emp}||${uid}`]: checked })), [])
   const toggleAllEmp = useCallback((emp, ids, selectAll) => { setActiveIds((prev) => { const next = { ...prev }; for (const uid of ids) next[`${emp}||${uid}`] = selectAll; return next }) }, [])
@@ -1371,10 +1239,10 @@ export default function PainelInventarios({ data = [] }) {
     { key: 'empresa', label: 'Empresa', align: 'left', sticky: true },
     { key: 'rotativos', label: 'Inventários Rotativos', align: 'right' },
     { key: 'geral', label: 'Inventários Geral', align: 'right' },
-    { key: 'total', label: 'Total Inventários', align: 'right', isTotalCol: true },
+    { key: 'total', label: 'Total Inventários', align: 'right' },
     { key: 'qtdeSkus', label: 'Qtde SKUs', align: 'right' },
     { key: 'valor', label: 'Valor (R$)', align: 'right' },
-    { key: 'acuraciaMedia', label: 'Acurácia média', align: 'right' },
+    { key: 'acuraciaMedia', label: 'Acurácia média', align: 'right', isTotalCol: true },
   ]
 
   const renderTabelaEmpresaResumo = () => (
@@ -1435,7 +1303,7 @@ export default function PainelInventarios({ data = [] }) {
               <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
                 {fmtInt(row.geral)}
               </td>
-              <td className="whitespace-nowrap bg-[#f58220]/10 px-3.5 py-2.5 text-right font-mono font-bold text-[#f58220]">
+              <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono font-bold text-[#f58220]">
                 {fmtInt(row.total)}
               </td>
               <td className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-white">
@@ -1445,7 +1313,7 @@ export default function PainelInventarios({ data = [] }) {
                 {fmtBRLInt(row.valor)}
               </td>
               <td
-                className="whitespace-nowrap px-3.5 py-2.5 text-right font-mono font-bold"
+                className="whitespace-nowrap bg-[#f58220]/10 px-3.5 py-2.5 text-right font-mono font-bold"
                 style={{ color: row.acuraciaMedia != null ? getCor(row.acuraciaMedia) : '#8c9ba5' }}
               >
                 {row.acuraciaMedia != null
@@ -1470,7 +1338,7 @@ export default function PainelInventarios({ data = [] }) {
             <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
               {fmtInt(totaisEmpresaResumo.geral)}
             </td>
-            <td className="whitespace-nowrap border-t-2 border-[#f58220] bg-[#361e0f] px-3.5 py-3 text-right font-mono text-[#ff9638]">
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-[#ff9638]">
               {fmtInt(totaisEmpresaResumo.total)}
             </td>
             <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
@@ -1479,7 +1347,7 @@ export default function PainelInventarios({ data = [] }) {
             <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
               {fmtBRLInt(totaisEmpresaResumo.valor)}
             </td>
-            <td className="whitespace-nowrap border-t-2 border-[#f58220] px-3.5 py-3 text-right font-mono text-orange-100">
+            <td className="whitespace-nowrap border-t-2 border-[#f58220] bg-[#361e0f] px-3.5 py-3 text-right font-mono text-orange-100">
               {totaisEmpresaResumo.acuraciaMedia != null
                 ? `${totaisEmpresaResumo.acuraciaMedia.toFixed(2).replace('.', ',')}%`
                 : '—'}
@@ -1529,21 +1397,6 @@ export default function PainelInventarios({ data = [] }) {
             <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <h2 className="text-white text-sm font-bold tracking-wider uppercase">GESTÃO E FECHAMENTO EXECUTIVO DE INVENTÁRIOS — {periodoMesLabel}</h2>
-        </div>
-        
-        <div className="flex items-center gap-2 bg-[#161616] border border-[#2A2A2A] rounded-xl p-1 shadow-inner">
-           <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#1a2e22] text-[#2ecc71] border border-[#2ecc71]/40 hover:bg-[#203a2b] transition-all flex items-center gap-1.5 shadow-sm">
-             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Excel
-           </button>
-           <button onClick={handleExportPDF} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1616] text-[#e74c3c] border border-[#e74c3c]/40 hover:bg-[#3a1c1c] transition-all flex items-center gap-1.5 shadow-sm">
-             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>PDF
-           </button>
-           <button onClick={handleExportWord} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#162432] text-[#3498db] border border-[#3498db]/40 hover:bg-[#1c2e40] transition-all flex items-center gap-1.5 shadow-sm">
-             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>Word
-           </button>
-           <button onClick={handleExportPPTX} className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[#2a1b16] text-[#f58220] border border-[#f58220]/40 hover:bg-[#3a251c] transition-all flex items-center gap-1.5 shadow-sm ml-1 border-l-2 border-l-[#f58220]">
-             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" /></svg>PPTX
-           </button>
         </div>
       </div>
 
@@ -2087,11 +1940,8 @@ export default function PainelInventarios({ data = [] }) {
             </div>
             <div>
               <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
-                Resumo Anual por Empresa — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
+                Resumo Anual de Inventário por Empresa — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
               </h3>
-              <p className="text-[11px] text-[#8c9ba5] mt-0.5">
-                Consolidado anual pelo filtro de Ano (independente do mês selecionado). Clique nos cabeçalhos para ordenar.
-              </p>
             </div>
           </div>
 
@@ -2160,14 +2010,13 @@ export default function PainelInventarios({ data = [] }) {
             <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
               {periodoAnoLabel}
             </span>
-            <span className="text-[10px] text-[#8c9ba5]">Independentes do mês do gráfico mestre</span>
-          </div>
+</div>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
             {/* 1 Total inventários */}
-            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden group hover:border-accent/40 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent opacity-60" />
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3a3a3a] transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3a3a3a] to-transparent opacity-60" />
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[#262014] border border-[#f58220]/30 flex items-center justify-center text-accent shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] flex items-center justify-center text-[#8c9ba5] shrink-0">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                 </div>
                 <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Total inventários</span>
@@ -2177,67 +2026,65 @@ export default function PainelInventarios({ data = [] }) {
             </div>
 
             {/* 2 Geral */}
-            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3498db]/40 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3498db]/40 to-transparent opacity-60" />
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3a3a3a] transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3a3a3a] to-transparent opacity-60" />
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[#0f1a24] border border-[#3498db]/30 flex items-center justify-center text-[#3498db] shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] flex items-center justify-center text-[#8c9ba5] shrink-0">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6" /></svg>
                 </div>
                 <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Inventários geral</span>
               </div>
-              <div className="font-mono text-xl sm:text-2xl font-black text-[#3498db] tracking-tight">{fmtInt(totaisEmpresaResumo.geral)}</div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-white tracking-tight">{fmtInt(totaisEmpresaResumo.geral)}</div>
               <div className="text-[10px] text-[#666] mt-1">Tipo geral · ano</div>
             </div>
 
             {/* 3 Rotativo */}
-            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#9b59b6]/40 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#9b59b6]/40 to-transparent opacity-60" />
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3a3a3a] transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3a3a3a] to-transparent opacity-60" />
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[#1a1220] border border-[#9b59b6]/30 flex items-center justify-center text-[#9b59b6] shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] flex items-center justify-center text-[#8c9ba5] shrink-0">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 </div>
                 <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Inventários rotativos</span>
               </div>
-              <div className="font-mono text-xl sm:text-2xl font-black text-[#9b59b6] tracking-tight">{fmtInt(totaisEmpresaResumo.rotativos)}</div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-white tracking-tight">{fmtInt(totaisEmpresaResumo.rotativos)}</div>
               <div className="text-[10px] text-[#666] mt-1">Tipo rotativo · ano</div>
             </div>
 
             {/* 4 Qtde SKUs / linhas */}
-            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#1abc9c]/40 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#1abc9c]/40 to-transparent opacity-60" />
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3a3a3a] transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3a3a3a] to-transparent opacity-60" />
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[#0f1e1a] border border-[#1abc9c]/30 flex items-center justify-center text-[#1abc9c] shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] flex items-center justify-center text-[#8c9ba5] shrink-0">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
                 </div>
                 <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Qtde SKUs</span>
               </div>
-              <div className="font-mono text-xl sm:text-2xl font-black text-[#1abc9c] tracking-tight">{fmtInt(totaisEmpresaResumo.qtdeSkus)}</div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-white tracking-tight">{fmtInt(totaisEmpresaResumo.qtdeSkus)}</div>
               <div className="text-[10px] text-[#666] mt-1">Linhas contadas · ano</div>
             </div>
 
             {/* 5 Valor total */}
-            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden col-span-2 md:col-span-3 xl:col-span-1 hover:border-[#2ecc71]/40 transition-all">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#2ecc71]/40 to-transparent opacity-60" />
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden col-span-2 md:col-span-3 xl:col-span-1 hover:border-[#3a3a3a] transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3a3a3a] to-transparent opacity-60" />
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[#0f1e14] border border-[#2ecc71]/30 flex items-center justify-center text-[#2ecc71] shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] border border-[#2A2A2A] flex items-center justify-center text-[#8c9ba5] shrink-0">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </div>
                 <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Valor total</span>
               </div>
-              <div className="font-mono text-lg sm:text-xl font-black text-[#2ecc71] tracking-tight leading-snug">{fmtBRLInt(totaisEmpresaResumo.valor)}</div>
+              <div className="font-mono text-lg sm:text-xl font-black text-white tracking-tight leading-snug">{fmtBRLInt(totaisEmpresaResumo.valor)}</div>
               <div className="text-[10px] text-[#666] mt-1">Saldo anterior val · ano</div>
             </div>
           </div>
-
-          {/* Medidores de acurácia ANUAL (mesmo critério do mensal, consolidado do ano) */}
+{/* Medidores de acurácia ANUAL (mesmo critério do mensal, consolidado do ano) */}
           <div className="mt-4 pt-3 border-t border-[#2A2A2A]">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase">Acurácia anual</span>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
                 {periodoAnoLabel}
               </span>
-              <span className="text-[10px] text-[#8c9ba5]">Consolidado de todas as linhas do ano</span>
-            </div>
+</div>
             {acuraciaAnual.hasData ? (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {[
@@ -2357,7 +2204,7 @@ export default function PainelInventarios({ data = [] }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
                 <h2 className="text-base font-bold text-white uppercase tracking-wider">
-                  Resumo Anual por Empresa — {periodoAnoLabel} (Tela Cheia)
+                  Resumo Anual de Inventário por Empresa — {periodoAnoLabel} (Tela Cheia)
                 </h2>
                 <span className="text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
                   {linhasEmpresaExibidas.length} empresas
