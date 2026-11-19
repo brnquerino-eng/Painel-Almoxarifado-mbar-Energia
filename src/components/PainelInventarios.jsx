@@ -447,7 +447,7 @@ export default function PainelInventarios({ data = [] }) {
 
   // Consolidação da Tabela Resumo por Empresa vinculada SOMENTE ao Ano (dfMaster, sem filtro mensal)
   // Empresas FIXAS: sempre listadas; sem inventário no ano => zera métricas.
-  // Qtde Linhas = soma de todas as linhas contadas nos inventários do ano
+  // Qtde SKUs (rótulo) = soma de todas as linhas contadas nos inventários do ano
   // Valor = soma de saldo_anterior_val (valor congelado) de cada linha
   const { linhasEmpresaResumo, totaisEmpresaResumo } = useMemo(() => {
     const emptyTotais = { rotativos: 0, geral: 0, total: 0, qtdeSkus: 0, valor: 0, acuraciaMedia: null }
@@ -592,7 +592,7 @@ export default function PainelInventarios({ data = [] }) {
       'Inventários Rotativos': r.rotativos,
       'Inventários Geral': r.geral,
       'Total Inventários': r.total,
-      'Qtde Linhas': r.qtdeSkus,
+      'Qtde SKUs': r.qtdeSkus,
       'Valor (R$)': Math.round(r.valor),
       'Acurácia média (%)': r.acuraciaMedia != null ? Number(r.acuraciaMedia.toFixed(2)) : null,
     }))
@@ -601,7 +601,7 @@ export default function PainelInventarios({ data = [] }) {
       'Inventários Rotativos': totaisEmpresaResumo.rotativos,
       'Inventários Geral': totaisEmpresaResumo.geral,
       'Total Inventários': totaisEmpresaResumo.total,
-      'Qtde Linhas': totaisEmpresaResumo.qtdeSkus,
+      'Qtde SKUs': totaisEmpresaResumo.qtdeSkus,
       'Valor (R$)': Math.round(totaisEmpresaResumo.valor),
       'Acurácia média (%)': totaisEmpresaResumo.acuraciaMedia != null ? Number(totaisEmpresaResumo.acuraciaMedia.toFixed(2)) : null,
     })
@@ -1035,7 +1035,7 @@ export default function PainelInventarios({ data = [] }) {
     { key: 'rotativos', label: 'Inventários Rotativos', align: 'right' },
     { key: 'geral', label: 'Inventários Geral', align: 'right' },
     { key: 'total', label: 'Total Inventários', align: 'right', isTotalCol: true },
-    { key: 'qtdeSkus', label: 'Qtde Linhas', align: 'right' },
+    { key: 'qtdeSkus', label: 'Qtde SKUs', align: 'right' },
     { key: 'valor', label: 'Valor (R$)', align: 'right' },
     { key: 'acuraciaMedia', label: 'Acurácia média', align: 'right' },
   ]
@@ -1803,6 +1803,83 @@ export default function PainelInventarios({ data = [] }) {
               </svg>
               <span>Exportar Excel</span>
             </button>
+          </div>
+        </div>
+
+        {/* KPIs ANUAIS — mesmo escopo da tabela (filtro de Ano) */}
+        <div className="px-4 sm:px-5 pt-4 pb-2 bg-[#121212] border-b border-[#2A2A2A]">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase">Indicadores anuais</span>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
+              {periodoAnoLabel}
+            </span>
+            <span className="text-[10px] text-[#8c9ba5]">Independentes do mês do gráfico mestre</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            {/* 1 Total inventários */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden group hover:border-accent/40 transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent opacity-60" />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-[#262014] border border-[#f58220]/30 flex items-center justify-center text-accent shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Total inventários</span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-white tracking-tight">{fmtInt(totaisEmpresaResumo.total)}</div>
+              <div className="text-[10px] text-[#666] mt-1">No ano · todas as empresas</div>
+            </div>
+
+            {/* 2 Geral */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#3498db]/40 transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#3498db]/40 to-transparent opacity-60" />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-[#0f1a24] border border-[#3498db]/30 flex items-center justify-center text-[#3498db] shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6" /></svg>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Inventários geral</span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-[#3498db] tracking-tight">{fmtInt(totaisEmpresaResumo.geral)}</div>
+              <div className="text-[10px] text-[#666] mt-1">Tipo geral · ano</div>
+            </div>
+
+            {/* 3 Rotativo */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#9b59b6]/40 transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#9b59b6]/40 to-transparent opacity-60" />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-[#1a1220] border border-[#9b59b6]/30 flex items-center justify-center text-[#9b59b6] shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Inventários rotativos</span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-[#9b59b6] tracking-tight">{fmtInt(totaisEmpresaResumo.rotativos)}</div>
+              <div className="text-[10px] text-[#666] mt-1">Tipo rotativo · ano</div>
+            </div>
+
+            {/* 4 Qtde SKUs / linhas */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden hover:border-[#1abc9c]/40 transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#1abc9c]/40 to-transparent opacity-60" />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-[#0f1e1a] border border-[#1abc9c]/30 flex items-center justify-center text-[#1abc9c] shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Qtde SKUs</span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-[#1abc9c] tracking-tight">{fmtInt(totaisEmpresaResumo.qtdeSkus)}</div>
+              <div className="text-[10px] text-[#666] mt-1">Linhas contadas · ano</div>
+            </div>
+
+            {/* 5 Valor total */}
+            <div className="rounded-xl border border-[#2A2A2A] bg-[#0c0c0c] p-3.5 sm:p-4 shadow-inner relative overflow-hidden col-span-2 md:col-span-3 xl:col-span-1 hover:border-[#2ecc71]/40 transition-all">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#2ecc71]/40 to-transparent opacity-60" />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-[#0f1e14] border border-[#2ecc71]/30 flex items-center justify-center text-[#2ecc71] shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.14em] text-[#8c9ba5] uppercase leading-tight">Valor total</span>
+              </div>
+              <div className="font-mono text-lg sm:text-xl font-black text-[#2ecc71] tracking-tight leading-snug">{fmtBRLInt(totaisEmpresaResumo.valor)}</div>
+              <div className="text-[10px] text-[#666] mt-1">Saldo anterior val · ano</div>
+            </div>
           </div>
         </div>
 
