@@ -39,7 +39,10 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
   const loading = loadingEstoque || loadingInventario || buscando
   const progress = Math.round((progressEstoque * 0.7 + progressInventario * 0.3)) || 0
 
-  // Filtra Estoque e Inventário conforme a abrangência do perfil (Admin/Gerente = tudo; Coordenador = Regiões; Supervisor = Unidades)
+  // Filtra Estoque e Inventário conforme a abrangência do perfil:
+  // - Admin / Gerente: acesso total
+  // - Coordenador: Regiões selecionadas + filtro granular pelas Unidades marcadas dentro delas
+  // - Supervisor: apenas Unidades permitidas
   const { estoqueFiltrado, inventarioFiltrado, unidadesPermitidasSet } = useMemo(() => {
     if (isAdmin || cargoAtual === 'gerente') {
       return {
@@ -51,27 +54,29 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
 
     if (cargoAtual === 'coordenador') {
       const regioesSet = new Set(perfilAcesso?.regioes_permitidas || [])
-      const unidadesDaRegiao = new Set()
+      const unidadesEspecificas = perfilAcesso?.unidades_permitidas || []
+      const temFiltroUnidade = unidadesEspecificas.length > 0
+      const unidadesSet = new Set(unidadesEspecificas)
+      const unidadesLiberadas = new Set()
 
       const est = estoqueData.filter((row) => {
         const reg = (row['Região'] || row['regiao'] || '').toString().trim()
         const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-        if (regioesSet.has(reg)) {
-          if (uni) unidadesDaRegiao.add(uni)
-          return true
-        }
-        return false
+        if (!regioesSet.has(reg)) return false
+        if (temFiltroUnidade && !unidadesSet.has(uni)) return false
+        if (uni) unidadesLiberadas.add(uni)
+        return true
       })
 
       const inv = inventarioData.filter((row) => {
         const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-        return unidadesDaRegiao.has(uni)
+        return unidadesLiberadas.has(uni)
       })
 
       return {
         estoqueFiltrado: est,
         inventarioFiltrado: inv,
-        unidadesPermitidasSet: unidadesDaRegiao,
+        unidadesPermitidasSet: unidadesLiberadas,
       }
     }
 
@@ -148,6 +153,13 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
     )
   }
 
+  const resumoEscopoCoordenador = () => {
+    const regs = perfilAcesso?.regioes_permitidas || []
+    const unis = perfilAcesso?.unidades_permitidas || []
+    if (regs.length === 0) return 'Nenhuma região configurada'
+    return `Regiões: ${regs.join(', ')} (${unis.length} unidade(s) ativa(s))`
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
       {/* 🚀 Sidebar Executiva e Controle de Navegação */}
@@ -182,7 +194,7 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
               </span>
               <span className="font-mono text-[#f58220]">
                 {cargoAtual === 'coordenador'
-                  ? `Regiões: ${(perfilAcesso?.regioes_permitidas || []).join(', ') || 'Nenhuma configurada'}`
+                  ? resumoEscopoCoordenador()
                   : `${unidadesPermitidasSet?.size || 0} unidade(s) liberada(s)`}
               </span>
             </div>

@@ -17,7 +17,7 @@ const CARGOS = [
   {
     id: 'coordenador',
     label: 'Coordenador',
-    descricao: 'Acesso filtrado por Região operacional selecionada',
+    descricao: 'Seleção em cascata: escolha a Região e depois as Unidades dela',
     badgeClass: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
   },
   {
@@ -31,6 +31,8 @@ const CARGOS = [
 export default function ControleAcessos({ estoqueData = [], inventarioData = [], currentUserId }) {
   const [perfis, setPerfis] = useState([]);
   const [loadingPerfis, setLoadingPerfis] = useState(true);
+  const [estruturaServer, setEstruturaServer] = useState([]);
+  const [loadingEstrutura, setLoadingEstrutura] = useState(true);
   const [erro, setErro] = useState(null);
   const [sucesso, setSucesso] = useState(null);
   const [buscaUsuario, setBuscaUsuario] = useState('');
@@ -38,11 +40,54 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   const [salvando, setSalvando] = useState(false);
   const [filtroUnidade, setFiltroUnidade] = useState('');
 
-  // Extrai automaticamente todas as Regiões e Unidades únicas da base carregada
-  const { regioesDisponiveis, unidadesDisponiveis, mapaUnidadeRegiao } = useMemo(() => {
+  // Estados do Painel de Novo Usuário
+  const [mostrarFormNovo, setMostrarFormNovo] = useState(false);
+  const [novoNome, setNovoNome] = useState('');
+  const [novoEmail, setNovoEmail] = useState('');
+  const [novaSenha, setNovaSenha] = useState('');
+  const [mostrarNovaSenha, setMostrarNovaSenha] = useState(false);
+  const [novoCargo, setNovoCargo] = useState('supervisor');
+  const [novasRegioes, setNovasRegioes] = useState([]);
+  const [novasUnidades, setNovasUnidades] = useState([]);
+  const [filtroUnidadeNovo, setFiltroUnidadeNovo] = useState('');
+  const [criandoUsuario, setCriandoUsuario] = useState(false);
+
+  // Estados para Redefinir Senha e Excluir Usuário
+  const [senhaRedefinida, setSenhaRedefinida] = useState('');
+  const [alterandoSenha, setAlterandoSenha] = useState(false);
+  const [confirmarExclusao, setConfirmarExclusao] = useState(false);
+  const [excluindoUsuario, setExcluindoUsuario] = useState(false);
+
+  // Busca instantânea da estrutura organizacional (Regiões + Unidades) direto do Supabase (somente Admin)
+  const carregarEstruturaOrganizacional = async () => {
+    setLoadingEstrutura(true);
+    const { data, error } = await supabase.rpc('admin_listar_estrutura_organizacional');
+    if (!error && Array.isArray(data)) {
+      setEstruturaServer(data);
+    }
+    setLoadingEstrutura(false);
+  };
+
+  // Consolida Regiões, Unidades e agrupamento por Região
+  const {
+    regioesDisponiveis,
+    unidadesDisponiveis,
+    mapaUnidadeRegiao,
+    unidadesAgrupadasPorRegiao,
+  } = useMemo(() => {
     const regSet = new Set();
     const uniSet = new Set();
     const mapa = {};
+
+    estruturaServer.forEach((item) => {
+      const reg = (item?.regiao || '').toString().trim();
+      const uni = (item?.unidade || '').toString().trim();
+      if (reg && reg !== 'Sem Região') regSet.add(reg);
+      if (uni) {
+        uniSet.add(uni);
+        mapa[uni] = reg || 'Sem Região';
+      }
+    });
 
     estoqueData.forEach((row) => {
       const reg = (row['Região'] || row['regiao'] || '').toString().trim();
@@ -50,24 +95,53 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       if (reg) regSet.add(reg);
       if (uni) {
         uniSet.add(uni);
-        if (reg && !mapa[uni]) mapa[uni] = reg;
+        if (reg && (!mapa[uni] || mapa[uni] === 'Sem Região')) {
+          mapa[uni] = reg;
+        } else if (!mapa[uni]) {
+          mapa[uni] = 'Sem Região';
+        }
       }
     });
 
     inventarioData.forEach((row) => {
       const uni = (row['unidade_almoxarifado'] || '').toString().trim();
-      if (uni) uniSet.add(uni);
+      if (uni) {
+        uniSet.add(uni);
+        if (!mapa[uni]) mapa[uni] = 'Sem Região';
+      }
     });
 
+    const regioesOrdenadas = Array.from(regSet).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const unidadesOrdenadas = Array.from(uniSet).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    const grupos = {};
+    unidadesOrdenadas.forEach((uni) => {
+      const reg = mapa[uni] || 'Sem Região';
+      if (!grupos[reg]) grupos[reg] = [];
+      grupos[reg].push(uni);
+    });
+
+    const gruposOrdenados = Object.keys(grupos)
+      .sort((a, b) => {
+        if (a === 'Sem Região') return 1;
+        if (b === 'Sem Região') return -1;
+        return a.localeCompare(b, 'pt-BR');
+      })
+      .map((reg) => ({
+        regiao: reg,
+        unidades: grupos[reg],
+      }));
+
     return {
-      regioesDisponiveis: Array.from(regSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
-      unidadesDisponiveis: Array.from(uniSet).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      regioesDisponiveis: regioesOrdenadas,
+      unidadesDisponiveis: unidadesOrdenadas,
       mapaUnidadeRegiao: mapa,
+      unidadesAgrupadasPorRegiao: gruposOrdenados,
     };
-  }, [estoqueData, inventarioData]);
+  }, [estruturaServer, estoqueData, inventarioData]);
 
   // Carrega todos os perfis da tabela perfis_acesso
-  const carregarPerfis = async () => {
+  const carregarPerfis = async (selecionarIdOpcional = null) => {
     setLoadingPerfis(true);
     setErro(null);
     const { data, error } = await supabase
@@ -80,7 +154,9 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     } else {
       const lista = data || [];
       setPerfis(lista);
-      if (!usuarioSelecionadoId && lista.length > 0) {
+      if (selecionarIdOpcional) {
+        setUsuarioSelecionadoId(selecionarIdOpcional);
+      } else if ((!usuarioSelecionadoId || !lista.some((p) => p.user_id === usuarioSelecionadoId)) && lista.length > 0) {
         setUsuarioSelecionadoId(lista[0].user_id);
       }
     }
@@ -88,6 +164,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   };
 
   useEffect(() => {
+    carregarEstruturaOrganizacional();
     carregarPerfis();
   }, []);
 
@@ -107,15 +184,83 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     );
   }, [perfis, buscaUsuario]);
 
-  const unidadesFiltradas = useMemo(() => {
+  // Grupos visíveis na Edição (Coordenador só vê grupos das regiões selecionadas; Supervisor vê todos)
+  const gruposBaseEdicao = useMemo(() => {
+    if (!usuarioAtual) return [];
+    if (usuarioAtual.cargo === 'coordenador') {
+      const regSelecionadas = new Set(usuarioAtual.regioes_permitidas || []);
+      return unidadesAgrupadasPorRegiao.filter((g) => regSelecionadas.has(g.regiao));
+    }
+    return unidadesAgrupadasPorRegiao;
+  }, [usuarioAtual, unidadesAgrupadasPorRegiao]);
+
+  const unidadesDisponiveisNoEscopoEdicao = useMemo(
+    () => gruposBaseEdicao.flatMap((g) => g.unidades),
+    [gruposBaseEdicao]
+  );
+
+  const gruposUnidadesEdicao = useMemo(() => {
     const q = filtroUnidade.trim().toLowerCase();
-    if (!q) return unidadesDisponiveis;
-    return unidadesDisponiveis.filter(
-      (u) =>
-        u.toLowerCase().includes(q) ||
-        (mapaUnidadeRegiao[u] || '').toLowerCase().includes(q)
-    );
-  }, [unidadesDisponiveis, filtroUnidade, mapaUnidadeRegiao]);
+    if (!q) return gruposBaseEdicao;
+    return gruposBaseEdicao
+      .map((grupo) => ({
+        regiao: grupo.regiao,
+        unidades: grupo.unidades.filter(
+          (u) => u.toLowerCase().includes(q) || grupo.regiao.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((grupo) => grupo.unidades.length > 0);
+  }, [gruposBaseEdicao, filtroUnidade]);
+
+  // Grupos visíveis no Cadastro Novo (Coordenador só vê grupos das regiões selecionadas; Supervisor vê todos)
+  const gruposBaseNovo = useMemo(() => {
+    if (novoCargo === 'coordenador') {
+      const regSelecionadas = new Set(novasRegioes);
+      return unidadesAgrupadasPorRegiao.filter((g) => regSelecionadas.has(g.regiao));
+    }
+    return unidadesAgrupadasPorRegiao;
+  }, [novoCargo, novasRegioes, unidadesAgrupadasPorRegiao]);
+
+  const unidadesDisponiveisNoEscopoNovo = useMemo(
+    () => gruposBaseNovo.flatMap((g) => g.unidades),
+    [gruposBaseNovo]
+  );
+
+  const gruposUnidadesNovo = useMemo(() => {
+    const q = filtroUnidadeNovo.trim().toLowerCase();
+    if (!q) return gruposBaseNovo;
+    return gruposBaseNovo
+      .map((grupo) => ({
+        regiao: grupo.regiao,
+        unidades: grupo.unidades.filter(
+          (u) => u.toLowerCase().includes(q) || grupo.regiao.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((grupo) => grupo.unidades.length > 0);
+  }, [gruposBaseNovo, filtroUnidadeNovo]);
+
+  const resetarFormularioNovoUsuario = () => {
+    setNovoNome('');
+    setNovoEmail('');
+    setNovaSenha('');
+    setMostrarNovaSenha(false);
+    setNovoCargo('supervisor');
+    setNovasRegioes([]);
+    setNovasUnidades([]);
+    setFiltroUnidadeNovo('');
+  };
+
+  const handleToggleFormNovo = () => {
+    setMostrarFormNovo((prev) => {
+      const proximoEstado = !prev;
+      if (proximoEstado) {
+        resetarFormularioNovoUsuario();
+      }
+      return proximoEstado;
+    });
+    setErro(null);
+    setSucesso(null);
+  };
 
   // Atualiza estado local do perfil em edição
   const atualizarCampoLocal = (campo, valor) => {
@@ -126,12 +271,120 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     );
   };
 
+  // Toggle em cascata da Região (Coordenador - Edição):
+  // Ao marcar uma região, já seleciona todas as unidades dela; ao desmarcar, remove as unidades dela
+  const toggleRegiaoCoordenadorEdicao = (regiao) => {
+    if (!usuarioAtual) return;
+    const regioesAtuais = Array.isArray(usuarioAtual.regioes_permitidas)
+      ? usuarioAtual.regioes_permitidas
+      : [];
+    const unidadesAtuais = new Set(usuarioAtual.unidades_permitidas || []);
+    const unidadesDaRegiao =
+      unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || [];
+
+    const jaExiste = regioesAtuais.includes(regiao);
+    let novasRegs;
+
+    if (jaExiste) {
+      novasRegs = regioesAtuais.filter((r) => r !== regiao);
+      unidadesDaRegiao.forEach((u) => unidadesAtuais.delete(u));
+    } else {
+      novasRegs = [...regioesAtuais, regiao];
+      unidadesDaRegiao.forEach((u) => unidadesAtuais.add(u));
+    }
+
+    setSucesso(null);
+    setPerfis((prev) =>
+      prev.map((p) =>
+        p.user_id === usuarioAtual.user_id
+          ? {
+              ...p,
+              regioes_permitidas: novasRegs,
+              unidades_permitidas: Array.from(unidadesAtuais),
+            }
+          : p
+      )
+    );
+  };
+
+  // Toggle em cascata da Região (Coordenador - Cadastro Novo)
+  const toggleRegiaoCoordenadorNovo = (regiao) => {
+    const unidadesDaRegiao =
+      unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || [];
+    const jaExiste = novasRegioes.includes(regiao);
+
+    if (jaExiste) {
+      setNovasRegioes((prev) => prev.filter((r) => r !== regiao));
+      setNovasUnidades((prev) => prev.filter((u) => !unidadesDaRegiao.includes(u)));
+    } else {
+      setNovasRegioes((prev) => [...prev, regiao]);
+      setNovasUnidades((prev) => Array.from(new Set([...prev, ...unidadesDaRegiao])));
+    }
+  };
+
   const toggleItemArray = (campo, item) => {
     if (!usuarioAtual) return;
     const listaAtual = Array.isArray(usuarioAtual[campo]) ? usuarioAtual[campo] : [];
     const existe = listaAtual.includes(item);
     const novaLista = existe ? listaAtual.filter((x) => x !== item) : [...listaAtual, item];
     atualizarCampoLocal(campo, novaLista);
+  };
+
+  const toggleGrupoUnidadesEdicao = (unidadesDoGrupo) => {
+    if (!usuarioAtual) return;
+    const atuais = new Set(usuarioAtual.unidades_permitidas || []);
+    const todasMarcadas = unidadesDoGrupo.every((u) => atuais.has(u));
+    if (todasMarcadas) {
+      unidadesDoGrupo.forEach((u) => atuais.delete(u));
+    } else {
+      unidadesDoGrupo.forEach((u) => atuais.add(u));
+    }
+    atualizarCampoLocal('unidades_permitidas', Array.from(atuais));
+  };
+
+  const toggleGrupoUnidadesNovo = (unidadesDoGrupo) => {
+    setNovasUnidades((prev) => {
+      const atuais = new Set(prev);
+      const todasMarcadas = unidadesDoGrupo.every((u) => atuais.has(u));
+      if (todasMarcadas) {
+        unidadesDoGrupo.forEach((u) => atuais.delete(u));
+      } else {
+        unidadesDoGrupo.forEach((u) => atuais.add(u));
+      }
+      return Array.from(atuais);
+    });
+  };
+
+  const selecionarTodasRegioesEdicao = () => {
+    if (!usuarioAtual) return;
+    setSucesso(null);
+    setPerfis((prev) =>
+      prev.map((p) =>
+        p.user_id === usuarioAtual.user_id
+          ? {
+              ...p,
+              regioes_permitidas: [...regioesDisponiveis],
+              unidades_permitidas: [...unidadesDisponiveis],
+            }
+          : p
+      )
+    );
+  };
+
+  const limparRegioesEdicao = () => {
+    if (!usuarioAtual) return;
+    setSucesso(null);
+    setPerfis((prev) =>
+      prev.map((p) =>
+        p.user_id === usuarioAtual.user_id
+          ? {
+              ...p,
+              regioes_permitidas: [],
+              unidades_permitidas: [],
+            }
+          : p
+      )
+    );
   };
 
   const selecionarTodos = (campo, todosItens) => {
@@ -142,22 +395,75 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     atualizarCampoLocal(campo, []);
   };
 
+  // Criar novo usuário direto pelo painel via RPC admin_criar_usuario
+  const handleCriarNovoUsuario = async (e) => {
+    e.preventDefault();
+    setErro(null);
+    setSucesso(null);
+
+    if (!novoEmail.trim()) {
+      setErro('Informe o e-mail do novo usuário.');
+      return;
+    }
+    if (novaSenha.length < 6) {
+      setErro('A senha inicial deve ter no mínimo 6 caracteres.');
+      return;
+    }
+
+    // Garante que apenas unidades pertencentes às regiões selecionadas sejam salvas para Coordenador
+    const unidadesValidadasNovo =
+      novoCargo === 'coordenador'
+        ? novasUnidades.filter((u) => novasRegioes.includes(mapaUnidadeRegiao[u]))
+        : novoCargo === 'supervisor'
+        ? novasUnidades
+        : [];
+
+    setCriandoUsuario(true);
+    const { data: novoUserId, error } = await supabase.rpc('admin_criar_usuario', {
+      p_email: novoEmail.trim(),
+      p_senha: novaSenha,
+      p_nome: novoNome.trim() || null,
+      p_cargo: novoCargo,
+      p_regioes: novoCargo === 'coordenador' ? novasRegioes : [],
+      p_unidades: unidadesValidadasNovo,
+    });
+
+    if (error) {
+      setErro(`Erro ao criar usuário: ${error.message}`);
+    } else {
+      setSucesso(`Usuário ${novoEmail.trim().toLowerCase()} criado e configurado com sucesso!`);
+      setMostrarFormNovo(false);
+      resetarFormularioNovoUsuario();
+      await carregarPerfis(novoUserId);
+    }
+    setCriandoUsuario(false);
+  };
+
+  // Salvar alterações de cargo/regiões/unidades do usuário selecionado
   const handleSalvarPermissoes = async () => {
     if (!usuarioAtual) return;
     setSalvando(true);
     setErro(null);
     setSucesso(null);
 
-    // Garante que o próprio admin principal não se bloqueie por acidente
     const ehProprioAdmin = usuarioAtual.user_id === currentUserId;
+    const regsFinal =
+      usuarioAtual.cargo === 'coordenador' ? usuarioAtual.regioes_permitidas || [] : [];
+    const unisFinal =
+      usuarioAtual.cargo === 'coordenador'
+        ? (usuarioAtual.unidades_permitidas || []).filter((u) =>
+            regsFinal.includes(mapaUnidadeRegiao[u])
+          )
+        : usuarioAtual.cargo === 'supervisor'
+        ? usuarioAtual.unidades_permitidas || []
+        : [];
+
     const payload = {
       nome: usuarioAtual.nome || usuarioAtual.email.split('@')[0],
       cargo: ehProprioAdmin ? 'admin' : usuarioAtual.cargo,
       ativo: ehProprioAdmin ? true : usuarioAtual.ativo,
-      regioes_permitidas:
-        usuarioAtual.cargo === 'coordenador' ? usuarioAtual.regioes_permitidas || [] : [],
-      unidades_permitidas:
-        usuarioAtual.cargo === 'supervisor' ? usuarioAtual.unidades_permitidas || [] : [],
+      regioes_permitidas: regsFinal,
+      unidades_permitidas: unisFinal,
       atualizado_em: new Date().toISOString(),
     };
 
@@ -170,53 +476,142 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       setErro(`Falha ao salvar permissões: ${error.message}`);
     } else {
       setSucesso(`Permissões de ${usuarioAtual.email} atualizadas com sucesso!`);
-      await carregarPerfis();
+      await carregarPerfis(usuarioAtual.user_id);
     }
     setSalvando(false);
   };
 
+  // Redefinir senha do usuário selecionado via RPC admin_alterar_senha_usuario
+  const handleRedefinirSenha = async () => {
+    if (!usuarioAtual) return;
+    if (senhaRedefinida.length < 6) {
+      setErro('A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    setAlterandoSenha(true);
+    setErro(null);
+    setSucesso(null);
+
+    const { error } = await supabase.rpc('admin_alterar_senha_usuario', {
+      p_user_id: usuarioAtual.user_id,
+      p_nova_senha: senhaRedefinida,
+    });
+
+    if (error) {
+      setErro(`Erro ao alterar senha: ${error.message}`);
+    } else {
+      setSucesso(`Senha de ${usuarioAtual.email} alterada com sucesso!`);
+      setSenhaRedefinida('');
+    }
+    setAlterandoSenha(false);
+  };
+
+  // Excluir usuário definitivamente via RPC admin_excluir_usuario
+  const handleExcluirUsuario = async () => {
+    if (!usuarioAtual || usuarioAtual.user_id === currentUserId) return;
+
+    setExcluindoUsuario(true);
+    setErro(null);
+    setSucesso(null);
+
+    const emailExcluido = usuarioAtual.email;
+    const { error } = await supabase.rpc('admin_excluir_usuario', {
+      p_user_id: usuarioAtual.user_id,
+    });
+
+    if (error) {
+      setErro(`Erro ao excluir usuário: ${error.message}`);
+    } else {
+      setSucesso(`Usuário ${emailExcluido} excluído permanentemente.`);
+      setConfirmarExclusao(false);
+      await carregarPerfis();
+    }
+    setExcluindoUsuario(false);
+  };
+
   const getCargoInfo = (cargoId) =>
     CARGOS.find((c) => c.id === cargoId) || CARGOS[3];
+
+  const formatarResumoAbrangencia = (perfil) => {
+    if (perfil.cargo === 'admin' || perfil.cargo === 'gerente') {
+      return 'Abrangência: Todas as unidades';
+    }
+    if (perfil.cargo === 'coordenador') {
+      const qtdReg = (perfil.regioes_permitidas || []).length;
+      const qtdUni = (perfil.unidades_permitidas || []).length;
+      return `Regiões: ${qtdReg} · Unidades ativas: ${qtdUni}`;
+    }
+    return `Unidades: ${(perfil.unidades_permitidas || []).length} selecionada(s)`;
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Cabeçalho da Tela */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#111111] border border-[#2A2A2A] rounded-2xl p-6">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-[#f58220]/15 text-[#f58220] border border-[#f58220]/30">
               Administração
             </span>
             <h2 className="text-xl font-black text-white tracking-tight">
               Controle de Acessos & Abrangência
             </h2>
+            {!loadingEstrutura && unidadesDisponiveis.length > 0 && (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-[#191919] text-gray-300 border border-[#2d2d2d]">
+                {regioesDisponiveis.length} Regiões · {unidadesDisponiveis.length} Unidades
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-400 mt-1.5">
-            Defina a hierarquia (<strong className="text-gray-300">Gerente</strong>,{' '}
+            Cadastre usuários, defina a hierarquia (<strong className="text-gray-300">Gerente</strong>,{' '}
             <strong className="text-gray-300">Coordenador</strong> ou{' '}
-            <strong className="text-gray-300">Supervisor</strong>) e restrinja quais regiões ou usinas cada usuário enxerga.
+            <strong className="text-gray-300">Supervisor</strong>) e controle quais regiões ou usinas cada pessoa enxerga.
           </p>
         </div>
 
-        <button
-          onClick={carregarPerfis}
-          disabled={loadingPerfis}
-          className="px-4 py-2 rounded-xl bg-[#181818] hover:bg-[#222222] border border-[#2E2E2E] text-xs font-bold text-gray-200 transition-all cursor-pointer shrink-0"
-        >
-          {loadingPerfis ? 'Sincronizando...' : 'Recarregar Usuários'}
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={handleToggleFormNovo}
+            className="px-4 py-2.5 rounded-xl bg-[#f58220] hover:bg-[#e07112] text-black text-xs font-black uppercase tracking-wider shadow-[0_0_20px_rgba(245,130,32,0.25)] transition-all cursor-pointer flex items-center gap-2"
+          >
+            <span className="text-base leading-none">{mostrarFormNovo ? '✕' : '+'}</span>
+            <span>{mostrarFormNovo ? 'Fechar Cadastro' : 'Novo Usuário'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              carregarEstruturaOrganizacional();
+              carregarPerfis();
+            }}
+            disabled={loadingPerfis || loadingEstrutura}
+            className="px-4 py-2.5 rounded-xl bg-[#181818] hover:bg-[#222222] border border-[#2E2E2E] text-xs font-bold text-gray-200 transition-all cursor-pointer"
+          >
+            {loadingPerfis || loadingEstrutura ? 'Sincronizando...' : 'Atualizar Lista'}
+          </button>
+        </div>
       </div>
 
       {/* Alertas */}
       {erro && (
-        <div className="bg-red-950/50 border border-red-500/50 text-red-200 text-xs rounded-xl px-4 py-3">
-          {erro}
+        <div className="bg-red-950/50 border border-red-500/50 text-red-200 text-xs rounded-xl px-4 py-3 flex items-center justify-between">
+          <span>{erro}</span>
+          <button
+            type="button"
+            onClick={() => setErro(null)}
+            className="text-red-400 hover:text-white font-bold ml-4 cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
       {sucesso && (
         <div className="bg-emerald-950/50 border border-emerald-500/50 text-emerald-200 text-xs rounded-xl px-4 py-3 flex items-center justify-between">
           <span>{sucesso}</span>
           <button
+            type="button"
             onClick={() => setSucesso(null)}
             className="text-emerald-400 hover:text-white font-bold ml-4 cursor-pointer"
           >
@@ -225,11 +620,298 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
         </div>
       )}
 
-      {/* Aviso caso base de estoque ainda não tenha sido carregada */}
-      {unidadesDisponiveis.length === 0 && (
-        <div className="bg-amber-950/40 border border-[#f58220]/40 text-amber-200 text-xs rounded-xl px-4 py-3">
-          <strong>Dica:</strong> Clique em <strong>"Atualizar Dados"</strong> no menu lateral para carregar a lista completa das 38 unidades e regiões antes de configurar supervisores e coordenadores.
-        </div>
+      {/* Formulário Expansível de Cadastro de Novo Usuário */}
+      {mostrarFormNovo && (
+        <form
+          onSubmit={handleCriarNovoUsuario}
+          autoComplete="off"
+          className="bg-[#111111] border border-[#f58220]/40 rounded-2xl p-6 space-y-5 shadow-[0_0_30px_rgba(245,130,32,0.08)]"
+        >
+          <input type="text" name="prevent_autofill_user" autoComplete="username" className="hidden" tabIndex={-1} />
+          <input type="password" name="prevent_autofill_pass" autoComplete="current-password" className="hidden" tabIndex={-1} />
+
+          <div className="flex items-center justify-between border-b border-[#242424] pb-4">
+            <div>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                Cadastrar Novo Usuário
+              </h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                O acesso será criado já confirmado e pronto para login imediato.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                Nome do Colaborador
+              </label>
+              <input
+                type="text"
+                name="novo-colaborador-nome"
+                autoComplete="off"
+                value={novoNome}
+                onChange={(e) => setNovoNome(e.target.value)}
+                placeholder="Ex.: João Silva"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0a0a0a] border border-[#282828] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                E-mail Corporativo *
+              </label>
+              <input
+                type="email"
+                name="novo-colaborador-email"
+                autoComplete="off"
+                required
+                value={novoEmail}
+                onChange={(e) => setNovoEmail(e.target.value)}
+                placeholder="nome.sobrenome@ambarenergia.com.br"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0a0a0a] border border-[#282828] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                Senha Inicial (mín. 6 caracteres) *
+              </label>
+              <div className="relative">
+                <input
+                  type={mostrarNovaSenha ? 'text' : 'password'}
+                  name="novo-colaborador-senha"
+                  autoComplete="new-password"
+                  required
+                  minLength={6}
+                  value={novaSenha}
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  placeholder="Crie uma senha de acesso"
+                  className="w-full px-3.5 py-2.5 pr-16 rounded-xl bg-[#0a0a0a] border border-[#282828] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarNovaSenha((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-400 hover:text-white cursor-pointer"
+                >
+                  {mostrarNovaSenha ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Cargo do Novo Usuário */}
+          <div className="space-y-2">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Cargo / Abrangência
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              {CARGOS.map((cargo) => {
+                const active = novoCargo === cargo.id;
+                return (
+                  <button
+                    key={cargo.id}
+                    type="button"
+                    onClick={() => setNovoCargo(cargo.id)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      active
+                        ? 'bg-[#1a0f05] border-[#f58220]'
+                        : 'bg-[#151515] border-[#262626] hover:border-[#3d3d3d]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-white">{cargo.label}</span>
+                      {active && <span className="w-2 h-2 rounded-full bg-[#f58220]" />}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1 leading-snug">
+                      {cargo.descricao}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* CAMADA 1 (Coordenador): Seleção de Regiões */}
+          {novoCargo === 'coordenador' && (
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                  Camada 1 · Selecione a(s) Região(ões) ({novasRegioes.length} de {regioesDisponiveis.length})
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNovasRegioes([...regioesDisponiveis]);
+                      setNovasUnidades([...unidadesDisponiveis]);
+                    }}
+                    className="text-[11px] text-[#f58220] hover:underline cursor-pointer"
+                  >
+                    Marcar todas
+                  </button>
+                  <span className="text-gray-600">·</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNovasRegioes([]);
+                      setNovasUnidades([]);
+                    }}
+                    className="text-[11px] text-gray-400 hover:underline cursor-pointer"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {regioesDisponiveis.map((regiao) => {
+                  const checked = novasRegioes.includes(regiao);
+                  return (
+                    <label
+                      key={regiao}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                        checked
+                          ? 'bg-blue-500/15 border-blue-500/50 text-white font-semibold'
+                          : 'bg-[#141414] border-[#252525] text-gray-400 hover:border-[#383838]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleRegiaoCoordenadorNovo(regiao)}
+                        className="accent-[#f58220] w-4 h-4 rounded"
+                      />
+                      <span className="truncate">{regiao}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* CAMADA 2 (Coordenador após marcar Região) OU Seleção Direta (Supervisor) */}
+          {(novoCargo === 'supervisor' || novoCargo === 'coordenador') && (
+            <div className="space-y-3 pt-2">
+              {novoCargo === 'coordenador' && novasRegioes.length === 0 ? (
+                <div className="p-4 rounded-xl bg-[#0e0e0e] border border-dashed border-[#2c2c2c] text-xs text-gray-400 text-center">
+                  Selecione acima pelo menos uma <strong className="text-blue-300">Região</strong> para liberar a escolha das unidades dela.
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      {novoCargo === 'coordenador'
+                        ? `Camada 2 · Unidades das Regiões Selecionadas (${novasUnidades.length} de ${unidadesDisponiveisNoEscopoNovo.length})`
+                        : `Unidades Permitidas (${novasUnidades.length} de ${unidadesDisponiveisNoEscopoNovo.length})`}
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNovasUnidades([...unidadesDisponiveisNoEscopoNovo])}
+                        className="text-[11px] text-[#f58220] hover:underline cursor-pointer"
+                      >
+                        Marcar todas
+                      </button>
+                      <span className="text-gray-600">·</span>
+                      <button
+                        type="button"
+                        onClick={() => setNovasUnidades([])}
+                        className="text-[11px] text-gray-400 hover:underline cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  <input
+                    type="search"
+                    name="filtro-unidade-novo-usuario"
+                    autoComplete="off"
+                    value={filtroUnidadeNovo}
+                    onChange={(e) => setFiltroUnidadeNovo(e.target.value)}
+                    placeholder="Buscar usina..."
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#f58220]"
+                  />
+
+                  <div className="space-y-3 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                    {gruposUnidadesNovo.map((grupo) => {
+                      const todasDoGrupoMarcadas =
+                        grupo.unidades.length > 0 &&
+                        grupo.unidades.every((u) => novasUnidades.includes(u));
+                      return (
+                        <div
+                          key={grupo.regiao}
+                          className="bg-[#0e0e0e] border border-[#222222] rounded-xl p-3 space-y-2"
+                        >
+                          <div className="flex items-center justify-between border-b border-[#1d1d1d] pb-1.5">
+                            <span className="text-[11px] font-extrabold text-[#f58220] uppercase tracking-wider">
+                              {grupo.regiao} ({grupo.unidades.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleGrupoUnidadesNovo(grupo.unidades)}
+                              className="text-[10px] font-bold text-gray-400 hover:text-white cursor-pointer"
+                            >
+                              {todasDoGrupoMarcadas ? 'Desmarcar região' : 'Selecionar região'}
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {grupo.unidades.map((unidade) => {
+                              const checked = novasUnidades.includes(unidade);
+                              return (
+                                <label
+                                  key={unidade}
+                                  className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                                    checked
+                                      ? 'bg-emerald-500/15 border-emerald-500/50 text-white font-semibold'
+                                      : 'bg-[#141414] border-[#252525] text-gray-400 hover:border-[#383838]'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() =>
+                                      setNovasUnidades((prev) =>
+                                        prev.includes(unidade)
+                                          ? prev.filter((u) => u !== unidade)
+                                          : [...prev, unidade]
+                                      )
+                                    }
+                                    className="accent-[#f58220] w-4 h-4 rounded shrink-0"
+                                  />
+                                  <span className="truncate" title={unidade}>
+                                    {unidade}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#242424]">
+            <button
+              type="button"
+              onClick={() => setMostrarFormNovo(false)}
+              className="px-4 py-2.5 rounded-xl bg-[#181818] hover:bg-[#222] text-xs font-bold text-gray-300 cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={criandoUsuario}
+              className="px-6 py-2.5 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-black text-xs uppercase tracking-wider cursor-pointer"
+            >
+              {criandoUsuario ? 'Criando...' : 'Criar Usuário Agora'}
+            </button>
+          </div>
+        </form>
       )}
 
       {/* Grid Principal: Lista de Usuários (Esquerda) + Editor de Permissões (Direita) */}
@@ -243,21 +925,23 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
           </div>
 
           <input
-            type="text"
+            type="search"
+            name="busca-usuario-acessos"
+            autoComplete="off"
             value={buscaUsuario}
             onChange={(e) => setBuscaUsuario(e.target.value)}
             placeholder="Buscar por e-mail, nome ou cargo..."
             className="w-full px-3.5 py-2.5 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#f58220]"
           />
 
-          <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1 custom-scrollbar">
+          <div className="flex flex-col gap-2 max-h-[540px] overflow-y-auto pr-1 custom-scrollbar">
             {loadingPerfis ? (
               <div className="text-center py-10 text-xs text-gray-500">
                 Carregando usuários...
               </div>
             ) : perfisFiltrados.length === 0 ? (
               <div className="text-center py-10 text-xs text-gray-500">
-                Nenhum usuário encontrado. Crie novos logins em Authentication → Users no Supabase.
+                Nenhum usuário encontrado. Clique em "+ Novo Usuário" acima para cadastrar.
               </div>
             ) : (
               perfisFiltrados.map((perfil) => {
@@ -266,9 +950,13 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                 return (
                   <button
                     key={perfil.user_id}
+                    type="button"
                     onClick={() => {
                       setUsuarioSelecionadoId(perfil.user_id);
                       setSucesso(null);
+                      setErro(null);
+                      setSenhaRedefinida('');
+                      setConfirmarExclusao(false);
                     }}
                     className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
                       isSelected
@@ -297,21 +985,12 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                       {perfil.email}
                     </div>
                     <div className="text-[10px] text-gray-500 mt-1.5 font-mono">
-                      {perfil.cargo === 'admin' || perfil.cargo === 'gerente'
-                        ? 'Abrangência: Todas as unidades'
-                        : perfil.cargo === 'coordenador'
-                        ? `Regiões: ${(perfil.regioes_permitidas || []).length} selecionada(s)`
-                        : `Unidades: ${(perfil.unidades_permitidas || []).length} selecionada(s)`}
+                      {formatarResumoAbrangencia(perfil)}
                     </div>
                   </button>
                 );
               })
             )}
-          </div>
-
-          <div className="pt-2 border-t border-[#222] text-[11px] text-gray-500 leading-relaxed">
-            Para adicionar um novo colaborador, cadastre o e-mail/senha dele em{' '}
-            <span className="text-gray-300 font-mono">Supabase → Authentication → Users</span>. Ele aparecerá automaticamente aqui.
           </div>
         </div>
 
@@ -332,6 +1011,8 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                     </label>
                     <input
                       type="text"
+                      name="editar-nome-exibicao"
+                      autoComplete="off"
                       value={usuarioAtual.nome || ''}
                       onChange={(e) => atualizarCampoLocal('nome', e.target.value)}
                       className="w-full max-w-sm px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#282828] text-xs text-white focus:outline-none focus:border-[#f58220]"
@@ -409,24 +1090,22 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                 {(usuarioAtual.cargo === 'admin' || usuarioAtual.cargo === 'gerente') && (
                   <div className="p-4 rounded-xl bg-[#161616] border border-[#262626] text-xs text-gray-300">
                     <strong className="text-[#f58220]">Acesso Global Ativo:</strong> Usuários com perfil{' '}
-                    <strong>{usuarioAtual.cargo === 'admin' ? 'Admin' : 'Gerente'}</strong> visualizam automaticamente todas as regiões e todas as {unidadesDisponiveis.length || 38} unidades sem restrições.
+                    <strong>{usuarioAtual.cargo === 'admin' ? 'Admin' : 'Gerente'}</strong> visualizam automaticamente todas as {regioesDisponiveis.length} regiões e todas as {unidadesDisponiveis.length || 38} unidades sem restrições.
                   </div>
                 )}
 
-                {/* Seletor de Regiões (Coordenador) */}
+                {/* CAMADA 1 (Coordenador - Edição): Seleção de Regiões */}
                 {usuarioAtual.cargo === 'coordenador' && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                        Regiões Permitidas ({(usuarioAtual.regioes_permitidas || []).length} de{' '}
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                        Camada 1 · Selecione a(s) Região(ões) ({(usuarioAtual.regioes_permitidas || []).length} de{' '}
                         {regioesDisponiveis.length})
                       </label>
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            selecionarTodos('regioes_permitidas', regioesDisponiveis)
-                          }
+                          onClick={selecionarTodasRegioesEdicao}
                           className="text-[11px] text-[#f58220] hover:underline cursor-pointer"
                         >
                           Marcar todas
@@ -434,7 +1113,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                         <span className="text-gray-600">·</span>
                         <button
                           type="button"
-                          onClick={() => limparSelecao('regioes_permitidas')}
+                          onClick={limparRegioesEdicao}
                           className="text-[11px] text-gray-400 hover:underline cursor-pointer"
                         >
                           Limpar
@@ -457,7 +1136,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => toggleItemArray('regioes_permitidas', regiao)}
+                              onChange={() => toggleRegiaoCoordenadorEdicao(regiao)}
                               className="accent-[#f58220] w-4 h-4 rounded"
                             />
                             <span className="truncate">{regiao}</span>
@@ -468,82 +1147,178 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                   </div>
                 )}
 
-                {/* Seletor de Unidades (Supervisor) */}
-                {usuarioAtual.cargo === 'supervisor' && (
+                {/* CAMADA 2 (Coordenador após marcar Região) OU Seleção Direta (Supervisor) */}
+                {(usuarioAtual.cargo === 'supervisor' || usuarioAtual.cargo === 'coordenador') && (
                   <div className="space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                        Unidades Permitidas ({(usuarioAtual.unidades_permitidas || []).length} de{' '}
-                        {unidadesDisponiveis.length})
-                      </label>
+                    {usuarioAtual.cargo === 'coordenador' &&
+                    (usuarioAtual.regioes_permitidas || []).length === 0 ? (
+                      <div className="p-4 rounded-xl bg-[#0e0e0e] border border-dashed border-[#2c2c2c] text-xs text-gray-400 text-center">
+                        Selecione acima pelo menos uma <strong className="text-blue-300">Região</strong> para liberar a escolha das unidades dela.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                            {usuarioAtual.cargo === 'coordenador'
+                              ? `Camada 2 · Unidades das Regiões Selecionadas (${(usuarioAtual.unidades_permitidas || []).length} de ${unidadesDisponiveisNoEscopoEdicao.length})`
+                              : `Unidades Permitidas (${(usuarioAtual.unidades_permitidas || []).length} de ${unidadesDisponiveisNoEscopoEdicao.length})`}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                selecionarTodos(
+                                  'unidades_permitidas',
+                                  unidadesDisponiveisNoEscopoEdicao
+                                )
+                              }
+                              className="text-[11px] text-[#f58220] hover:underline cursor-pointer"
+                            >
+                              Marcar todas
+                            </button>
+                            <span className="text-gray-600">·</span>
+                            <button
+                              type="button"
+                              onClick={() => limparSelecao('unidades_permitidas')}
+                              className="text-[11px] text-gray-400 hover:underline cursor-pointer"
+                            >
+                              Limpar
+                            </button>
+                          </div>
+                        </div>
+
+                        <input
+                          type="search"
+                          name="filtro-unidade-edicao-usuario"
+                          autoComplete="off"
+                          value={filtroUnidade}
+                          onChange={(e) => setFiltroUnidade(e.target.value)}
+                          placeholder="Buscar usina..."
+                          className="w-full px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#f58220]"
+                        />
+
+                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                          {gruposUnidadesEdicao.map((grupo) => {
+                            const selecionadasSet = new Set(usuarioAtual.unidades_permitidas || []);
+                            const todasDoGrupoMarcadas =
+                              grupo.unidades.length > 0 &&
+                              grupo.unidades.every((u) => selecionadasSet.has(u));
+                            return (
+                              <div
+                                key={grupo.regiao}
+                                className="bg-[#0e0e0e] border border-[#222222] rounded-xl p-3 space-y-2"
+                              >
+                                <div className="flex items-center justify-between border-b border-[#1d1d1d] pb-1.5">
+                                  <span className="text-[11px] font-extrabold text-[#f58220] uppercase tracking-wider">
+                                    {grupo.regiao} ({grupo.unidades.length})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleGrupoUnidadesEdicao(grupo.unidades)}
+                                    className="text-[10px] font-bold text-gray-400 hover:text-white cursor-pointer"
+                                  >
+                                    {todasDoGrupoMarcadas ? 'Desmarcar região' : 'Selecionar região'}
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {grupo.unidades.map((unidade) => {
+                                    const checked = selecionadasSet.has(unidade);
+                                    return (
+                                      <label
+                                        key={unidade}
+                                        className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                                          checked
+                                            ? 'bg-emerald-500/15 border-emerald-500/50 text-white font-semibold'
+                                            : 'bg-[#141414] border-[#252525] text-gray-400 hover:border-[#383838]'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() =>
+                                            toggleItemArray('unidades_permitidas', unidade)
+                                          }
+                                          className="accent-[#f58220] w-4 h-4 rounded shrink-0"
+                                        />
+                                        <span className="truncate" title={unidade}>
+                                          {unidade}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Segurança: Redefinir Senha */}
+                <div className="pt-4 border-t border-[#242424] space-y-2.5">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Redefinir Senha de Acesso
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <input
+                      type="password"
+                      name="redefinir-senha-usuario"
+                      autoComplete="new-password"
+                      value={senhaRedefinida}
+                      onChange={(e) => setSenhaRedefinida(e.target.value)}
+                      placeholder="Nova senha (mín. 6 caracteres)"
+                      className="flex-1 px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
+                    />
+                    <button
+                      type="button"
+                      disabled={alterandoSenha || senhaRedefinida.length < 6}
+                      onClick={handleRedefinirSenha}
+                      className="px-4 py-2 rounded-xl bg-[#1a1a1a] hover:bg-[#242424] disabled:opacity-40 border border-[#303030] text-xs font-bold text-gray-200 transition-all cursor-pointer shrink-0"
+                    >
+                      {alterandoSenha ? 'Alterando...' : 'Atualizar Senha'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Rodapé com Excluir Usuário + Salvar Permissões */}
+              <div className="pt-4 border-t border-[#242424] flex flex-wrap items-center justify-between gap-3">
+                {usuarioAtual.user_id !== currentUserId ? (
+                  <div>
+                    {!confirmarExclusao ? (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmarExclusao(true)}
+                        className="px-4 py-2.5 rounded-xl bg-red-950/30 hover:bg-red-950/60 border border-red-500/30 text-xs font-bold text-red-400 transition-all cursor-pointer"
+                      >
+                        Excluir Usuário
+                      </button>
+                    ) : (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            selecionarTodos('unidades_permitidas', unidadesDisponiveis)
-                          }
-                          className="text-[11px] text-[#f58220] hover:underline cursor-pointer"
+                          disabled={excluindoUsuario}
+                          onClick={handleExcluirUsuario}
+                          className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-black text-white cursor-pointer"
                         >
-                          Marcar todas
+                          {excluindoUsuario ? 'Excluindo...' : 'Confirmar Exclusão'}
                         </button>
-                        <span className="text-gray-600">·</span>
                         <button
                           type="button"
-                          onClick={() => limparSelecao('unidades_permitidas')}
-                          className="text-[11px] text-gray-400 hover:underline cursor-pointer"
+                          onClick={() => setConfirmarExclusao(false)}
+                          className="px-3 py-2 rounded-xl bg-[#1c1c1c] text-xs text-gray-300 cursor-pointer"
                         >
-                          Limpar
+                          Cancelar
                         </button>
                       </div>
-                    </div>
-
-                    <input
-                      type="text"
-                      value={filtroUnidade}
-                      onChange={(e) => setFiltroUnidade(e.target.value)}
-                      placeholder="Filtrar usina ou região..."
-                      className="w-full px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#f58220]"
-                    />
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
-                      {unidadesFiltradas.map((unidade) => {
-                        const checked = (usuarioAtual.unidades_permitidas || []).includes(unidade);
-                        const regiaoDaUnidade = mapaUnidadeRegiao[unidade];
-                        return (
-                          <label
-                            key={unidade}
-                            className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                              checked
-                                ? 'bg-emerald-500/15 border-emerald-500/50 text-white font-semibold'
-                                : 'bg-[#141414] border-[#252525] text-gray-400 hover:border-[#383838]'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleItemArray('unidades_permitidas', unidade)}
-                                className="accent-[#f58220] w-4 h-4 rounded shrink-0"
-                              />
-                              <span className="truncate" title={unidade}>
-                                {unidade}
-                              </span>
-                            </div>
-                            {regiaoDaUnidade && (
-                              <span className="text-[10px] font-mono text-gray-500 shrink-0">
-                                {regiaoDaUnidade}
-                              </span>
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
+                    )}
                   </div>
+                ) : (
+                  <div />
                 )}
-              </div>
 
-              {/* Rodapé com Botão Salvar */}
-              <div className="pt-4 border-t border-[#242424] flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={handleSalvarPermissoes}
