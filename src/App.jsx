@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from './lib/supabase'
+import { GLOBAL_CACHE_KEYS } from './lib/cacheUtils'
 import LoginScreen from './components/LoginScreen'
 import Header from './components/Header'
 import LoadingScreen from './components/LoadingScreen'
@@ -26,7 +27,11 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
     error: errorEstoque,
     progress: progressEstoque,
     reload: carregarEstoque,
-  } = useEstoqueData()
+  } = useEstoqueData({
+    userId: user?.id,
+    isAdmin,
+    perfilAcesso,
+  })
 
   const {
     data: inventarioData,
@@ -34,107 +39,48 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
     error: errorInventario,
     progress: progressInventario,
     reload: carregarInventario,
-  } = useInventarioData()
+  } = useInventarioData({
+    userId: user?.id,
+    isAdmin,
+    perfilAcesso,
+  })
 
   const loading = loadingEstoque || loadingInventario || buscando
   const progress = Math.round((progressEstoque * 0.7 + progressInventario * 0.3)) || 0
 
-  // Filtra Estoque e Inventário conforme a abrangência do perfil:
-  // - Admin / Gerente: acesso total
-  // - Coordenador: Regiões selecionadas + filtro granular pelas Unidades marcadas dentro delas
-  // - Supervisor: apenas Unidades permitidas
-  const { estoqueFiltrado, inventarioFiltrado, unidadesPermitidasSet } = useMemo(() => {
-    if (isAdmin || cargoAtual === 'gerente') {
-      return {
-        estoqueFiltrado: estoqueData,
-        inventarioFiltrado: inventarioData,
-        unidadesPermitidasSet: null,
-      }
-    }
+  const unidadesPermitidasSet = useMemo(() => {
+    if (isAdmin || cargoAtual === 'gerente') return null
+    return new Set(
+      (perfilAcesso?.unidades_permitidas || []).map((u) => u.toString().trim().toUpperCase())
+    )
+  }, [isAdmin, cargoAtual, perfilAcesso])
 
-    if (cargoAtual === 'coordenador') {
-      const regioesSet = new Set(perfilAcesso?.regioes_permitidas || [])
-      const unidadesEspecificas = perfilAcesso?.unidades_permitidas || []
-      const temFiltroUnidade = unidadesEspecificas.length > 0
-      const unidadesSet = new Set(unidadesEspecificas)
-      const unidadesLiberadas = new Set()
-
-      const est = estoqueData.filter((row) => {
-        const reg = (row['Região'] || row['regiao'] || '').toString().trim()
-        const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-        if (!regioesSet.has(reg)) return false
-        if (temFiltroUnidade && !unidadesSet.has(uni)) return false
-        if (uni) unidadesLiberadas.add(uni)
-        return true
-      })
-
-      const inv = inventarioData.filter((row) => {
-        const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-        return unidadesLiberadas.has(uni)
-      })
-
-      return {
-        estoqueFiltrado: est,
-        inventarioFiltrado: inv,
-        unidadesPermitidasSet: unidadesLiberadas,
-      }
-    }
-
-    // Supervisor (ou padrão restrito)
-    const unidadesSet = new Set(perfilAcesso?.unidades_permitidas || [])
-    const est = estoqueData.filter((row) => {
-      const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-      return unidadesSet.has(uni)
-    })
-    const inv = inventarioData.filter((row) => {
-      const uni = (row['unidade_almoxarifado'] || '').toString().trim()
-      return unidadesSet.has(uni)
-    })
-
-    return {
-      estoqueFiltrado: est,
-      inventarioFiltrado: inv,
-      unidadesPermitidasSet: unidadesSet,
-    }
-  }, [estoqueData, inventarioData, isAdmin, cargoAtual, perfilAcesso])
-
-  // Proteção extra: impede acesso à aba 'acessos' se não for admin
   useEffect(() => {
     if (activeTab === 'acessos' && !isAdmin) {
       setActiveTab('pergunte')
     }
   }, [activeTab, isAdmin])
 
-  // 1. Ao abrir o painel, recupera a data do último clique
   useEffect(() => {
-    const dataSalva = localStorage.getItem('dataUltimaAtualizacao')
-    if (dataSalva) {
-      setUltimaAtualizacao(dataSalva)
-    }
+    const dataSalva = localStorage.getItem(GLOBAL_CACHE_KEYS.ULTIMA_CARGA)
+    setUltimaAtualizacao(dataSalva || null)
   }, [])
 
-  // 2. Função mágica do botão
   const handleAtualizarDados = async () => {
     setBuscando(true)
-    
-    // Força a busca no Supabase
     await Promise.all([carregarEstoque(), carregarInventario()])
-    
-    // Carimba a hora exata que terminou de puxar
     const agora = new Date().toLocaleString('pt-BR')
-    localStorage.setItem('dataUltimaAtualizacao', agora)
+    localStorage.setItem(GLOBAL_CACHE_KEYS.ULTIMA_CARGA, agora)
     setUltimaAtualizacao(agora)
-    
     setBuscando(false)
   }
 
-  // Tela preta de loading se você tiver CLICADO no botão (mas mantendo a sidebar visível!)
   if (loading && buscando) {
     return (
       <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
-        <Header 
-          ultimaAtualizacao={ultimaAtualizacao} 
-          onAtualizar={handleAtualizarDados} 
+        <Header
+          ultimaAtualizacao={ultimaAtualizacao}
+          onAtualizar={handleAtualizarDados}
           loading={buscando}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -146,7 +92,11 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
         <div className="flex-1 flex flex-col relative">
           <LoadingScreen
             progress={progress}
-            label="Sincronizando e atualizando base de dados..."
+            label={
+              isAdmin || cargoAtual === 'gerente'
+                ? 'Atualizando disco local com a base corporativa...'
+                : 'Atualizando disco local com suas unidades autorizadas...'
+            }
           />
         </div>
       </div>
@@ -162,10 +112,9 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
 
   return (
     <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
-      {/* 🚀 Sidebar Executiva e Controle de Navegação */}
-      <Header 
-        ultimaAtualizacao={ultimaAtualizacao} 
-        onAtualizar={handleAtualizarDados} 
+      <Header
+        ultimaAtualizacao={ultimaAtualizacao}
+        onAtualizar={handleAtualizarDados}
         loading={buscando}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -175,10 +124,8 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
         onLogout={onLogout}
       />
 
-      {/* Área Principal com Scroll Independente */}
       <div className="flex-1 flex flex-col h-screen overflow-y-auto relative">
         <main className="flex-1 p-6 lg:p-8">
-          
           {(errorEstoque || errorInventario) && (
             <div className="bg-[#990000]/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
               <strong>Erro ao carregar dados:</strong>{' '}
@@ -186,21 +133,19 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
             </div>
           )}
 
-          {/* Faixa informativa de escopo para Coordenadores e Supervisores */}
-          {!isAdmin && cargoAtual !== 'gerente' && estoqueData.length > 0 && (
+          {!isAdmin && cargoAtual !== 'gerente' && (
             <div className="mb-5 px-4 py-2.5 rounded-xl bg-[#121212] border border-[#262626] flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
               <span>
-                Visualização filtrada por perfil <strong className="text-white uppercase">{cargoAtual}</strong>:
+                Leitura do disco filtrada para <strong className="text-white uppercase">{cargoAtual}</strong>:
               </span>
               <span className="font-mono text-[#f58220]">
                 {cargoAtual === 'coordenador'
                   ? resumoEscopoCoordenador()
-                  : `${unidadesPermitidasSet?.size || 0} unidade(s) liberada(s)`}
+                  : `${(perfilAcesso?.unidades_permitidas || []).join(', ') || 'Nenhuma unidade'} (${unidadesPermitidasSet?.size || 0})`}
               </span>
             </div>
           )}
 
-          {/* Se a aba ativa for Controle de Acessos (Admin), abre direto mesmo antes de sincronizar */}
           {activeTab === 'acessos' && isAdmin ? (
             <div className="animate-fade-in">
               <ControleAcessos
@@ -209,26 +154,30 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
                 currentUserId={user?.id}
               />
             </div>
-          ) : !ultimaAtualizacao && estoqueData.length === 0 ? (
+          ) : estoqueData.length === 0 && !loadingEstoque ? (
             <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
               <div className="bg-[#111] p-8 rounded-2xl border border-[#222] max-w-md">
                 <svg className="w-12 h-12 text-[#f58220] mx-auto mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
                 </svg>
-                <h3 className="text-lg font-bold text-white mb-2">Base de Dados Vazia</h3>
+                <h3 className="text-lg font-bold text-white mb-2">
+                  {ultimaAtualizacao ? 'Nenhuma Movimentação no Disco para o Seu Perfil' : 'Base de Dados Vazia'}
+                </h3>
                 <p className="text-sm text-gray-500">
-                  O cache está vazio. Clique no botão "Atualizar Dados" no menu lateral para puxar as informações do Supabase pela primeira vez.
+                  {ultimaAtualizacao
+                    ? 'A carga salva neste computador ainda não contém registros das suas unidades. Clique em "Atualizar Dados" no menu lateral para sincronizar suas usinas.'
+                    : 'O disco local está vazio. Clique no botão "Atualizar Dados" no menu lateral para carregar as informações pela primeira vez.'}
                 </p>
               </div>
             </div>
           ) : (
             <div className="animate-fade-in">
-              {activeTab === 'geral' && <VisaoGeral data={estoqueFiltrado} />}
-              {activeTab === 'inventarios' && <PainelInventarios data={inventarioFiltrado} />}
+              {activeTab === 'geral' && <VisaoGeral data={estoqueData} />}
+              {activeTab === 'inventarios' && <PainelInventarios data={inventarioData} />}
               {activeTab === 'pergunte' && (
-                <PergunteAoEstoque data={estoqueFiltrado} loading={loadingEstoque} />
+                <PergunteAoEstoque data={estoqueData} loading={loadingEstoque} />
               )}
-              {activeTab === 'resumo' && <ResumoEstoque data={estoqueFiltrado} />}
+              {activeTab === 'resumo' && <ResumoEstoque data={estoqueData} />}
             </div>
           )}
         </main>
@@ -261,26 +210,32 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Verifica se o link aberto veio de recuperação de senha na URL
     if (window.location.hash && window.location.hash.includes('type=recovery')) {
       setIsRecoveryMode(true)
     }
 
-    // Verifica sessão ativa ao abrir o app
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       carregarPerfilUsuario(session)
     })
 
-    // Escuta login, logout, recuperação de senha e expiração de token em tempo real
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true)
       }
-      setSession(session)
-      carregarPerfilUsuario(session)
+
+      if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setPerfilAcesso(null)
+        setVerificandoSessao(false)
+        return
+      }
+
+      setVerificandoSessao(true)
+      setSession(newSession)
+      carregarPerfilUsuario(newSession)
     })
 
     return () => subscription.unsubscribe()
@@ -288,10 +243,10 @@ export default function App() {
 
   const handleLogout = async () => {
     setIsRecoveryMode(false)
+    setPerfilAcesso(null)
     await supabase.auth.signOut()
   }
 
-  // Tela rápida enquanto checa o token salvo no navegador
   if (verificandoSessao) {
     return (
       <div className="h-screen w-full bg-[#080808] flex flex-col items-center justify-center text-white gap-3">
@@ -303,27 +258,33 @@ export default function App() {
     )
   }
 
-  // Se o usuário acabou de clicar no link de "Esqueci minha senha" no e-mail, exibe tela de nova senha
-  if (isRecoveryMode) {
+  if (!session) {
+    return <LoginScreen />
+  }
+
+  const isAdmin =
+    session.user?.app_metadata?.role === 'admin' || perfilAcesso?.cargo === 'admin'
+
+  const trocaObrigatoriaAtiva = Boolean(perfilAcesso?.trocar_senha_obrigatoria) && !isAdmin
+
+  if (isRecoveryMode || trocaObrigatoriaAtiva) {
     return (
       <LoginScreen
-        isRecoveryMode={true}
+        isRecoveryMode={isRecoveryMode}
+        forcePasswordChange={trocaObrigatoriaAtiva}
+        userEmail={session.user?.email || ''}
         onRecoveryComplete={() => {
           setIsRecoveryMode(false)
-          window.history.replaceState(null, '', window.location.pathname)
+          if (window.location.hash) {
+            window.history.replaceState(null, '', window.location.pathname)
+          }
+          setVerificandoSessao(true)
+          carregarPerfilUsuario(session)
         }}
       />
     )
   }
 
-  // Bloqueia o painel se não estiver autenticado
-  if (!session) {
-    return <LoginScreen />
-  }
-
-  // Bloqueia usuário desativado pelo Admin na tela de Controle de Acessos
-  const isAdmin =
-    session.user?.app_metadata?.role === 'admin' || perfilAcesso?.cargo === 'admin'
   if (perfilAcesso && perfilAcesso.ativo === false && !isAdmin) {
     return (
       <div className="h-screen w-full bg-[#080808] flex flex-col items-center justify-center text-white p-6">
@@ -343,9 +304,9 @@ export default function App() {
     )
   }
 
-  // Libera o painel completo quando autenticado
   return (
     <DashboardContent
+      key={session.user.id}
       user={session.user}
       perfilAcesso={perfilAcesso}
       onLogout={handleLogout}

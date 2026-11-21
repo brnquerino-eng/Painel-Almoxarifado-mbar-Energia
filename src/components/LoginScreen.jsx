@@ -169,9 +169,22 @@ function MultiSelectDropdown({
   )
 }
 
-export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete }) {
+export default function LoginScreen({
+  isRecoveryMode = false,
+  forcePasswordChange = false,
+  userEmail = '',
+  onRecoveryComplete,
+}) {
+  const precisaDefinirSenha = isRecoveryMode || forcePasswordChange
+
   // Modos: 'login' | 'esqueci' | 'solicitar' | 'nova_senha'
-  const [modo, setModo] = useState(isRecoveryMode ? 'nova_senha' : 'login')
+  const [modo, setModo] = useState(precisaDefinirSenha ? 'nova_senha' : 'login')
+
+  useEffect(() => {
+    if (precisaDefinirSenha) {
+      setModo('nova_senha')
+    }
+  }, [precisaDefinirSenha])
 
   // Login
   const [email, setEmail] = useState('')
@@ -182,7 +195,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
   const [emailRecuperacao, setEmailRecuperacao] = useState('')
   const [recuperacaoEnviada, setRecuperacaoEnviada] = useState(false)
 
-  // Redefinir nova senha (após clicar no link do e-mail)
+  // Redefinir nova senha (após clicar no link do e-mail OU primeiro acesso obrigatório)
   const [novaSenha, setNovaSenha] = useState('')
   const [confirmarNovaSenha, setConfirmarNovaSenha] = useState('')
   const [showNovaSenha, setShowNovaSenha] = useState(false)
@@ -287,7 +300,6 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
       novasRegsSet.has(mapaUnidadeRegiao[u])
     )
 
-    // Se for Coordenador e acabou de marcar uma região nova, pré-marca as usinas dela (podendo desmarcar o que não atender)
     if (solCargo === 'coordenador') {
       const regioesAntigasSet = new Set(solRegioes)
       const extras = []
@@ -371,7 +383,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
     }
   }
 
-  // 3. Salvar nova senha após clicar no link recebido por e-mail
+  // 3. Salvar nova senha (recuperação por e-mail OU troca obrigatória no primeiro acesso)
   const handleSalvarNovaSenha = async (e) => {
     e.preventDefault()
     setError(null)
@@ -393,12 +405,19 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
       })
 
       if (updateError) {
-        setError(updateError.message)
+        if (updateError.message?.toLowerCase().includes('different from the old password')) {
+          setError('A nova senha precisa ser diferente da senha temporária atual.')
+        } else {
+          setError(updateError.message)
+        }
       } else {
-        setSuccessMsg('Senha atualizada com sucesso! Entrando no painel...')
+        // Marca no perfil que a troca obrigatória foi concluída
+        await supabase.rpc('usuario_confirmar_troca_senha')
+
+        setSuccessMsg('Senha pessoal atualizada com sucesso! Entrando no painel...')
         setTimeout(() => {
           if (onRecoveryComplete) onRecoveryComplete()
-        }, 1200)
+        }, 1000)
       }
     } catch (err) {
       setError('Erro ao salvar a nova senha.')
@@ -492,7 +511,10 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
           <h1 className="text-white text-xl font-black tracking-wide">
             {modo === 'login' && 'VISÃO ESTOQUE'}
             {modo === 'esqueci' && 'RECUPERAR SENHA'}
-            {modo === 'nova_senha' && 'DEFINIR NOVA SENHA'}
+            {modo === 'nova_senha' &&
+              (forcePasswordChange && !isRecoveryMode
+                ? 'TROCA OBRIGATÓRIA DE SENHA'
+                : 'DEFINIR NOVA SENHA')}
             {modo === 'solicitar' && 'SOLICITAR PRIMEIRO ACESSO'}
           </h1>
           <p className="text-gray-400 text-xs mt-1 font-medium">
@@ -501,13 +523,26 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
               (recuperacaoEnviada
                 ? 'Verifique sua caixa de entrada para continuar'
                 : 'Enviaremos um link de redefinição para o seu e-mail')}
-            {modo === 'nova_senha' && 'Cadastre sua nova senha pessoal de acesso'}
+            {modo === 'nova_senha' &&
+              (forcePasswordChange && !isRecoveryMode
+                ? 'Por segurança, substitua a senha provisória antes de continuar'
+                : 'Cadastre sua nova senha pessoal de acesso')}
             {modo === 'solicitar' &&
               (solicitacaoEnviada
                 ? 'Pedido registrado na fila de aprovação'
                 : 'Seu pedido será analisado e liberado pelo Administrador')}
           </p>
         </div>
+
+        {/* Aviso informativo no primeiro acesso obrigatório */}
+        {modo === 'nova_senha' && forcePasswordChange && !isRecoveryMode && !successMsg && (
+          <div className="bg-[#1a0f05] border border-[#f58220]/50 rounded-xl p-3.5 mb-5 text-xs text-orange-100 leading-relaxed">
+            <strong className="text-[#f58220] block mb-0.5">
+              Primeiro Acesso Detectado{userEmail ? ` · ${userEmail}` : ''}
+            </strong>
+            Sua conta foi criada com uma senha temporária. Defina abaixo a sua senha pessoal definitiva para liberar o painel.
+          </div>
+        )}
 
         {/* Alerta de Erro */}
         {error && (
@@ -673,12 +708,12 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
           </div>
         )}
 
-        {/* MODO 3: DEFINIR NOVA SENHA (APÓS CLICAR NO LINK DO E-MAIL) */}
+        {/* MODO 3: DEFINIR NOVA SENHA (RECUPERAÇÃO OU PRIMEIRO ACESSO OBRIGATÓRIO) */}
         {modo === 'nova_senha' && (
           <form onSubmit={handleSalvarNovaSenha} className="flex flex-col gap-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
-                Nova Senha (mín. 6 caracteres)
+                Nova Senha Pessoal (mín. 6 caracteres)
               </label>
               <div className="relative">
                 <input
@@ -724,6 +759,16 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
             >
               {loading ? 'Salvando...' : 'Salvar Nova Senha e Entrar'}
             </button>
+
+            {forcePasswordChange && !isRecoveryMode && (
+              <button
+                type="button"
+                onClick={() => supabase.auth.signOut()}
+                className="w-full py-2 rounded-xl bg-[#141414] hover:bg-[#1c1c1c] text-[11px] font-semibold text-gray-400 cursor-pointer"
+              >
+                Sair e entrar com outra conta
+              </button>
+            )}
           </form>
         )}
 

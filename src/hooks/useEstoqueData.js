@@ -1,51 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLE_ESTOQUE } from '../lib/supabase'
-
-// --- Mágica do IndexedDB (Cache com chave única e validação estrutural) ---
-const DB_NAME = 'AmbarCacheDB'
-const STORE_NAME = 'cache_store'
-const CACHE_KEY = 'estoqueData'
-
-function getDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME)
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-async function getCache(key) {
-  try {
-    const db = await getDB()
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const req = tx.objectStore(STORE_NAME).get(key)
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
-  } catch (e) {
-    return null;
-  }
-}
-
-async function setCache(key, data) {
-  try {
-    const db = await getDB()
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      const req = tx.objectStore(STORE_NAME).put(data, key)
-      req.onsuccess = () => resolve()
-      req.onerror = () => reject(req.error)
-    })
-  } catch (e) {
-    console.warn('Erro IndexedDB', e)
-  }
-}
-// -----------------------------------------------------------
+import {
+  GLOBAL_CACHE_KEYS,
+  getDiscoCache,
+  mergeDiscoCache,
+  lerDoDiscoPorPerfil,
+} from '../lib/cacheUtils'
 
 const COLS = [
   'id',
@@ -65,7 +25,7 @@ const COLS = [
   'preco_medio',
   'qtde_entrada_compras',
   'Segmento',
-  'Região'
+  'Região',
 ].join(',')
 
 function cleanStr(val) {
@@ -105,102 +65,163 @@ function normalizeRow(row) {
   }
 }
 
-export function useEstoqueData() {
+export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } = {}) {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
 
-  const load = useCallback(async (forceReload = false) => {
-    setLoading(true)
-    setError(null)
-    setProgress(0)
-
-    if (!forceReload) {
-      const cachedData = await getCache(CACHE_KEY)
-      const isValidCache = cachedData && 
-                           cachedData.length > 0 && 
-                           'ge' in cachedData[0] && 
-                           'preco_medio' in cachedData[0] &&
-                           'qtde_entrada_compras' in cachedData[0] &&
-                           ('Segmento' in cachedData[0] || 'segmento' in cachedData[0]) &&
-                           ('Região' in cachedData[0] || 'regiao' in cachedData[0])
-
-      if (isValidCache) {
-        setData(cachedData)
-        setProgress(100)
+  const load = useCallback(
+    async (forceReload = false) => {
+      if (!userId || (!isAdmin && !perfilAcesso)) {
+        setData([])
         setLoading(false)
-        return 
+        return
       }
-    }
 
-    try {
-      // 1. Contagem removida completamente para evitar timeout inicial
-      const batchSize = 500 // 2. Lote reduzido para aliviar a carga no servidor
-      const all = []
-      
-      let lastId = 0
-      let hasMore = true
+      const cargo = isAdmin ? 'admin' : perfilAcesso?.cargo || 'supervisor'
+      const isGlobalRole = isAdmin || cargo === 'gerente'
 
-      while (hasMore) {
-        let attempt = 0
-        let success = false
-        let lastError = null
-        let currentBatch = []
+      // 1. Leitura do Disco Compartilhado (sem baixar do Supabase)
+      if (!forceReload) {
+        setLoading(true)
+        const discoBruto = await getDiscoCache(GLOBAL_CACHE_KEYS.ESTOQUE)
+        const isValidCache =
+          discoBruto &&
+          discoBruto.length > 0 &&
+          'ge' in discoBruto[0] &&
+          'preco_medio' in discoBruto[0] &&
+          'qtde_entrada_compras' in discoBruto[0] &&
+          ('Segmento' in discoBruto[0] || 'segmento' in discoBruto[0]) &&
+          ('Região' in discoBruto[0] || 'regiao' in discoBruto[0])
 
-        while (attempt < 3 && !success) {
-          try {
-            const { data: rows, error: fetchErr } = await supabase
-              .from(TABLE_ESTOQUE)
-              .select(COLS)
-              .order('id')
-              .gt('id', lastId)
-              .limit(batchSize)
+        if (isValidCache) {
+          // A cabeça de leitura filtra o disco exclusivamente para o login ativo
+          const fatiaAutorizada = lerDoDiscoPorPerfil(discoBruto, isAdmin, perfilAcesso)
+          setData(fatiaAutorizada)
+          setProgress(100)
+        } else {
+          setData([])
+          setProgress(0)
+        }
+        setLoading(false)
+        return
+      }
 
-            if (fetchErr) throw fetchErr
-            
-            currentBatch = rows || []
-            success = true
-          } catch (e) {
-            lastError = e
-            attempt++
-            if (attempt < 3) {
-              await new Promise((r) => setTimeout(r, 500 * attempt)) // Tempo de espera um pouquinho maior entre tentativas
+      // 2. Atualização Manual ("Atualizar Dados"): baixa apenas o escopo permitido e grava no disco
+      const regioesPermitidas = (perfilAcesso?.regioes_permitidas || [])
+        .map((r) => cleanStr(r))
+        .filter(Boolean)
+      const unidadesPermitidas = (perfilAcesso?.unidades_permitidas || [])
+        .map((u) => cleanStr(u))
+        .filter(Boolean)
+
+      if (!isGlobalRole) {
+        if (cargo === 'coordenador' && regioesPermitidas.length === 0) {
+          setData([])
+          setProgress(100)
+          setLoading(false)
+          return
+        }
+        if (cargo === 'supervisor' && unidadesPermitidas.length === 0) {
+          setData([])
+          setProgress(100)
+          setLoading(false)
+          return
+        }
+      }
+
+      setLoading(true)
+      setError(null)
+      setProgress(0)
+
+      try {
+        const batchSize = 500
+        const all = []
+
+        let lastId = 0
+        let hasMore = true
+
+        while (hasMore) {
+          let attempt = 0
+          let success = false
+          let lastError = null
+          let currentBatch = []
+
+          while (attempt < 3 && !success) {
+            try {
+              let query = supabase
+                .from(TABLE_ESTOQUE)
+                .select(COLS)
+                .order('id')
+                .gt('id', lastId)
+                .limit(batchSize)
+
+              if (!isGlobalRole) {
+                if (cargo === 'coordenador') {
+                  query = query.in('Região', regioesPermitidas)
+                  if (unidadesPermitidas.length > 0) {
+                    query = query.in('unidade_almoxarifado', unidadesPermitidas)
+                  }
+                } else {
+                  query = query.in('unidade_almoxarifado', unidadesPermitidas)
+                }
+              }
+
+              const { data: rows, error: fetchErr } = await query
+
+              if (fetchErr) throw fetchErr
+
+              currentBatch = rows || []
+              success = true
+            } catch (e) {
+              lastError = e
+              attempt++
+              if (attempt < 3) {
+                await new Promise((r) => setTimeout(r, 500 * attempt))
+              }
             }
           }
-        }
 
-        if (!success && lastError) throw lastError
+          if (!success && lastError) throw lastError
 
-        if (currentBatch.length > 0) {
-          all.push(...currentBatch.map(normalizeRow))
-          lastId = currentBatch[currentBatch.length - 1].id
-          
-          // 3. Progresso simulado seguro que vai crescendo aos poucos até 95%
-          setProgress((prev) => Math.min(prev + (10000 / (all.length + 100)), 95))
+          if (currentBatch.length > 0) {
+            all.push(...currentBatch.map(normalizeRow))
+            lastId = currentBatch[currentBatch.length - 1].id
 
-          if (currentBatch.length < batchSize) {
+            setProgress((prev) => Math.min(prev + 10000 / (all.length + 100), 95))
+
+            if (currentBatch.length < batchSize) {
+              hasMore = false
+            }
+          } else {
             hasMore = false
           }
-        } else {
-          hasMore = false
         }
+
+        // Grava/mescla no disco compartilhado e entrega apenas a fatia deste login
+        const discoAtualizado = await mergeDiscoCache(
+          GLOBAL_CACHE_KEYS.ESTOQUE,
+          all,
+          isGlobalRole
+        )
+        const fatiaAutorizada = lerDoDiscoPorPerfil(discoAtualizado, isAdmin, perfilAcesso)
+
+        setProgress(100)
+        setData(fatiaAutorizada)
+      } catch (err) {
+        console.error('Erro ao carregar estoque:', err)
+        setError(err.message || 'Erro ao carregar dados do Supabase')
+        setData([])
+      } finally {
+        setLoading(false)
       }
-
-      setProgress(100)
-      setData(all)
-      await setCache(CACHE_KEY, all)
-
-    } catch (err) {
-      console.error('Erro ao carregar estoque:', err)
-      setError(err.message || 'Erro ao carregar dados do Supabase')
-      setData([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    },
+    [userId, isAdmin, perfilAcesso]
+  )
 
   useEffect(() => {
+    setData([])
     load(false)
   }, [load])
 

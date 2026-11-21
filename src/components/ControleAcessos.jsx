@@ -28,6 +28,26 @@ const CARGOS = [
   },
 ];
 
+// Interpreta o campo regiao_unidade_info da solicitação (JSON estruturado ou texto legado)
+function parseEscopoSolicitacao(raw) {
+  if (!raw) return { regioes: [], unidades: [], resumoTexto: '' };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.regioes)) {
+      const regs = parsed.regioes || [];
+      const unis = parsed.unidades || [];
+      return {
+        regioes: regs,
+        unidades: unis,
+        resumoTexto: `Regiões: ${regs.join(', ') || 'Nenhuma'} · ${unis.length} usina(s) selecionada(s)`,
+      };
+    }
+  } catch {
+    // Texto simples legado
+  }
+  return { regioes: [], unidades: [], resumoTexto: raw };
+}
+
 export default function ControleAcessos({ estoqueData = [], inventarioData = [], currentUserId }) {
   const [perfis, setPerfis] = useState([]);
   const [loadingPerfis, setLoadingPerfis] = useState(true);
@@ -61,7 +81,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   const [confirmarExclusao, setConfirmarExclusao] = useState(false);
   const [excluindoUsuario, setExcluindoUsuario] = useState(false);
 
-  // Busca instantânea da estrutura organizacional (Regiões + Unidades) direto do Supabase (somente Admin)
   const carregarEstruturaOrganizacional = async () => {
     setLoadingEstrutura(true);
     const { data, error } = await supabase.rpc('admin_listar_estrutura_organizacional');
@@ -71,7 +90,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setLoadingEstrutura(false);
   };
 
-  // Carrega solicitações de primeiro acesso pendentes
   const carregarSolicitacoes = async () => {
     setLoadingSolicitacoes(true);
     const { data, error } = await supabase
@@ -86,7 +104,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setLoadingSolicitacoes(false);
   };
 
-  // Consolida Regiões, Unidades e agrupamento por Região
   const {
     regioesDisponiveis,
     unidadesDisponiveis,
@@ -158,7 +175,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     };
   }, [estruturaServer, estoqueData, inventarioData]);
 
-  // Carrega todos os perfis da tabela perfis_acesso
   const carregarPerfis = async (selecionarIdOpcional = null) => {
     setLoadingPerfis(true);
     setErro(null);
@@ -280,8 +296,8 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setSucesso(null);
   };
 
-  // Preenche o formulário de cadastro a partir de uma solicitação pendente
   const handleIniciarAprovacao = (sol) => {
+    const escopo = parseEscopoSolicitacao(sol.regiao_unidade_info);
     setErro(null);
     setSucesso(null);
     setSolicitacaoEmAprovacaoId(sol.id);
@@ -290,8 +306,8 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setNovaSenha('');
     setMostrarNovaSenha(false);
     setNovoCargo(sol.cargo_solicitado || 'supervisor');
-    setNovasRegioes([]);
-    setNovasUnidades([]);
+    setNovasRegioes(escopo.regioes);
+    setNovasUnidades(escopo.unidades);
     setFiltroUnidadeNovo('');
     setMostrarFormNovo(true);
   };
@@ -440,7 +456,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     atualizarCampoLocal(campo, []);
   };
 
-  // Criar novo usuário direto pelo painel via RPC admin_criar_usuario
   const handleCriarNovoUsuario = async (e) => {
     e.preventDefault();
     setErro(null);
@@ -475,7 +490,14 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     if (error) {
       setErro(`Erro ao criar usuário: ${error.message}`);
     } else {
-      // Se veio de uma solicitação pendente, marca como aprovada
+      // Garante que o novo usuário precisará trocar a senha provisória no primeiro login
+      if (novoUserId) {
+        await supabase
+          .from('perfis_acesso')
+          .update({ trocar_senha_obrigatoria: true })
+          .eq('user_id', novoUserId);
+      }
+
       if (solicitacaoEmAprovacaoId) {
         await supabase
           .from('solicitacoes_acesso')
@@ -484,7 +506,9 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
         await carregarSolicitacoes();
       }
 
-      setSucesso(`Usuário ${novoEmail.trim().toLowerCase()} criado e liberado com sucesso!`);
+      setSucesso(
+        `Usuário ${novoEmail.trim().toLowerCase()} criado! Ele deverá definir uma senha pessoal no primeiro acesso.`
+      );
       setMostrarFormNovo(false);
       resetarFormularioNovoUsuario();
       await carregarPerfis(novoUserId);
@@ -552,8 +576,17 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     if (error) {
       setErro(`Erro ao alterar senha: ${error.message}`);
     } else {
-      setSucesso(`Senha de ${usuarioAtual.email} alterada com sucesso!`);
+      if (usuarioAtual.user_id !== currentUserId) {
+        await supabase
+          .from('perfis_acesso')
+          .update({ trocar_senha_obrigatoria: true })
+          .eq('user_id', usuarioAtual.user_id);
+      }
+      setSucesso(
+        `Senha provisória de ${usuarioAtual.email} definida! Ele deverá cadastrar uma nova senha pessoal ao entrar.`
+      );
       setSenhaRedefinida('');
+      await carregarPerfis(usuarioAtual.user_id);
     }
     setAlterandoSenha(false);
   };
@@ -684,44 +717,59 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {solicitacoes.map((sol) => (
-              <div
-                key={sol.id}
-                className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-xl p-4 flex flex-col justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-white">{sol.nome}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-[#f58220]/20 text-[#f58220] border border-[#f58220]/40">
-                      {sol.cargo_solicitado}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-gray-300 font-mono">{sol.email}</div>
-                  {sol.regiao_unidade_info && (
-                    <div className="text-[11px] text-gray-400">
-                      Escopo informado: <strong className="text-gray-200">{sol.regiao_unidade_info}</strong>
+            {solicitacoes.map((sol) => {
+              const escopo = parseEscopoSolicitacao(sol.regiao_unidade_info);
+              return (
+                <div
+                  key={sol.id}
+                  className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-xl p-4 flex flex-col justify-between gap-3"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white">{sol.nome}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-[#f58220]/20 text-[#f58220] border border-[#f58220]/40">
+                        {sol.cargo_solicitado}
+                      </span>
                     </div>
-                  )}
-                </div>
+                    <div className="text-[11px] text-gray-300 font-mono">{sol.email}</div>
+                    {escopo.resumoTexto && (
+                      <div className="text-[11px] text-gray-400">
+                        Escopo solicitado: <strong className="text-gray-200">{escopo.resumoTexto}</strong>
+                      </div>
+                    )}
+                    {escopo.unidades.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {escopo.unidades.map((u) => (
+                          <span
+                            key={u}
+                            className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                          >
+                            {u}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1e1e1e]">
-                  <button
-                    type="button"
-                    onClick={() => handleRecusarSolicitacao(sol.id)}
-                    className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-red-950/60 text-[11px] font-bold text-gray-400 hover:text-red-300 cursor-pointer"
-                  >
-                    Recusar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleIniciarAprovacao(sol)}
-                    className="px-3.5 py-1.5 rounded-lg bg-[#f58220] hover:bg-[#e07112] text-[11px] font-black text-black uppercase cursor-pointer"
-                  >
-                    Aprovar & Liberar
-                  </button>
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1e1e1e]">
+                    <button
+                      type="button"
+                      onClick={() => handleRecusarSolicitacao(sol.id)}
+                      className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-red-950/60 text-[11px] font-bold text-gray-400 hover:text-red-300 cursor-pointer"
+                    >
+                      Recusar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleIniciarAprovacao(sol)}
+                      className="px-3.5 py-1.5 rounded-lg bg-[#f58220] hover:bg-[#e07112] text-[11px] font-black text-black uppercase cursor-pointer"
+                    >
+                      Aprovar & Liberar
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -744,7 +792,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                   : 'Cadastrar Novo Usuário'}
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">
-                Defina a senha inicial e as regiões/unidades permitidas para liberar o acesso.
+                Defina uma senha temporária inicial — o colaborador será obrigado a criar uma senha pessoal no primeiro acesso.
               </p>
             </div>
           </div>
@@ -783,7 +831,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
 
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
-                Senha Inicial (mín. 6 caracteres) *
+                Senha Provisória (mín. 6 caracteres) *
               </label>
               <div className="relative">
                 <input
@@ -1080,6 +1128,14 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                         {perfil.nome || perfil.email.split('@')[0]}
                       </span>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {perfil.trocar_senha_obrigatoria && (
+                          <span
+                            title="Aguardando troca da senha provisória no primeiro login"
+                            className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                          >
+                            Senha Provisória
+                          </span>
+                        )}
                         {!perfil.ativo && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
                             Bloqueado
@@ -1367,10 +1423,10 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                   </div>
                 )}
 
-                {/* Segurança: Redefinir Senha */}
+                {/* Segurança: Definir Nova Senha Provisória */}
                 <div className="pt-4 border-t border-[#242424] space-y-2.5">
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Redefinir Senha de Acesso (Suporte Admin)
+                    Definir Senha Provisória (Usuário trocará ao entrar)
                   </label>
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <input
@@ -1379,7 +1435,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                       autoComplete="new-password"
                       value={senhaRedefinida}
                       onChange={(e) => setSenhaRedefinida(e.target.value)}
-                      placeholder="Nova senha (mín. 6 caracteres)"
+                      placeholder="Nova senha provisória (mín. 6 caracteres)"
                       className="flex-1 px-3.5 py-2 rounded-xl bg-[#0a0a0a] border border-[#262626] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
                     />
                     <button
