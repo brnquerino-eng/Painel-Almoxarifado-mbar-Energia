@@ -5,13 +5,16 @@ export default function Header({
   activeTab,
   setActiveTab,
   userEmail,
+  userCargo,
+  isAdmin,
   onLogout,
 }) {
   const menus = [
     { id: 'pergunte', label: 'Pergunte ao Estoque' },
     { id: 'resumo', label: 'Resumo Estoque' },
     { id: 'geral', label: 'Visão Geral' },
-    { id: 'inventarios', label: 'Painel de Inventários' }
+    { id: 'inventarios', label: 'Painel de Inventários' },
+    ...(isAdmin ? [{ id: 'acessos', label: 'Controle de Acessos' }] : []),
   ];
 
   const getMenuIcon = (id, isActive) => {
@@ -40,6 +43,12 @@ export default function Header({
         return (
           <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          </svg>
+        );
+      case 'acessos':
+        return (
+          <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
         );
       default:
@@ -132,15 +141,28 @@ export default function Header({
         })}
       </nav>
 
-      {/* Rodapé da Sidebar: Usuário Logado + Botão Sair + Versão */}
+      {/* Rodapé da Sidebar: Usuário Logado + Cargo + Botão Sair + Versão */}
       <div className="p-4 border-t border-[#2A2A2A] flex flex-col gap-3 bg-[#0a0a0a]">
         {userEmail && (
           <div className="flex items-center justify-between gap-2 bg-[#141414] border border-[#242424] rounded-xl px-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">
-                Conectado
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                  Conectado
+                </span>
+                {userCargo && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider ${
+                      isAdmin
+                        ? 'bg-[#f58220]/20 text-[#f58220] border border-[#f58220]/40'
+                        : 'bg-white/10 text-gray-300'
+                    }`}
+                  >
+                    {userCargo}
+                  </span>
+                )}
               </div>
-              <div className="text-xs text-gray-300 truncate font-medium" title={userEmail}>
+              <div className="text-xs text-gray-300 truncate font-medium mt-0.5" title={userEmail}>
                 {userEmail}
               </div>
             </div>
