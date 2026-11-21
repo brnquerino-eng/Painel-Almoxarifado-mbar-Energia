@@ -429,7 +429,7 @@ export default function LoginScreen({
     }
   }
 
-  // 4. Enviar pedido de primeiro acesso para aprovação do Admin
+  // 4. Enviar pedido de primeiro acesso para aprovação do Admin + disparar e-mails
   const handleSolicitarAcesso = async (e) => {
     e.preventDefault()
     setError(null)
@@ -445,13 +445,14 @@ export default function LoginScreen({
     }
 
     let resumoEscopo = 'Acesso Corporativo Global (Todas as regiões e unidades)'
+    let unidadesValidadas = []
 
     if (solCargo !== 'gerente') {
       if (solRegioes.length === 0) {
         setError('Selecione pelo menos uma Região.')
         return
       }
-      const unidadesValidadas = solUnidades.filter((u) =>
+      unidadesValidadas = solUnidades.filter((u) =>
         solRegioes.includes(mapaUnidadeRegiao[u])
       )
       if (unidadesValidadas.length === 0) {
@@ -527,8 +528,26 @@ export default function LoginScreen({
           setError(`Não foi possível enviar a solicitação: ${insertError.message}`)
         }
       } else {
+        // Dispara notificação por e-mail para o solicitante e para o Admin
+        try {
+          await fetch('/api/notificar-solicitacao', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              nome: nomeLimpo,
+              email: emailLimpo,
+              cargo: solCargo,
+              regioes: solRegioes,
+              unidades: unidadesValidadas,
+              urlPainel: window.location.origin,
+            }),
+          })
+        } catch (mailErr) {
+          console.warn('Solicitação gravada, mas houve falha ao disparar e-mails:', mailErr)
+        }
+
         setSuccessMsg(
-          'Solicitação enviada com sucesso! Assim que o Administrador aprovar e liberar sua abrangência, você poderá acessar o painel.'
+          'Solicitação enviada com sucesso! Enviamos uma confirmação para o seu e-mail e notificamos o Administrador para análise.'
         )
         setSolNome('')
         setSolEmail('')
