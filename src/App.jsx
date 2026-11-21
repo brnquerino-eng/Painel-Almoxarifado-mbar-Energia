@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { supabase } from './lib/supabase'
+import LoginScreen from './components/LoginScreen'
 import Header from './components/Header'
 import LoadingScreen from './components/LoadingScreen'
 import VisaoGeral from './components/VisaoGeral'
@@ -8,7 +10,7 @@ import ResumoEstoque from './components/ResumoEstoque'
 import { useEstoqueData } from './hooks/useEstoqueData'
 import { useInventarioData } from './hooks/useInventarioData'
 
-export default function App() {
+function DashboardContent({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('pergunte')
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
   const [buscando, setBuscando] = useState(false)
@@ -65,6 +67,8 @@ export default function App() {
           loading={buscando}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          userEmail={user?.email}
+          onLogout={onLogout}
         />
         <div className="flex-1 flex flex-col relative">
           <LoadingScreen
@@ -85,6 +89,8 @@ export default function App() {
         loading={buscando}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        userEmail={user?.email}
+        onLogout={onLogout}
       />
 
       {/* Área Principal com Scroll Independente */}
@@ -125,4 +131,51 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+export default function App() {
+  const [session, setSession] = useState(null)
+  const [verificandoSessao, setVerificandoSessao] = useState(true)
+
+  useEffect(() => {
+    // Verifica sessão ativa ao abrir o app
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setVerificandoSessao(false)
+    })
+
+    // Escuta login, logout e expiração de token em tempo real
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setVerificandoSessao(false)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+  }
+
+  // Tela rápida enquanto checa o token salvo no navegador
+  if (verificandoSessao) {
+    return (
+      <div className="h-screen w-full bg-[#080808] flex flex-col items-center justify-center text-white gap-3">
+        <div className="w-8 h-8 border-2 border-[#f58220] border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-mono text-gray-500 uppercase tracking-widest">
+          Verificando acesso...
+        </span>
+      </div>
+    )
+  }
+
+  // Bloqueia o painel se não estiver autenticado
+  if (!session) {
+    return <LoginScreen />
+  }
+
+  // Libera o painel completo quando autenticado
+  return <DashboardContent user={session.user} onLogout={handleLogout} />
 }

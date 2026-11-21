@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-// ⚠️ Configure suas variáveis de ambiente no StackBlitz:
-// Clique no ícone de cadeado (Secrets) e adicione:
+// ⚠️ Configure suas variáveis de ambiente no StackBlitz / Vercel:
 //   VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 //   VITE_SUPABASE_ANON_KEY=sua-chave-anon
 //
@@ -13,14 +12,15 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn(
     '[Supabase] Variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY não configuradas. ' +
-    'Adicione-as nas Secrets do StackBlitz.'
+    'Adicione-as nas Secrets do StackBlitz ou Environment Variables da Vercel.'
   )
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false,
-    autoRefreshToken: false,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
   },
 })
 

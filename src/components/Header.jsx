@@ -1,4 +1,12 @@
-export default function Header({ ultimaAtualizacao, onAtualizar, loading, activeTab, setActiveTab }) {
+export default function Header({
+  ultimaAtualizacao,
+  onAtualizar,
+  loading,
+  activeTab,
+  setActiveTab,
+  userEmail,
+  onLogout,
+}) {
   const menus = [
     { id: 'pergunte', label: 'Pergunte ao Estoque' },
     { id: 'resumo', label: 'Resumo Estoque' },
@@ -124,11 +132,37 @@ export default function Header({ ultimaAtualizacao, onAtualizar, loading, active
         })}
       </nav>
 
-      {/* Rodapé da Sidebar */}
-      <div className="p-4 border-t border-[#2A2A2A] text-center">
-        <span className="text-[10px] font-mono text-gray-600 uppercase tracking-widest">
-          Painel Estoque · v3.0
-        </span>
+      {/* Rodapé da Sidebar: Usuário Logado + Botão Sair + Versão */}
+      <div className="p-4 border-t border-[#2A2A2A] flex flex-col gap-3 bg-[#0a0a0a]">
+        {userEmail && (
+          <div className="flex items-center justify-between gap-2 bg-[#141414] border border-[#242424] rounded-xl px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                Conectado
+              </div>
+              <div className="text-xs text-gray-300 truncate font-medium" title={userEmail}>
+                {userEmail}
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                title="Sair do sistema"
+                className="shrink-0 p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all cursor-pointer"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="text-center">
+          <span className="text-[10px] font-mono text-gray-600 uppercase tracking-widest">
+            Painel Estoque · v3.0
+          </span>
+        </div>
       </div>
     </aside>
   );
