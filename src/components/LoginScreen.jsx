@@ -1,5 +1,173 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+
+// Dropdown compacto com múltipla seleção (visual de lista suspensa, permite marcar várias opções)
+function MultiSelectDropdown({
+  label,
+  placeholder,
+  disabled = false,
+  options = [], // [{ value, label, group? }]
+  selectedValues = [],
+  onChange,
+  showSelectAll = true,
+  searchable = false,
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [busca, setBusca] = useState('')
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickFora = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setAberto(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickFora)
+    return () => document.removeEventListener('mousedown', handleClickFora)
+  }, [])
+
+  const opcoesFiltradas = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return options
+    return options.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(q) ||
+        (opt.group && opt.group.toLowerCase().includes(q))
+    )
+  }, [options, busca])
+
+  const toggleValor = (val) => {
+    if (selectedValues.includes(val)) {
+      onChange(selectedValues.filter((v) => v !== val))
+    } else {
+      onChange([...selectedValues, val])
+    }
+  }
+
+  const textoResumo = useMemo(() => {
+    if (selectedValues.length === 0) return placeholder
+    if (selectedValues.length === 1) return selectedValues[0]
+    if (selectedValues.length <= 2) return selectedValues.join(', ')
+    return `${selectedValues.length} selecionada(s)`
+  }, [selectedValues, placeholder])
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+        {label}
+      </label>
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) setAberto((prev) => !prev)
+        }}
+        className={`w-full bg-[#141414] border ${
+          aberto ? 'border-[#f58220]' : 'border-[#2A2A2A]'
+        } rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between gap-2 transition-colors ${
+          disabled
+            ? 'opacity-40 cursor-not-allowed'
+            : 'cursor-pointer hover:border-[#3c3c3c]'
+        }`}
+      >
+        <span
+          className={`truncate ${
+            selectedValues.length === 0 ? 'text-gray-500' : 'text-white font-medium'
+          }`}
+        >
+          {textoResumo}
+        </span>
+        <svg
+          className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${
+            aberto ? 'rotate-180 text-[#f58220]' : ''
+          }`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {aberto && !disabled && (
+        <div className="absolute z-30 mt-1.5 w-full bg-[#121212] border border-[#f58220]/50 rounded-xl shadow-[0_12px_35px_rgba(0,0,0,0.9)] overflow-hidden">
+          {searchable && (
+            <div className="p-2 border-b border-[#222]">
+              <input
+                type="search"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar..."
+                autoFocus
+                className="w-full px-3 py-1.5 rounded-lg bg-[#0a0a0a] border border-[#2a2a2a] text-xs text-white placeholder-gray-500 outline-none focus:border-[#f58220]"
+              />
+            </div>
+          )}
+
+          {showSelectAll && options.length > 1 && (
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[#0d0d0d] border-b border-[#222] text-[10px]">
+              <button
+                type="button"
+                onClick={() => onChange(options.map((o) => o.value))}
+                className="text-[#f58220] font-bold hover:underline cursor-pointer"
+              >
+                Marcar todas ({options.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-gray-400 hover:underline cursor-pointer"
+              >
+                Limpar
+              </button>
+            </div>
+          )}
+
+          <div className="max-h-48 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
+            {opcoesFiltradas.length === 0 ? (
+              <div className="text-center py-3 text-xs text-gray-500">
+                Nenhuma opção encontrada.
+              </div>
+            ) : (
+              opcoesFiltradas.map((opt, idx) => {
+                const checked = selectedValues.includes(opt.value)
+                const mostrarCabecalhoGrupo =
+                  opt.group && (idx === 0 || opcoesFiltradas[idx - 1].group !== opt.group)
+
+                return (
+                  <div key={opt.value}>
+                    {mostrarCabecalhoGrupo && (
+                      <div className="px-2.5 pt-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-[#f58220]">
+                        {opt.group}
+                      </div>
+                    )}
+                    <label
+                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-[#f58220]/15 text-white font-semibold'
+                          : 'text-gray-300 hover:bg-[#1b1b1b]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleValor(opt.value)}
+                        className="accent-[#f58220] w-3.5 h-3.5 rounded shrink-0"
+                      />
+                      <span className="truncate">{opt.label}</span>
+                    </label>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete }) {
   // Modos: 'login' | 'esqueci' | 'solicitar' | 'nova_senha'
@@ -19,16 +187,120 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
   const [confirmarNovaSenha, setConfirmarNovaSenha] = useState('')
   const [showNovaSenha, setShowNovaSenha] = useState(false)
 
-  // Solicitação de primeiro acesso
+  // Solicitação de primeiro acesso (dropdowns multi-seleção em cascata)
+  const [estruturaOrg, setEstruturaOrg] = useState([])
+  const [loadingEstrutura, setLoadingEstrutura] = useState(false)
+  const [erroEstrutura, setErroEstrutura] = useState(null)
   const [solNome, setSolNome] = useState('')
   const [solEmail, setSolEmail] = useState('')
   const [solCargo, setSolCargo] = useState('supervisor')
-  const [solRegiaoUnidade, setSolRegiaoUnidade] = useState('')
+  const [solRegioes, setSolRegioes] = useState([])
+  const [solUnidades, setSolUnidades] = useState([])
   const [solicitacaoEnviada, setSolicitacaoEnviada] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
+
+  const carregarEstrutura = async () => {
+    setLoadingEstrutura(true)
+    setErroEstrutura(null)
+    const { data, error: rpcErr } = await supabase.rpc('public_listar_estrutura_organizacional')
+    if (rpcErr) {
+      setErroEstrutura(`Não foi possível carregar regiões/usinas (${rpcErr.message}).`)
+    } else if (Array.isArray(data)) {
+      setEstruturaOrg(data)
+    }
+    setLoadingEstrutura(false)
+  }
+
+  useEffect(() => {
+    if (modo === 'solicitar' && estruturaOrg.length === 0) {
+      carregarEstrutura()
+    }
+  }, [modo])
+
+  // Agrupa Regiões e Unidades
+  const { regioesDisponiveis, gruposPorRegiao, mapaUnidadeRegiao } = useMemo(() => {
+    const regSet = new Set()
+    const grupos = {}
+    const mapa = {}
+
+    estruturaOrg.forEach((item) => {
+      const reg = (item?.regiao || '').toString().trim()
+      const uni = (item?.unidade || '').toString().trim()
+      if (!uni) return
+      const regFinal = reg || 'Geral / Outras'
+      regSet.add(regFinal)
+      if (!grupos[regFinal]) grupos[regFinal] = []
+      if (!grupos[regFinal].includes(uni)) grupos[regFinal].push(uni)
+      mapa[uni] = regFinal
+    })
+
+    const regioesOrdenadas = Array.from(regSet).sort((a, b) => {
+      if (a === 'Geral / Outras') return 1
+      if (b === 'Geral / Outras') return -1
+      return a.localeCompare(b, 'pt-BR')
+    })
+
+    const gruposMap = {}
+    regioesOrdenadas.forEach((reg) => {
+      gruposMap[reg] = (grupos[reg] || []).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    })
+
+    return {
+      regioesDisponiveis: regioesOrdenadas,
+      gruposPorRegiao: gruposMap,
+      mapaUnidadeRegiao: mapa,
+    }
+  }, [estruturaOrg])
+
+  const opcoesRegioes = useMemo(
+    () => regioesDisponiveis.map((reg) => ({ value: reg, label: reg })),
+    [regioesDisponiveis]
+  )
+
+  const opcoesUnidadesFiltradas = useMemo(() => {
+    if (solRegioes.length === 0) return []
+    const lista = []
+    regioesDisponiveis.forEach((reg) => {
+      if (!solRegioes.includes(reg)) return
+      const unis = gruposPorRegiao[reg] || []
+      unis.forEach((u) => {
+        lista.push({
+          value: u,
+          label: u,
+          group: solRegioes.length > 1 ? reg : null,
+        })
+      })
+    })
+    return lista
+  }, [solRegioes, regioesDisponiveis, gruposPorRegiao])
+
+  // Atualiza Regiões em cascata e limpa unidades de regiões desmarcadas
+  const handleAlterarRegioesSolicitacao = (novasRegs) => {
+    setSolRegioes(novasRegs)
+    setError(null)
+
+    const novasRegsSet = new Set(novasRegs)
+    const unidadesMantidas = solUnidades.filter((u) =>
+      novasRegsSet.has(mapaUnidadeRegiao[u])
+    )
+
+    // Se for Coordenador e acabou de marcar uma região nova, pré-marca as usinas dela (podendo desmarcar o que não atender)
+    if (solCargo === 'coordenador') {
+      const regioesAntigasSet = new Set(solRegioes)
+      const extras = []
+      novasRegs.forEach((r) => {
+        if (!regioesAntigasSet.has(r)) {
+          extras.push(...(gruposPorRegiao[r] || []))
+        }
+      })
+      setSolUnidades(Array.from(new Set([...unidadesMantidas, ...extras])))
+    } else {
+      setSolUnidades(unidadesMantidas)
+    }
+  }
 
   const trocarModo = (novoModo) => {
     setModo(novoModo)
@@ -143,11 +415,31 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
 
     const nomeLimpo = solNome.trim()
     const emailLimpo = solEmail.trim().toLowerCase()
-    const regUniLimpo = solRegiaoUnidade.trim()
 
-    if (!nomeLimpo || !emailLimpo || !regUniLimpo) {
-      setError('Preencha todos os campos obrigatórios para análise do administrador.')
+    if (!nomeLimpo || !emailLimpo) {
+      setError('Informe seu nome completo e e-mail corporativo.')
       return
+    }
+
+    let resumoEscopo = 'Acesso Corporativo Global (Todas as regiões e unidades)'
+
+    if (solCargo !== 'gerente') {
+      if (solRegioes.length === 0) {
+        setError('Selecione pelo menos uma Região.')
+        return
+      }
+      const unidadesValidadas = solUnidades.filter((u) =>
+        solRegioes.includes(mapaUnidadeRegiao[u])
+      )
+      if (unidadesValidadas.length === 0) {
+        setError('Selecione pelo menos uma Usina / Unidade.')
+        return
+      }
+
+      resumoEscopo = JSON.stringify({
+        regioes: solRegioes,
+        unidades: unidadesValidadas,
+      })
     }
 
     setLoading(true)
@@ -156,7 +448,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
         nome: nomeLimpo,
         email: emailLimpo,
         cargo_solicitado: solCargo,
-        regiao_unidade_info: regUniLimpo,
+        regiao_unidade_info: resumoEscopo,
         status: 'pendente',
       })
 
@@ -169,7 +461,8 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
         setSolNome('')
         setSolEmail('')
         setSolCargo('supervisor')
-        setSolRegiaoUnidade('')
+        setSolRegioes([])
+        setSolUnidades([])
         setSolicitacaoEnviada(true)
       }
     } catch (err) {
@@ -180,11 +473,11 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#080808] text-white font-sans flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen w-full bg-[#080808] text-white font-sans flex items-center justify-center p-4 relative overflow-y-auto">
       {/* Glow decorativo sutil no fundo */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#f58220]/5 rounded-full blur-[120px] pointer-events-none" />
 
-      <div className="w-full max-w-md bg-[#0c0c0c] border border-[#2A2A2A] rounded-3xl p-8 shadow-[0_0_40px_rgba(0,0,0,0.8)] relative z-10">
+      <div className="w-full max-w-md bg-[#0c0c0c] border border-[#2A2A2A] rounded-3xl p-8 shadow-[0_0_40px_rgba(0,0,0,0.8)] relative z-10 my-6">
         {/* Identidade Âmbar Energia */}
         <div className="bg-[#101010] backdrop-blur-md px-6 py-4 rounded-2xl text-center shadow-[0_0_15px_rgba(245,130,32,0.12)] border border-[#f58220]/25 mb-6">
           <div className="text-white font-black text-3xl leading-tight tracking-tight drop-shadow-md">
@@ -434,7 +727,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
           </form>
         )}
 
-        {/* MODO 4: SOLICITAR PRIMEIRO ACESSO */}
+        {/* MODO 4: SOLICITAR PRIMEIRO ACESSO (DROPDOWNS MULTI-SELEÇÃO EM CASCATA) */}
         {modo === 'solicitar' && (
           <div className="flex flex-col gap-3.5">
             {!solicitacaoEnviada && (
@@ -473,8 +766,11 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
                   </label>
                   <select
                     value={solCargo}
-                    onChange={(e) => setSolCargo(e.target.value)}
-                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white outline-none"
+                    onChange={(e) => {
+                      setSolCargo(e.target.value)
+                      setError(null)
+                    }}
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white outline-none cursor-pointer"
                   >
                     <option value="supervisor">Supervisor de Almoxarifado</option>
                     <option value="coordenador">Coordenador Regional</option>
@@ -482,19 +778,61 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
-                    Região / Usina(s) que atende *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={solRegiaoUnidade}
-                    onChange={(e) => setSolRegiaoUnidade(e.target.value)}
-                    placeholder="Ex.: UTE Uruguaiana / Região Sul"
-                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
-                  />
-                </div>
+                {solCargo === 'gerente' ? (
+                  <div className="p-3 rounded-xl bg-[#141414] border border-[#262626] text-xs text-gray-400">
+                    Para <strong className="text-gray-200">Gerente Corporativo</strong>, o acesso é global para todas as regiões e usinas.
+                  </div>
+                ) : (
+                  <>
+                    {/* Dropdown Multi-Seleção 1: Regiões */}
+                    {erroEstrutura ? (
+                      <div className="p-2.5 rounded-xl bg-red-950/30 border border-red-500/40 text-xs text-red-200 flex items-center justify-between gap-2">
+                        <span>{erroEstrutura}</span>
+                        <button
+                          type="button"
+                          onClick={carregarEstrutura}
+                          className="text-[#f58220] font-bold underline shrink-0 cursor-pointer"
+                        >
+                          Recarregar
+                        </button>
+                      </div>
+                    ) : (
+                      <MultiSelectDropdown
+                        label="Região(ões) *"
+                        placeholder={
+                          loadingEstrutura
+                            ? 'Carregando regiões...'
+                            : 'Selecione uma ou mais regiões...'
+                        }
+                        disabled={loadingEstrutura}
+                        options={opcoesRegioes}
+                        selectedValues={solRegioes}
+                        onChange={handleAlterarRegioesSolicitacao}
+                        showSelectAll={true}
+                        searchable={false}
+                      />
+                    )}
+
+                    {/* Dropdown Multi-Seleção 2: Usinas / Unidades (liberado após selecionar Região) */}
+                    <MultiSelectDropdown
+                      label="Usina(s) / Unidade(s) *"
+                      placeholder={
+                        solRegioes.length === 0
+                          ? 'Selecione primeiro uma região acima...'
+                          : 'Selecione uma ou mais usinas...'
+                      }
+                      disabled={solRegioes.length === 0}
+                      options={opcoesUnidadesFiltradas}
+                      selectedValues={solUnidades}
+                      onChange={(novasUnis) => {
+                        setSolUnidades(novasUnis)
+                        setError(null)
+                      }}
+                      showSelectAll={true}
+                      searchable={true}
+                    />
+                  </>
+                )}
 
                 <button
                   type="submit"
@@ -511,7 +849,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
               onClick={() => trocarModo('login')}
               className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#1c1c1c] text-xs font-bold text-gray-300 cursor-pointer"
             >
-              ← Voltar para o Login
+              ← Já tenho conta · Voltar ao Login
             </button>
           </div>
         )}
