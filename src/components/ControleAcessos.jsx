@@ -28,17 +28,26 @@ const CARGOS = [
   },
 ];
 
+function normUni(val) {
+  return (val || '').toString().trim().toUpperCase();
+}
+
+function normReg(val) {
+  const s = (val || '').toString().trim();
+  return s || 'Sem Região';
+}
+
 // Interpreta o campo regiao_unidade_info da solicitação (JSON estruturado ou texto legado)
 function parseEscopoSolicitacao(raw) {
   if (!raw) return { regioes: [], unidades: [], resumoTexto: '' };
   try {
     const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.regioes)) {
-      const regs = parsed.regioes || [];
-      const unis = parsed.unidades || [];
+      const regs = (parsed.regioes || []).map((r) => normReg(r)).filter(Boolean);
+      const unis = (parsed.unidades || []).map((u) => normUni(u)).filter(Boolean);
       return {
-        regioes: regs,
-        unidades: unis,
+        regioes: Array.from(new Set(regs)),
+        unidades: Array.from(new Set(unis)),
         resumoTexto: `Regiões: ${regs.join(', ') || 'Nenhuma'} · ${unis.length} usina(s) selecionada(s)`,
       };
     }
@@ -114,36 +123,30 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     const uniSet = new Set();
     const mapa = {};
 
-    estruturaServer.forEach((item) => {
-      const reg = (item?.regiao || '').toString().trim();
-      const uni = (item?.unidade || '').toString().trim();
+    const registrar = (rawReg, rawUni) => {
+      const reg = (rawReg || '').toString().trim();
+      const uni = normUni(rawUni);
       if (reg && reg !== 'Sem Região') regSet.add(reg);
       if (uni) {
         uniSet.add(uni);
-        mapa[uni] = reg || 'Sem Região';
-      }
-    });
-
-    estoqueData.forEach((row) => {
-      const reg = (row['Região'] || row['regiao'] || '').toString().trim();
-      const uni = (row['unidade_almoxarifado'] || '').toString().trim();
-      if (reg) regSet.add(reg);
-      if (uni) {
-        uniSet.add(uni);
-        if (reg && (!mapa[uni] || mapa[uni] === 'Sem Região')) {
+        if (reg && reg !== 'Sem Região') {
           mapa[uni] = reg;
         } else if (!mapa[uni]) {
           mapa[uni] = 'Sem Região';
         }
       }
+    };
+
+    estruturaServer.forEach((item) => {
+      registrar(item?.regiao, item?.unidade);
+    });
+
+    estoqueData.forEach((row) => {
+      registrar(row['Região'] || row['regiao'], row['unidade_almoxarifado']);
     });
 
     inventarioData.forEach((row) => {
-      const uni = (row['unidade_almoxarifado'] || '').toString().trim();
-      if (uni) {
-        uniSet.add(uni);
-        if (!mapa[uni]) mapa[uni] = 'Sem Região';
-      }
+      registrar(row['Região'] || row['regiao'], row['unidade_almoxarifado']);
     });
 
     const regioesOrdenadas = Array.from(regSet).sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -186,7 +189,15 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     if (error) {
       setErro(`Erro ao carregar perfis: ${error.message}`);
     } else {
-      const lista = data || [];
+      const lista = (data || []).map((p) => ({
+        ...p,
+        regioes_permitidas: Array.from(
+          new Set((p.regioes_permitidas || []).map((r) => (r || '').toString().trim()).filter(Boolean))
+        ),
+        unidades_permitidas: Array.from(
+          new Set((p.unidades_permitidas || []).map((u) => normUni(u)).filter(Boolean))
+        ),
+      }));
       setPerfis(lista);
       if (selecionarIdOpcional) {
         setUsuarioSelecionadoId(selecionarIdOpcional);
@@ -298,6 +309,20 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
 
   const handleIniciarAprovacao = (sol) => {
     const escopo = parseEscopoSolicitacao(sol.regiao_unidade_info);
+    const unidadesNormalizadas = escopo.unidades.map((u) => normUni(u));
+
+    // Se a solicitação trouxe unidades mas não trouxe regiões explicitamente, infere a(s) região(ões) delas
+    const regioesInferidas =
+      escopo.regioes.length > 0
+        ? escopo.regioes
+        : Array.from(
+            new Set(
+              unidadesNormalizadas
+                .map((u) => mapaUnidadeRegiao[u])
+                .filter((r) => r && r !== 'Sem Região')
+            )
+          );
+
     setErro(null);
     setSucesso(null);
     setSolicitacaoEmAprovacaoId(sol.id);
@@ -306,8 +331,8 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setNovaSenha('');
     setMostrarNovaSenha(false);
     setNovoCargo(sol.cargo_solicitado || 'supervisor');
-    setNovasRegioes(escopo.regioes);
-    setNovasUnidades(escopo.unidades);
+    setNovasRegioes(regioesInferidas);
+    setNovasUnidades(unidadesNormalizadas);
     setFiltroUnidadeNovo('');
     setMostrarFormNovo(true);
   };
@@ -340,7 +365,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     const regioesAtuais = Array.isArray(usuarioAtual.regioes_permitidas)
       ? usuarioAtual.regioes_permitidas
       : [];
-    const unidadesAtuais = new Set(usuarioAtual.unidades_permitidas || []);
+    const unidadesAtuais = new Set((usuarioAtual.unidades_permitidas || []).map(normUni));
     const unidadesDaRegiao =
       unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || [];
 
@@ -349,10 +374,10 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
 
     if (jaExiste) {
       novasRegs = regioesAtuais.filter((r) => r !== regiao);
-      unidadesDaRegiao.forEach((u) => unidadesAtuais.delete(u));
+      unidadesDaRegiao.forEach((u) => unidadesAtuais.delete(normUni(u)));
     } else {
       novasRegs = [...regioesAtuais, regiao];
-      unidadesDaRegiao.forEach((u) => unidadesAtuais.add(u));
+      unidadesDaRegiao.forEach((u) => unidadesAtuais.add(normUni(u)));
     }
 
     setSucesso(null);
@@ -370,47 +395,51 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   };
 
   const toggleRegiaoCoordenadorNovo = (regiao) => {
-    const unidadesDaRegiao =
-      unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || [];
+    const unidadesDaRegiao = (
+      unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || []
+    ).map(normUni);
     const jaExiste = novasRegioes.includes(regiao);
 
     if (jaExiste) {
       setNovasRegioes((prev) => prev.filter((r) => r !== regiao));
-      setNovasUnidades((prev) => prev.filter((u) => !unidadesDaRegiao.includes(u)));
+      setNovasUnidades((prev) => prev.filter((u) => !unidadesDaRegiao.includes(normUni(u))));
     } else {
-      setNovasRegioes((prev) => [...prev, regiao]);
-      setNovasUnidades((prev) => Array.from(new Set([...prev, ...unidadesDaRegiao])));
+      setNovasRegioes((prev) => Array.from(new Set([...prev, regiao])));
+      setNovasUnidades((prev) => Array.from(new Set([...prev.map(normUni), ...unidadesDaRegiao])));
     }
   };
 
   const toggleItemArray = (campo, item) => {
     if (!usuarioAtual) return;
+    const val = campo === 'unidades_permitidas' ? normUni(item) : item;
     const listaAtual = Array.isArray(usuarioAtual[campo]) ? usuarioAtual[campo] : [];
-    const existe = listaAtual.includes(item);
-    const novaLista = existe ? listaAtual.filter((x) => x !== item) : [...listaAtual, item];
+    const existe = listaAtual.includes(val);
+    const novaLista = existe ? listaAtual.filter((x) => x !== val) : [...listaAtual, val];
     atualizarCampoLocal(campo, novaLista);
   };
 
   const toggleGrupoUnidadesEdicao = (unidadesDoGrupo) => {
     if (!usuarioAtual) return;
-    const atuais = new Set(usuarioAtual.unidades_permitidas || []);
-    const todasMarcadas = unidadesDoGrupo.every((u) => atuais.has(u));
+    const grupoNorm = unidadesDoGrupo.map(normUni);
+    const atuais = new Set((usuarioAtual.unidades_permitidas || []).map(normUni));
+    const todasMarcadas = grupoNorm.length > 0 && grupoNorm.every((u) => atuais.has(u));
     if (todasMarcadas) {
-      unidadesDoGrupo.forEach((u) => atuais.delete(u));
+      grupoNorm.forEach((u) => atuais.delete(u));
     } else {
-      unidadesDoGrupo.forEach((u) => atuais.add(u));
+      grupoNorm.forEach((u) => atuais.add(u));
     }
     atualizarCampoLocal('unidades_permitidas', Array.from(atuais));
   };
 
   const toggleGrupoUnidadesNovo = (unidadesDoGrupo) => {
+    const grupoNorm = unidadesDoGrupo.map(normUni);
     setNovasUnidades((prev) => {
-      const atuais = new Set(prev);
-      const todasMarcadas = unidadesDoGrupo.every((u) => atuais.has(u));
+      const atuais = new Set(prev.map(normUni));
+      const todasMarcadas = grupoNorm.length > 0 && grupoNorm.every((u) => atuais.has(u));
       if (todasMarcadas) {
-        unidadesDoGrupo.forEach((u) => atuais.delete(u));
+        grupoNorm.forEach((u) => atuais.delete(u));
       } else {
-        unidadesDoGrupo.forEach((u) => atuais.add(u));
+        grupoNorm.forEach((u) => atuais.add(u));
       }
       return Array.from(atuais);
     });
@@ -449,7 +478,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   };
 
   const selecionarTodos = (campo, todosItens) => {
-    atualizarCampoLocal(campo, [...todosItens]);
+    atualizarCampoLocal(campo, Array.from(new Set(todosItens.map(normUni))));
   };
 
   const limparSelecao = (campo) => {
@@ -470,11 +499,12 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       return;
     }
 
+    const unidadesNorm = Array.from(new Set(novasUnidades.map(normUni).filter(Boolean)));
     const unidadesValidadasNovo =
       novoCargo === 'coordenador'
-        ? novasUnidades.filter((u) => novasRegioes.includes(mapaUnidadeRegiao[u]))
+        ? unidadesNorm.filter((u) => novasRegioes.includes(mapaUnidadeRegiao[u]))
         : novoCargo === 'supervisor'
-        ? novasUnidades
+        ? unidadesNorm
         : [];
 
     setCriandoUsuario(true);
@@ -490,7 +520,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     if (error) {
       setErro(`Erro ao criar usuário: ${error.message}`);
     } else {
-      // Garante que o novo usuário precisará trocar a senha provisória no primeiro login
       if (novoUserId) {
         await supabase
           .from('perfis_acesso')
@@ -525,13 +554,14 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     const ehProprioAdmin = usuarioAtual.user_id === currentUserId;
     const regsFinal =
       usuarioAtual.cargo === 'coordenador' ? usuarioAtual.regioes_permitidas || [] : [];
+    const unisNorm = Array.from(
+      new Set((usuarioAtual.unidades_permitidas || []).map(normUni).filter(Boolean))
+    );
     const unisFinal =
       usuarioAtual.cargo === 'coordenador'
-        ? (usuarioAtual.unidades_permitidas || []).filter((u) =>
-            regsFinal.includes(mapaUnidadeRegiao[u])
-          )
+        ? unisNorm.filter((u) => regsFinal.includes(mapaUnidadeRegiao[u]))
         : usuarioAtual.cargo === 'supervisor'
-        ? usuarioAtual.unidades_permitidas || []
+        ? unisNorm
         : [];
 
     const payload = {
@@ -993,7 +1023,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                     {gruposUnidadesNovo.map((grupo) => {
                       const todasDoGrupoMarcadas =
                         grupo.unidades.length > 0 &&
-                        grupo.unidades.every((u) => novasUnidades.includes(u));
+                        grupo.unidades.every((u) => novasUnidades.includes(normUni(u)));
                       return (
                         <div
                           key={grupo.regiao}
@@ -1013,7 +1043,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             {grupo.unidades.map((unidade) => {
-                              const checked = novasUnidades.includes(unidade);
+                              const checked = novasUnidades.includes(normUni(unidade));
                               return (
                                 <label
                                   key={unidade}
@@ -1027,11 +1057,12 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                                     type="checkbox"
                                     checked={checked}
                                     onChange={() =>
-                                      setNovasUnidades((prev) =>
-                                        prev.includes(unidade)
-                                          ? prev.filter((u) => u !== unidade)
-                                          : [...prev, unidade]
-                                      )
+                                      setNovasUnidades((prev) => {
+                                        const uNorm = normUni(unidade);
+                                        return prev.includes(uNorm)
+                                          ? prev.filter((u) => u !== uNorm)
+                                          : [...prev, uNorm];
+                                      })
                                     }
                                     className="accent-[#f58220] w-4 h-4 rounded shrink-0"
                                   />
@@ -1366,10 +1397,12 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
 
                         <div className="space-y-3 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
                           {gruposUnidadesEdicao.map((grupo) => {
-                            const selecionadasSet = new Set(usuarioAtual.unidades_permitidas || []);
+                            const selecionadasSet = new Set(
+                              (usuarioAtual.unidades_permitidas || []).map(normUni)
+                            );
                             const todasDoGrupoMarcadas =
                               grupo.unidades.length > 0 &&
-                              grupo.unidades.every((u) => selecionadasSet.has(u));
+                              grupo.unidades.every((u) => selecionadasSet.has(normUni(u)));
                             return (
                               <div
                                 key={grupo.regiao}
@@ -1389,7 +1422,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {grupo.unidades.map((unidade) => {
-                                    const checked = selecionadasSet.has(unidade);
+                                    const checked = selecionadasSet.has(normUni(unidade));
                                     return (
                                       <label
                                         key={unidade}

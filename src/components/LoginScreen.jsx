@@ -210,6 +210,7 @@ export default function LoginScreen({
   const [solRegioes, setSolRegioes] = useState([])
   const [solUnidades, setSolUnidades] = useState([])
   const [solicitacaoEnviada, setSolicitacaoEnviada] = useState(false)
+  const [statusSolicitacaoInfo, setStatusSolicitacaoInfo] = useState(null)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -318,6 +319,7 @@ export default function LoginScreen({
     setModo(novoModo)
     setError(null)
     setSuccessMsg(null)
+    setStatusSolicitacaoInfo(null)
     setRecuperacaoEnviada(false)
     setSolicitacaoEnviada(false)
   }
@@ -327,6 +329,7 @@ export default function LoginScreen({
     e.preventDefault()
     setError(null)
     setSuccessMsg(null)
+    setStatusSolicitacaoInfo(null)
     setLoading(true)
 
     try {
@@ -431,6 +434,7 @@ export default function LoginScreen({
     e.preventDefault()
     setError(null)
     setSuccessMsg(null)
+    setStatusSolicitacaoInfo(null)
 
     const nomeLimpo = solNome.trim()
     const emailLimpo = solEmail.trim().toLowerCase()
@@ -463,6 +467,40 @@ export default function LoginScreen({
 
     setLoading(true)
     try {
+      // Verifica se já está aprovado/cadastrado OU já tem pedido pendente em avaliação
+      const { data: verificacao, error: checkErr } = await supabase.rpc(
+        'verificar_status_solicitacao_email',
+        { p_email: emailLimpo }
+      )
+
+      if (!checkErr && Array.isArray(verificacao) && verificacao.length > 0) {
+        const registro = verificacao[0]
+
+        if (registro.situacao === 'ja_cadastrado') {
+          setStatusSolicitacaoInfo({
+            situacao: 'ja_cadastrado',
+            cargo: registro.cargo_solicitado,
+            data: registro.solicitado_em,
+          })
+          setError(
+            'Este e-mail já está aprovado e cadastrado no painel! Volte para a tela de login para entrar ou clique em "Esqueci minha senha".'
+          )
+          setLoading(false)
+          return
+        }
+
+        setStatusSolicitacaoInfo({
+          situacao: 'em_avaliacao',
+          cargo: registro.cargo_solicitado,
+          data: registro.solicitado_em,
+        })
+        setError(
+          'Já existe um pedido em avaliação para este e-mail. Aguarde a análise do administrador antes de enviar uma nova solicitação.'
+        )
+        setLoading(false)
+        return
+      }
+
       const { error: insertError } = await supabase.from('solicitacoes_acesso').insert({
         nome: nomeLimpo,
         email: emailLimpo,
@@ -472,7 +510,22 @@ export default function LoginScreen({
       })
 
       if (insertError) {
-        setError(`Não foi possível enviar a solicitação: ${insertError.message}`)
+        if (
+          insertError.code === '23505' ||
+          (insertError.message || '').toLowerCase().includes('duplicate') ||
+          (insertError.message || '').toLowerCase().includes('unique')
+        ) {
+          setStatusSolicitacaoInfo({
+            situacao: 'em_avaliacao',
+            cargo: solCargo,
+            data: new Date().toISOString(),
+          })
+          setError(
+            'Já existe um pedido em avaliação para este e-mail. Aguarde a análise do administrador.'
+          )
+        } else {
+          setError(`Não foi possível enviar a solicitação: ${insertError.message}`)
+        }
       } else {
         setSuccessMsg(
           'Solicitação enviada com sucesso! Assim que o Administrador aprovar e liberar sua abrangência, você poderá acessar o painel.'
@@ -550,7 +603,27 @@ export default function LoginScreen({
             <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
-            <span>{error}</span>
+            <div className="space-y-1.5">
+              <span>{error}</span>
+              {statusSolicitacaoInfo && (
+                <div className="pt-1 border-t border-red-500/20 text-[10px] font-mono text-red-100/90 flex flex-wrap gap-x-3 gap-y-1">
+                  <span>
+                    Status:{' '}
+                    {statusSolicitacaoInfo.situacao === 'ja_cadastrado'
+                      ? 'JÁ APROVADO / ATIVO'
+                      : 'EM AVALIAÇÃO'}
+                  </span>
+                  {statusSolicitacaoInfo.cargo && (
+                    <span>Perfil: {statusSolicitacaoInfo.cargo.toUpperCase()}</span>
+                  )}
+                  {statusSolicitacaoInfo.data && (
+                    <span>
+                      Data: {new Date(statusSolicitacaoInfo.data).toLocaleDateString('pt-BR')}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -799,7 +872,10 @@ export default function LoginScreen({
                     type="email"
                     required
                     value={solEmail}
-                    onChange={(e) => setSolEmail(e.target.value)}
+                    onChange={(e) => {
+                      setSolEmail(e.target.value)
+                      if (statusSolicitacaoInfo) setStatusSolicitacaoInfo(null)
+                    }}
                     placeholder="nome.sobrenome@ambarenergia.com.br"
                     className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
                   />
