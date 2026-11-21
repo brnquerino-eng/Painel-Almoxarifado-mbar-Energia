@@ -829,7 +829,7 @@ export default function ResumoEstoque({ data = [] }) {
     const periodoTitulo = String(periodoLabelAtual || '—')
 
     const rowHtml = (r, idx) => {
-      const bg = idx % 2 === 0 ? '#ffffff' : '#f3f6fb'
+      const bg = idx % 2 === 0 ? '#ffffff' : '#fff4eb'
       return `
       <tr style="background:${bg};">
         <td class="td-left">${r.unidade}</td>
@@ -939,8 +939,8 @@ export default function ResumoEstoque({ data = [] }) {
       if (!data.length) return '<p class="chart-empty">Sem dados de evolução mensal.</p>'
 
       const W = 520
-      const H = 210
-      const pad = { l: 52, r: 16, t: 28, b: 36 }
+      const H = 220
+      const pad = { l: 48, r: 48, t: 38, b: 38 }
       const innerW = W - pad.l - pad.r
       const innerH = H - pad.t - pad.b
       const maxY = Math.max(...data.map((d) => Math.max(d.estoqueTotal || 0, d.estoqueAtiva || 0)), 1) * 1.12
@@ -953,21 +953,22 @@ export default function ResumoEstoque({ data = [] }) {
 
       const grid = [0, 0.25, 0.5, 0.75, 1].map((t) => {
         const y = pad.t + innerH * (1 - t)
-        const val = maxY * t
-        return `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>
-          <text x="${pad.l - 6}" y="${y + 3}" text-anchor="end" font-size="8" fill="#64748b">${fmtCurto(val)}</text>`
+        return `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>`
       }).join('')
 
       const labels = data.map((d, i) => {
         const x = xAt(i)
         const yT = yAt(d.estoqueTotal)
         const yA = yAt(d.estoqueAtiva)
+        // Se Total e Ativa estão muito próximos, empurra o rótulo de baixo um pouco mais
+        const gap = Math.abs(yA - yT)
+        const yALab = gap < 16 ? yA + 16 : yA + 13
         return `
-          <circle cx="${x.toFixed(1)}" cy="${yT.toFixed(1)}" r="3.5" fill="#fff" stroke="#f58220" stroke-width="2"/>
-          <text x="${x.toFixed(1)}" y="${(yT - 8).toFixed(1)}" text-anchor="middle" font-size="7.5" font-weight="700" fill="#c2410c">${fmtCurto(d.estoqueTotal)}</text>
-          <circle cx="${x.toFixed(1)}" cy="${yA.toFixed(1)}" r="3.5" fill="#fff" stroke="#38bdf8" stroke-width="2"/>
-          <text x="${x.toFixed(1)}" y="${(yA + 14).toFixed(1)}" text-anchor="middle" font-size="7.5" font-weight="700" fill="#0284c7">${fmtCurto(d.estoqueAtiva)}</text>
-          <text x="${x.toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="9" font-weight="700" fill="#334155">${d.label}</text>
+          <circle cx="${x.toFixed(1)}" cy="${yT.toFixed(1)}" r="3.2" fill="#fff" stroke="#f58220" stroke-width="2"/>
+          <text x="${x.toFixed(1)}" y="${(yT - 8).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="700" fill="#c2410c">${fmtCurto(d.estoqueTotal)}</text>
+          <circle cx="${x.toFixed(1)}" cy="${yA.toFixed(1)}" r="3.2" fill="#fff" stroke="#38bdf8" stroke-width="2"/>
+          <text x="${x.toFixed(1)}" y="${yALab.toFixed(1)}" text-anchor="middle" font-size="7" font-weight="700" fill="#0284c7">${fmtCurto(d.estoqueAtiva)}</text>
+          <text x="${x.toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${d.label}</text>
         `
       }).join('')
 
@@ -992,8 +993,8 @@ export default function ResumoEstoque({ data = [] }) {
       if (!data.length) return '<p class="chart-empty">Sem dados de ranking.</p>'
 
       const W = 520
-      const rowH = 16
-      const pad = { l: 118, r: 90, t: 8, b: 8 }
+      const rowH = 18
+      const pad = { l: 96, r: 110, t: 18, b: 6 }
       const H = pad.t + pad.b + data.length * rowH
       const innerW = W - pad.l - pad.r
       const maxX = Math.max(...data.map((d) => d.estoqueTotal || 0), 1)
@@ -1001,11 +1002,11 @@ export default function ResumoEstoque({ data = [] }) {
 
       const bars = data.map((d, i) => {
         const y = pad.t + i * rowH
-        const w = Math.max(2, (d.estoqueTotal / maxX) * innerW)
+        const w = Math.max(2, (d.estoqueTotal / maxX) * innerW * 0.88)
         const pct = totalRef > 0 ? ((d.estoqueTotal / totalRef) * 100).toFixed(1).replace('.', ',') : '0,0'
         return `
           <text x="${pad.l - 6}" y="${y + 11}" text-anchor="end" font-size="8.5" fill="#334155">${d.unidade}</text>
-          <rect x="${pad.l}" y="${y + 3}" width="${w.toFixed(1)}" height="10" rx="2" fill="#f58220"/>
+          <rect x="${pad.l}" y="${y + 2}" width="${w.toFixed(1)}" height="12" rx="2" fill="#f58220"/>
           <text x="${(pad.l + w + 4).toFixed(1)}" y="${y + 11}" font-size="8" fill="#0f172a">${fmtCurto(d.estoqueTotal)} <tspan fill="#c2410c" font-weight="700">[${pct}%]</tspan></text>
         `
       }).join('')
@@ -1061,7 +1062,7 @@ export default function ResumoEstoque({ data = [] }) {
   <style>
     @page {
       size: A4 landscape;
-      margin: 11mm 9mm 13mm 9mm;
+      margin: 16mm 10mm 13mm 10mm;
       @bottom-right {
         content: "Página " counter(page) " de " counter(pages);
         font-family: Inter, Arial, sans-serif;
@@ -1087,7 +1088,7 @@ export default function ResumoEstoque({ data = [] }) {
       padding-bottom: 7px;
       border-bottom: 2px solid #e2e8f0;
     }
-    .brand-inner img { height: 38px; width: auto; display: block; }
+    .brand-inner img { height: 58px; width: auto; display: block; }
     .brand-inner .t {
       margin: 0;
       font-size: 15px;
@@ -1151,16 +1152,16 @@ export default function ResumoEstoque({ data = [] }) {
       border: 1px solid #94a3b8;
     }
     thead th {
-      background: #0f2744;
+      background: #f58220;
       color: #ffffff;
-      font-size: 8px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      padding: 6px 5px;
-      text-align: right;
-      border-right: 1px solid #1e3a5f;
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      padding: 8px 5px;
+      text-align: center;
+      border-right: 1px solid rgba(255,255,255,0.25);
     }
-    thead th:first-child { text-align: left; }
+    thead th:first-child { text-align: center; }
     thead th:last-child { border-right: none; }
     td {
       padding: 4px 5px;
@@ -1174,15 +1175,15 @@ export default function ResumoEstoque({ data = [] }) {
     .td-left { text-align: left; font-weight: 600; }
     .td-strong { font-weight: 800; }
     tr.total-row td {
-      background: #0f2744;
+      background: #f58220;
       color: #ffffff;
       font-weight: 800;
-      padding: 6px 5px;
-      border-top: 2px solid #0f2744;
-      border-right: 1px solid #1e3a5f;
-      text-align: right;
+      padding: 7px 5px;
+      border-top: 2px solid #e06b10;
+      border-right: 1px solid rgba(255,255,255,0.25);
+      text-align: center;
     }
-    tr.total-row td:first-child { text-align: left; letter-spacing: 0.04em; }
+    tr.total-row td:first-child { text-align: center; letter-spacing: 0.04em; }
     tr.total-row td:last-child { border-right: none; }
     .footer-note {
       margin-top: 8px;
