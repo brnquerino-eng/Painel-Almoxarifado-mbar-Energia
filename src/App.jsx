@@ -46,7 +46,7 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
   })
 
   const loading = loadingEstoque || loadingInventario || buscando
-  const progress = Math.round((progressEstoque * 0.7 + progressInventario * 0.3)) || 0
+  const progress = Math.round(progressEstoque * 0.7 + progressInventario * 0.3) || 0
 
   const unidadesPermitidasSet = useMemo(() => {
     if (isAdmin || cargoAtual === 'gerente') return null
@@ -67,15 +67,20 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
   }, [])
 
   const handleAtualizarDados = async () => {
+    if (buscando) return
     setBuscando(true)
-    await Promise.all([carregarEstoque(), carregarInventario()])
-    const agora = new Date().toLocaleString('pt-BR')
-    localStorage.setItem(GLOBAL_CACHE_KEYS.ULTIMA_CARGA, agora)
-    setUltimaAtualizacao(agora)
-    setBuscando(false)
+    try {
+      await Promise.all([carregarEstoque(), carregarInventario()])
+      const agora = new Date().toLocaleString('pt-BR')
+      localStorage.setItem(GLOBAL_CACHE_KEYS.ULTIMA_CARGA, agora)
+      setUltimaAtualizacao(agora)
+    } finally {
+      setBuscando(false)
+    }
   }
 
-  if (loading && buscando) {
+  // Só ocupa a tela inteira se ainda NÃO houver nenhum dado carregado no disco
+  if (loading && buscando && estoqueData.length === 0) {
     return (
       <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
         <Header
@@ -125,6 +130,29 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
       />
 
       <div className="flex-1 flex flex-col h-screen overflow-y-auto relative">
+        {/* Barra discreta de sincronização em segundo plano (não bloqueia troca de abas) */}
+        {buscando && (
+          <div className="sticky top-0 z-30 bg-[#140d06]/95 backdrop-blur-md border-b border-[#f58220]/40 px-6 py-2.5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-xs text-orange-100">
+              <div className="w-4 h-4 border-2 border-[#f58220] border-t-transparent rounded-full animate-spin shrink-0" />
+              <span>
+                Sincronizando base de dados em segundo plano... Você pode navegar entre as abas normalmente.
+              </span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-32 h-1.5 bg-[#262626] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#f58220] transition-all duration-300"
+                  style={{ width: `${Math.max(progress, 5)}%` }}
+                />
+              </div>
+              <span className="text-[11px] font-mono font-bold text-[#f58220]">
+                {progress}%
+              </span>
+            </div>
+          </div>
+        )}
+
         <main className="flex-1 p-6 lg:p-8">
           {(errorEstoque || errorInventario) && (
             <div className="bg-[#990000]/30 border border-red-500 rounded-xl p-4 mb-6 text-sm text-red-200">
