@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from './lib/supabase'
 import { GLOBAL_CACHE_KEYS } from './lib/cacheUtils'
 import LoginScreen from './components/LoginScreen'
@@ -79,7 +79,6 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
     }
   }
 
-  // Só ocupa a tela inteira se ainda NÃO houver nenhum dado carregado no disco
   if (loading && buscando && estoqueData.length === 0) {
     return (
       <div className="flex h-screen w-full bg-[#080808] overflow-hidden text-white font-sans">
@@ -130,7 +129,6 @@ function DashboardContent({ user, perfilAcesso, onLogout }) {
       />
 
       <div className="flex-1 flex flex-col h-screen overflow-y-auto relative">
-        {/* Barra discreta de sincronização em segundo plano (não bloqueia troca de abas) */}
         {buscando && (
           <div className="sticky top-0 z-30 bg-[#140d06]/95 backdrop-blur-md border-b border-[#f58220]/40 px-6 py-2.5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 text-xs text-orange-100">
@@ -220,11 +218,19 @@ export default function App() {
   const [verificandoSessao, setVerificandoSessao] = useState(true)
   const [isRecoveryMode, setIsRecoveryMode] = useState(false)
 
-  const carregarPerfilUsuario = async (currentSession) => {
+  // Guarda o ID do usuário atual para ignorar renovações silenciosas de token ao trocar de aba
+  const activeUserIdRef = useRef(null)
+
+  const carregarPerfilUsuario = async (currentSession, silencioso = false) => {
     if (!currentSession?.user) {
+      activeUserIdRef.current = null
       setPerfilAcesso(null)
       setVerificandoSessao(false)
       return
+    }
+
+    if (!silencioso) {
+      setVerificandoSessao(true)
     }
 
     const { data } = await supabase
@@ -233,6 +239,7 @@ export default function App() {
       .eq('user_id', currentSession.user.id)
       .maybeSingle()
 
+    activeUserIdRef.current = currentSession.user.id
     setPerfilAcesso(data || null)
     setVerificandoSessao(false)
   }
@@ -244,7 +251,7 @@ export default function App() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      carregarPerfilUsuario(session)
+      carregarPerfilUsuario(session, false)
     })
 
     const {
@@ -255,21 +262,32 @@ export default function App() {
       }
 
       if (event === 'SIGNED_OUT') {
+        activeUserIdRef.current = null
         setSession(null)
         setPerfilAcesso(null)
         setVerificandoSessao(false)
         return
       }
 
-      setVerificandoSessao(true)
+      const novoUserId = newSession?.user?.id || null
+      const mesmoUsuarioJaLogado =
+        novoUserId && activeUserIdRef.current === novoUserId
+
+      // Se é o mesmo usuário (ex.: voltou para a aba e o Supabase renovou o token),
+      // NÃO desmonta o painel nem recarrega os dados!
+      if (mesmoUsuarioJaLogado) {
+        return
+      }
+
       setSession(newSession)
-      carregarPerfilUsuario(newSession)
+      carregarPerfilUsuario(newSession, false)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   const handleLogout = async () => {
+    activeUserIdRef.current = null
     setIsRecoveryMode(false)
     setPerfilAcesso(null)
     await supabase.auth.signOut()
@@ -306,8 +324,7 @@ export default function App() {
           if (window.location.hash) {
             window.history.replaceState(null, '', window.location.pathname)
           }
-          setVerificandoSessao(true)
-          carregarPerfilUsuario(session)
+          carregarPerfilUsuario(session, false)
         }}
       />
     )
