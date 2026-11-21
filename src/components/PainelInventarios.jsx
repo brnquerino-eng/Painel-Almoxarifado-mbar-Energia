@@ -652,7 +652,7 @@ export default function PainelInventarios({ data = [] }) {
     const logoSrc = 'data:image/png;base64,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'
 
     const rowHtml = (r, idx) => {
-      const bg = idx % 2 === 0 ? '#ffffff' : '#f3f6fb'
+      const bg = idx % 2 === 0 ? '#ffffff' : '#fff4eb'
       const acu = r.acuraciaMedia
       const acuColor = acu == null ? '#64748b' : acu >= 95 ? '#15803d' : acu >= 90 ? '#c2410c' : '#b91c1c'
       return `
@@ -687,6 +687,88 @@ export default function PainelInventarios({ data = [] }) {
         </div>
       </div>`
 
+    const corAcu = (v) => (v == null ? '#94a3b8' : v >= 95 ? '#2ecc71' : v >= 90 ? '#f58220' : '#e74c3c')
+    const statusAcu = (v) => (v == null ? 'SEM DADOS' : v >= 95 ? 'EXCELENTE' : v >= 90 ? 'EM ATENÇÃO' : 'CRÍTICA')
+    const descAcu = {
+      bruta: 'Impacto financeiro absoluto no saldo contábil (ano).',
+      liquida: 'Impacto financeiro real compensado (ano).',
+      fisica: 'Precisão da contagem física linha a linha (ano).',
+    }
+    const temaAcu = (val) => {
+      if (val == null) {
+        return {
+          tone: 'acu-tone-empty',
+          cor: '#94a3b8',
+          track: '#e2e8f0',
+          title: '#334155',
+          desc: '#64748b',
+          pct: '#64748b',
+        }
+      }
+      if (val >= 95) {
+        return {
+          tone: 'acu-tone-ok',
+          cor: '#16a34a',
+          track: '#bbf7d0',
+          title: '#14532d',
+          desc: '#3f6212',
+          pct: '#15803d',
+        }
+      }
+      if (val >= 90) {
+        return {
+          tone: 'acu-tone-warn',
+          cor: '#ea580c',
+          track: '#fed7aa',
+          title: '#9a3412',
+          desc: '#c2410c',
+          pct: '#c2410c',
+        }
+      }
+      return {
+        tone: 'acu-tone-crit',
+        cor: '#dc2626',
+        track: '#fecaca',
+        title: '#991b1b',
+        desc: '#b91c1c',
+        pct: '#b91c1c',
+      }
+    }
+
+    const ringSvg = (val) => {
+      const v = val == null ? 0 : Math.max(0, Math.min(100, Number(val)))
+      const tema = temaAcu(val)
+      const r = 15.9155
+      const c = 2 * Math.PI * r
+      const dash = (v / 100) * c
+      const gap = c - dash
+      const label = val == null ? '—' : `${Number(val).toFixed(1).replace('.', ',')}%`
+      return `<svg class="ring" viewBox="0 0 42 42" width="84" height="84">
+        <circle cx="21" cy="21" r="${r}" fill="none" stroke="${tema.track}" stroke-width="3.5"/>
+        <circle cx="21" cy="21" r="${r}" fill="none" stroke="${tema.cor}" stroke-width="3.5"
+          stroke-linecap="round"
+          stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}"
+          transform="rotate(-90 21 21)"/>
+        <text x="21" y="23" text-anchor="middle" font-size="6.2" font-weight="800" fill="${tema.pct}" font-family="Inter, Arial, sans-serif">${label}</text>
+      </svg>`
+    }
+
+    const acuCard = (title, val, desc) => {
+      const tema = temaAcu(val)
+      const st = statusAcu(val)
+      return `<div class="acu-card ${tema.tone}">
+        <div class="acu-left">
+          <div class="acu-title" style="color:${tema.title}">${title}</div>
+          <div class="acu-desc" style="color:${tema.desc}">${desc}</div>
+          <div class="acu-badge" style="color:${tema.cor};border-color:${tema.cor}55;background:rgba(255,255,255,0.55);">
+            <span class="acu-dot" style="background:${tema.cor}"></span>
+            CONFIABILIDADE: ${st}
+          </div>
+        </div>
+        <div class="acu-right">${ringSvg(val)}</div>
+      </div>`
+    }
+
     const kpisBlock = `
       <div class="kpis">
         <div class="kpi kpi-c0"><div class="kpi-label">Total inventários</div><div class="kpi-value">${fmtNum(totaisEmpresaResumo.total)}</div></div>
@@ -695,10 +777,11 @@ export default function PainelInventarios({ data = [] }) {
         <div class="kpi kpi-c3"><div class="kpi-label">Qtde SKUs (linhas)</div><div class="kpi-value">${fmtNum(totaisEmpresaResumo.qtdeSkus)}</div></div>
         <div class="kpi kpi-c4"><div class="kpi-label">Valor total</div><div class="kpi-value">${fmtMoney(totaisEmpresaResumo.valor)}</div></div>
       </div>
+
       <div class="acus">
-        <div class="acu acu-c0"><div class="acu-label">Acurácia financeira (bruta)</div><div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaValor)}</div></div>
-        <div class="acu acu-c1"><div class="acu-label">Acurácia financeira (líquida)</div><div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaLiquida)}</div></div>
-        <div class="acu acu-c2"><div class="acu-label">Acurácia física (itens)</div><div class="acu-value">${fmtAcu(acuraciaAnual.acuraciaItens)}</div></div>
+        ${acuCard('Acurácia financeira (bruta)', acuraciaAnual.acuraciaValor, descAcu.bruta)}
+        ${acuCard('Acurácia financeira (líquida)', acuraciaAnual.acuraciaLiquida, descAcu.liquida)}
+        ${acuCard('Acurácia física (itens)', acuraciaAnual.acuraciaItens, descAcu.fisica)}
       </div>`
 
     const totalRow = `
@@ -714,8 +797,8 @@ export default function PainelInventarios({ data = [] }) {
 
     // Paginação explícita: garante cabeçalho de colunas em TODAS as páginas
     // Pág. 1 tem KPIs (cabe menos linhas); demais páginas só tabela
-    const PAGE1_SIZE = 16
-    const PAGE_SIZE = 22
+    const PAGE1_SIZE = 18
+    const PAGE_SIZE = 28
     const pages = []
     let offset = 0
     if (linhasEmpresaExibidas.length <= PAGE1_SIZE) {
@@ -763,7 +846,7 @@ export default function PainelInventarios({ data = [] }) {
   <style>
     @page {
       size: A4 landscape;
-      margin: 12mm 10mm 14mm 10mm;
+      margin: 16mm 10mm 13mm 10mm;
       @bottom-right {
         content: "Página " counter(page) " de " counter(pages);
         font-family: Inter, Arial, sans-serif;
@@ -789,7 +872,7 @@ export default function PainelInventarios({ data = [] }) {
       padding-bottom: 8px;
       border-bottom: 2px solid #e2e8f0;
     }
-    .brand-inner img { height: 40px; width: auto; display: block; }
+    .brand-inner img { height: 58px; width: auto; display: block; }
     .brand-inner .t {
       margin: 0;
       font-size: 16px;
@@ -830,38 +913,91 @@ export default function PainelInventarios({ data = [] }) {
     .acus {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 0;
-      border-radius: 6px;
-      overflow: hidden;
+      gap: 8px;
       margin-bottom: 10px;
-      border: 1px solid #cbd5e1;
     }
-    .acu { padding: 9px 11px; color: #fff; }
-    .acu-label { font-size: 10px; font-weight: 700; opacity: 0.95; margin-bottom: 4px; }
-    .acu-value { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
-    .acu-c0 { background: #1d4ed8; }
-    .acu-c1 { background: #7c3aed; }
-    .acu-c2 { background: #0f766e; }
+    .acu-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      min-height: 92px;
+      border: 1px solid transparent;
+    }
+    /* Temas dinâmicos por confiabilidade (igual referência de diretoria) */
+    .acu-tone-ok {
+      background: #ecfdf5;
+      border-color: #86efac;
+    }
+    .acu-tone-warn {
+      background: #fff7ed;
+      border-color: #fdba74;
+    }
+    .acu-tone-crit {
+      background: #fef2f2;
+      border-color: #fca5a5;
+    }
+    .acu-tone-empty {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    .acu-left { flex: 1; min-width: 0; }
+    .acu-title {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #ffffff;
+      margin-bottom: 3px;
+    }
+    .acu-desc {
+      font-size: 8.5px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      line-height: 1.25;
+    }
+    .acu-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid;
+    }
+    .acu-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .acu-right { flex-shrink: 0; }
+    .ring { display: block; }
     table.main {
       width: 100%;
       border-collapse: collapse;
-      font-size: 10px;
+      font-size: 9px;
       border: 1px solid #94a3b8;
     }
     thead th {
-      background: #0f2744;
+      background: #f58220;
       color: #ffffff;
       font-size: 9px;
-      font-weight: 700;
+      font-weight: 800;
       letter-spacing: 0.03em;
-      padding: 7px 8px;
-      text-align: right;
-      border-right: 1px solid #1e3a5f;
+      padding: 6px 5px;
+      text-align: center;
+      border-right: 1px solid rgba(255,255,255,0.25);
     }
-    thead th:first-child { text-align: left; }
+    thead th:first-child { text-align: center; }
     thead th:last-child { border-right: none; }
     td {
-      padding: 5px 8px;
+      padding: 4px 6px;
       text-align: right;
       border-bottom: 1px solid #e2e8f0;
       border-right: 1px solid #e2e8f0;
@@ -872,15 +1008,15 @@ export default function PainelInventarios({ data = [] }) {
     .td-left { text-align: left; font-weight: 600; }
     .td-strong { font-weight: 800; }
     tr.total-row td {
-      background: #0f2744;
+      background: #f58220;
       color: #ffffff;
       font-weight: 800;
-      padding: 7px 8px;
-      border-top: 2px solid #0f2744;
-      border-right: 1px solid #1e3a5f;
-      text-align: right;
+      padding: 6px 5px;
+      border-top: 2px solid #e06b10;
+      border-right: 1px solid rgba(255,255,255,0.25);
+      text-align: center;
     }
-    tr.total-row td:first-child { text-align: left; letter-spacing: 0.04em; }
+    tr.total-row td:first-child { text-align: center; letter-spacing: 0.04em; }
     tr.total-row td:last-child { border-right: none; }
     .footer-note {
       margin-top: 8px;
@@ -1940,66 +2076,9 @@ export default function PainelInventarios({ data = [] }) {
             </div>
             <div>
               <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white">
-                Resumo Anual de Inventário por Empresa — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
+                Resumo Anual de Inventário — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
               </h3>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <svg
-                className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8c9ba5]"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={buscaEmpresaResumo}
-                onChange={(e) => setBuscaEmpresaResumo(e.target.value)}
-                placeholder="Filtrar empresa..."
-                className="rounded-lg border border-[#2A2A2A] bg-[#080808] pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8c9ba5] focus:border-accent focus:outline-none transition-colors"
-              />
-            </div>
-
-            <button
-              onClick={exportarExcelResumoEmpresa}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span>Exportar Excel</span>
-            </button>
-
-            <button
-              onClick={exportarPdfResumoEmpresa}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-              <span>Exportar PDF</span>
-            </button>
-
-            <button
-              onClick={() => setTabelaEmpresaTelaCheia(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"
-            >
-              <svg
-                className="w-3.5 h-3.5 group-hover:scale-110 transition-transform"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-              <span>Expandir Tabela</span>
-            </button>
           </div>
         </div>
 
@@ -2078,7 +2157,7 @@ export default function PainelInventarios({ data = [] }) {
             </div>
           </div>
 {/* Medidores de acurácia ANUAL (mesmo critério do mensal, consolidado do ano) */}
-          <div className="mt-4 pt-3 border-t border-[#2A2A2A]">
+          <div className="mt-4 pt-3 pb-2 border-t border-[#2A2A2A]">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase">Acurácia anual</span>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
@@ -2183,6 +2262,77 @@ export default function PainelInventarios({ data = [] }) {
           </div>
         </div>
 
+        {/* Título + ações do detalhamento por empresa */}
+        <div className="flex flex-col gap-3 border-t border-[#2A2A2A] mt-5 p-4 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between bg-[#121212]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-[#1a1a1a] flex items-center justify-center text-[#8c9ba5] shadow-inner shrink-0 border border-[#2A2A2A]">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            </div>
+            <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white truncate">
+              Detalhamento Anual de Inventário por Empresa — {periodoAnoLabel} ({linhasEmpresaExibidas.length} empresas)
+            </h4>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="relative">
+              <svg
+                className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8c9ba5]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                value={buscaEmpresaResumo}
+                onChange={(e) => setBuscaEmpresaResumo(e.target.value)}
+                placeholder="Filtrar empresa..."
+                className="rounded-lg border border-[#2A2A2A] bg-[#080808] pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8c9ba5] focus:border-accent focus:outline-none transition-colors"
+              />
+            </div>
+
+            <button
+              onClick={exportarExcelResumoEmpresa}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a2e22] hover:bg-[#203a2b] text-[#2ecc71] border border-[#2ecc71]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Exportar Excel</span>
+            </button>
+
+            <button
+              onClick={exportarPdfResumoEmpresa}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1616] hover:bg-[#3a1c1c] text-[#e74c3c] border border-[#e74c3c]/40 text-xs font-bold transition-all shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <span>Exportar PDF</span>
+            </button>
+
+            <button
+              onClick={() => setTabelaEmpresaTelaCheia(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2a1a1a] hover:bg-[#3a2020] text-[#f58220] border border-[#f58220]/40 text-xs font-bold transition-all shadow-sm group"
+            >
+              <svg
+                className="w-3.5 h-3.5 group-hover:scale-110 transition-transform"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              <span>Expandir Tabela</span>
+            </button>
+          </div>
+        </div>
+
         <div className="max-h-[540px] overflow-auto custom-scrollbar overscroll-contain bg-[#0c0c0c]">
           {renderTabelaEmpresaResumo()}
         </div>
@@ -2204,7 +2354,7 @@ export default function PainelInventarios({ data = [] }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
                 <h2 className="text-base font-bold text-white uppercase tracking-wider">
-                  Resumo Anual de Inventário por Empresa — {periodoAnoLabel} (Tela Cheia)
+                  Detalhamento Anual de Inventário por Empresa — {periodoAnoLabel} (Tela Cheia)
                 </h2>
                 <span className="text-xs bg-accent/15 text-accent px-2.5 py-1 rounded-md font-mono border border-accent/30 font-bold shadow-inner">
                   {linhasEmpresaExibidas.length} empresas
