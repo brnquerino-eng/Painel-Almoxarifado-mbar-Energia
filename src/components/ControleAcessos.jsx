@@ -31,6 +31,8 @@ const CARGOS = [
 export default function ControleAcessos({ estoqueData = [], inventarioData = [], currentUserId }) {
   const [perfis, setPerfis] = useState([]);
   const [loadingPerfis, setLoadingPerfis] = useState(true);
+  const [solicitacoes, setSolicitacoes] = useState([]);
+  const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(true);
   const [estruturaServer, setEstruturaServer] = useState([]);
   const [loadingEstrutura, setLoadingEstrutura] = useState(true);
   const [erro, setErro] = useState(null);
@@ -42,6 +44,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
 
   // Estados do Painel de Novo Usuário
   const [mostrarFormNovo, setMostrarFormNovo] = useState(false);
+  const [solicitacaoEmAprovacaoId, setSolicitacaoEmAprovacaoId] = useState(null);
   const [novoNome, setNovoNome] = useState('');
   const [novoEmail, setNovoEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
@@ -66,6 +69,21 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       setEstruturaServer(data);
     }
     setLoadingEstrutura(false);
+  };
+
+  // Carrega solicitações de primeiro acesso pendentes
+  const carregarSolicitacoes = async () => {
+    setLoadingSolicitacoes(true);
+    const { data, error } = await supabase
+      .from('solicitacoes_acesso')
+      .select('*')
+      .eq('status', 'pendente')
+      .order('criado_em', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      setSolicitacoes(data);
+    }
+    setLoadingSolicitacoes(false);
   };
 
   // Consolida Regiões, Unidades e agrupamento por Região
@@ -166,6 +184,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   useEffect(() => {
     carregarEstruturaOrganizacional();
     carregarPerfis();
+    carregarSolicitacoes();
   }, []);
 
   const usuarioAtual = useMemo(
@@ -184,7 +203,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     );
   }, [perfis, buscaUsuario]);
 
-  // Grupos visíveis na Edição (Coordenador só vê grupos das regiões selecionadas; Supervisor vê todos)
   const gruposBaseEdicao = useMemo(() => {
     if (!usuarioAtual) return [];
     if (usuarioAtual.cargo === 'coordenador') {
@@ -212,7 +230,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       .filter((grupo) => grupo.unidades.length > 0);
   }, [gruposBaseEdicao, filtroUnidade]);
 
-  // Grupos visíveis no Cadastro Novo (Coordenador só vê grupos das regiões selecionadas; Supervisor vê todos)
   const gruposBaseNovo = useMemo(() => {
     if (novoCargo === 'coordenador') {
       const regSelecionadas = new Set(novasRegioes);
@@ -240,6 +257,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
   }, [gruposBaseNovo, filtroUnidadeNovo]);
 
   const resetarFormularioNovoUsuario = () => {
+    setSolicitacaoEmAprovacaoId(null);
     setNovoNome('');
     setNovoEmail('');
     setNovaSenha('');
@@ -262,7 +280,37 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setSucesso(null);
   };
 
-  // Atualiza estado local do perfil em edição
+  // Preenche o formulário de cadastro a partir de uma solicitação pendente
+  const handleIniciarAprovacao = (sol) => {
+    setErro(null);
+    setSucesso(null);
+    setSolicitacaoEmAprovacaoId(sol.id);
+    setNovoNome(sol.nome || '');
+    setNovoEmail(sol.email || '');
+    setNovaSenha('');
+    setMostrarNovaSenha(false);
+    setNovoCargo(sol.cargo_solicitado || 'supervisor');
+    setNovasRegioes([]);
+    setNovasUnidades([]);
+    setFiltroUnidadeNovo('');
+    setMostrarFormNovo(true);
+  };
+
+  const handleRecusarSolicitacao = async (solId) => {
+    setErro(null);
+    const { error } = await supabase
+      .from('solicitacoes_acesso')
+      .update({ status: 'rejeitado' })
+      .eq('id', solId);
+
+    if (error) {
+      setErro(`Erro ao recusar solicitação: ${error.message}`);
+    } else {
+      setSucesso('Solicitação recusada e arquivada.');
+      await carregarSolicitacoes();
+    }
+  };
+
   const atualizarCampoLocal = (campo, valor) => {
     if (!usuarioAtual) return;
     setSucesso(null);
@@ -271,8 +319,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     );
   };
 
-  // Toggle em cascata da Região (Coordenador - Edição):
-  // Ao marcar uma região, já seleciona todas as unidades dela; ao desmarcar, remove as unidades dela
   const toggleRegiaoCoordenadorEdicao = (regiao) => {
     if (!usuarioAtual) return;
     const regioesAtuais = Array.isArray(usuarioAtual.regioes_permitidas)
@@ -307,7 +353,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     );
   };
 
-  // Toggle em cascata da Região (Coordenador - Cadastro Novo)
   const toggleRegiaoCoordenadorNovo = (regiao) => {
     const unidadesDaRegiao =
       unidadesAgrupadasPorRegiao.find((g) => g.regiao === regiao)?.unidades || [];
@@ -410,7 +455,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
       return;
     }
 
-    // Garante que apenas unidades pertencentes às regiões selecionadas sejam salvas para Coordenador
     const unidadesValidadasNovo =
       novoCargo === 'coordenador'
         ? novasUnidades.filter((u) => novasRegioes.includes(mapaUnidadeRegiao[u]))
@@ -431,7 +475,16 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     if (error) {
       setErro(`Erro ao criar usuário: ${error.message}`);
     } else {
-      setSucesso(`Usuário ${novoEmail.trim().toLowerCase()} criado e configurado com sucesso!`);
+      // Se veio de uma solicitação pendente, marca como aprovada
+      if (solicitacaoEmAprovacaoId) {
+        await supabase
+          .from('solicitacoes_acesso')
+          .update({ status: 'aprovado' })
+          .eq('id', solicitacaoEmAprovacaoId);
+        await carregarSolicitacoes();
+      }
+
+      setSucesso(`Usuário ${novoEmail.trim().toLowerCase()} criado e liberado com sucesso!`);
       setMostrarFormNovo(false);
       resetarFormularioNovoUsuario();
       await carregarPerfis(novoUserId);
@@ -439,7 +492,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setCriandoUsuario(false);
   };
 
-  // Salvar alterações de cargo/regiões/unidades do usuário selecionado
   const handleSalvarPermissoes = async () => {
     if (!usuarioAtual) return;
     setSalvando(true);
@@ -481,7 +533,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setSalvando(false);
   };
 
-  // Redefinir senha do usuário selecionado via RPC admin_alterar_senha_usuario
   const handleRedefinirSenha = async () => {
     if (!usuarioAtual) return;
     if (senhaRedefinida.length < 6) {
@@ -507,7 +558,6 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
     setAlterandoSenha(false);
   };
 
-  // Excluir usuário definitivamente via RPC admin_excluir_usuario
   const handleExcluirUsuario = async () => {
     if (!usuarioAtual || usuarioAtual.user_id === currentUserId) return;
 
@@ -564,7 +614,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
             )}
           </div>
           <p className="text-xs text-gray-400 mt-1.5">
-            Cadastre usuários, defina a hierarquia (<strong className="text-gray-300">Gerente</strong>,{' '}
+            Aprove novos pedidos de acesso, defina a hierarquia (<strong className="text-gray-300">Gerente</strong>,{' '}
             <strong className="text-gray-300">Coordenador</strong> ou{' '}
             <strong className="text-gray-300">Supervisor</strong>) e controle quais regiões ou usinas cada pessoa enxerga.
           </p>
@@ -585,8 +635,9 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
             onClick={() => {
               carregarEstruturaOrganizacional();
               carregarPerfis();
+              carregarSolicitacoes();
             }}
-            disabled={loadingPerfis || loadingEstrutura}
+            disabled={loadingPerfis || loadingEstrutura || loadingSolicitacoes}
             className="px-4 py-2.5 rounded-xl bg-[#181818] hover:bg-[#222222] border border-[#2E2E2E] text-xs font-bold text-gray-200 transition-all cursor-pointer"
           >
             {loadingPerfis || loadingEstrutura ? 'Sincronizando...' : 'Atualizar Lista'}
@@ -620,6 +671,61 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
         </div>
       )}
 
+      {/* Fila de Solicitações de Primeiro Acesso Pendentes */}
+      {solicitacoes.length > 0 && (
+        <div className="bg-[#130e08] border border-[#f58220]/50 rounded-2xl p-5 space-y-3 shadow-[0_0_25px_rgba(245,130,32,0.1)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#f58220] animate-pulse" />
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">
+                Solicitações de Primeiro Acesso Pendentes ({solicitacoes.length})
+              </h3>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {solicitacoes.map((sol) => (
+              <div
+                key={sol.id}
+                className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-xl p-4 flex flex-col justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-white">{sol.nome}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-[#f58220]/20 text-[#f58220] border border-[#f58220]/40">
+                      {sol.cargo_solicitado}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-gray-300 font-mono">{sol.email}</div>
+                  {sol.regiao_unidade_info && (
+                    <div className="text-[11px] text-gray-400">
+                      Escopo informado: <strong className="text-gray-200">{sol.regiao_unidade_info}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#1e1e1e]">
+                  <button
+                    type="button"
+                    onClick={() => handleRecusarSolicitacao(sol.id)}
+                    className="px-3 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-red-950/60 text-[11px] font-bold text-gray-400 hover:text-red-300 cursor-pointer"
+                  >
+                    Recusar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleIniciarAprovacao(sol)}
+                    className="px-3.5 py-1.5 rounded-lg bg-[#f58220] hover:bg-[#e07112] text-[11px] font-black text-black uppercase cursor-pointer"
+                  >
+                    Aprovar & Liberar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Formulário Expansível de Cadastro de Novo Usuário */}
       {mostrarFormNovo && (
         <form
@@ -633,10 +739,12 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
           <div className="flex items-center justify-between border-b border-[#242424] pb-4">
             <div>
               <h3 className="text-sm font-black text-white uppercase tracking-wider">
-                Cadastrar Novo Usuário
+                {solicitacaoEmAprovacaoId
+                  ? 'Aprovar Solicitação & Liberar Acesso'
+                  : 'Cadastrar Novo Usuário'}
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">
-                O acesso será criado já confirmado e pronto para login imediato.
+                Defina a senha inicial e as regiões/unidades permitidas para liberar o acesso.
               </p>
             </div>
           </div>
@@ -686,7 +794,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                   minLength={6}
                   value={novaSenha}
                   onChange={(e) => setNovaSenha(e.target.value)}
-                  placeholder="Crie uma senha de acesso"
+                  placeholder="Crie uma senha inicial"
                   className="w-full px-3.5 py-2.5 pr-16 rounded-xl bg-[#0a0a0a] border border-[#282828] text-xs text-white placeholder-gray-600 focus:outline-none focus:border-[#f58220]"
                 />
                 <button
@@ -898,7 +1006,10 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#242424]">
             <button
               type="button"
-              onClick={() => setMostrarFormNovo(false)}
+              onClick={() => {
+                setMostrarFormNovo(false);
+                resetarFormularioNovoUsuario();
+              }}
               className="px-4 py-2.5 rounded-xl bg-[#181818] hover:bg-[#222] text-xs font-bold text-gray-300 cursor-pointer"
             >
               Cancelar
@@ -908,7 +1019,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
               disabled={criandoUsuario}
               className="px-6 py-2.5 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-black text-xs uppercase tracking-wider cursor-pointer"
             >
-              {criandoUsuario ? 'Criando...' : 'Criar Usuário Agora'}
+              {criandoUsuario ? 'Liberando...' : 'Confirmar & Liberar Acesso'}
             </button>
           </div>
         </form>
@@ -1259,7 +1370,7 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
                 {/* Segurança: Redefinir Senha */}
                 <div className="pt-4 border-t border-[#242424] space-y-2.5">
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Redefinir Senha de Acesso
+                    Redefinir Senha de Acesso (Suporte Admin)
                   </label>
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <input

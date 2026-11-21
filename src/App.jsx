@@ -241,6 +241,7 @@ export default function App() {
   const [session, setSession] = useState(null)
   const [perfilAcesso, setPerfilAcesso] = useState(null)
   const [verificandoSessao, setVerificandoSessao] = useState(true)
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false)
 
   const carregarPerfilUsuario = async (currentSession) => {
     if (!currentSession?.user) {
@@ -260,16 +261,24 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Verifica se o link aberto veio de recuperação de senha na URL
+    if (window.location.hash && window.location.hash.includes('type=recovery')) {
+      setIsRecoveryMode(true)
+    }
+
     // Verifica sessão ativa ao abrir o app
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       carregarPerfilUsuario(session)
     })
 
-    // Escuta login, logout e expiração de token em tempo real
+    // Escuta login, logout, recuperação de senha e expiração de token em tempo real
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true)
+      }
       setSession(session)
       carregarPerfilUsuario(session)
     })
@@ -278,6 +287,7 @@ export default function App() {
   }, [])
 
   const handleLogout = async () => {
+    setIsRecoveryMode(false)
     await supabase.auth.signOut()
   }
 
@@ -290,6 +300,19 @@ export default function App() {
           Verificando acesso...
         </span>
       </div>
+    )
+  }
+
+  // Se o usuário acabou de clicar no link de "Esqueci minha senha" no e-mail, exibe tela de nova senha
+  if (isRecoveryMode) {
+    return (
+      <LoginScreen
+        isRecoveryMode={true}
+        onRecoveryComplete={() => {
+          setIsRecoveryMode(false)
+          window.history.replaceState(null, '', window.location.pathname)
+        }}
+      />
     )
   }
 
