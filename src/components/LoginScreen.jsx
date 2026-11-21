@@ -12,6 +12,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
 
   // Esqueci minha senha
   const [emailRecuperacao, setEmailRecuperacao] = useState('')
+  const [recuperacaoEnviada, setRecuperacaoEnviada] = useState(false)
 
   // Redefinir nova senha (após clicar no link do e-mail)
   const [novaSenha, setNovaSenha] = useState('')
@@ -23,6 +24,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
   const [solEmail, setSolEmail] = useState('')
   const [solCargo, setSolCargo] = useState('supervisor')
   const [solRegiaoUnidade, setSolRegiaoUnidade] = useState('')
+  const [solicitacaoEnviada, setSolicitacaoEnviada] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -32,6 +34,8 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
     setModo(novoModo)
     setError(null)
     setSuccessMsg(null)
+    setRecuperacaoEnviada(false)
+    setSolicitacaoEnviada(false)
   }
 
   // 1. Login normal
@@ -83,9 +87,10 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
         setError(resetError.message)
       } else {
         setSuccessMsg(
-          `Se o e-mail ${emailLimpo} estiver cadastrado, você receberá em instantes um link oficial para redefinir sua senha.`
+          `Se o e-mail ${emailLimpo} estiver cadastrado, você receberá em instantes um link oficial para redefinir sua senha. Verifique também a caixa de spam.`
         )
         setEmailRecuperacao('')
+        setRecuperacaoEnviada(true)
       }
     } catch (err) {
       setError('Não foi possível solicitar a recuperação de senha agora.')
@@ -165,6 +170,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
         setSolEmail('')
         setSolCargo('supervisor')
         setSolRegiaoUnidade('')
+        setSolicitacaoEnviada(true)
       }
     } catch (err) {
       setError('Falha de comunicação ao registrar sua solicitação.')
@@ -198,9 +204,15 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
           </h1>
           <p className="text-gray-400 text-xs mt-1 font-medium">
             {modo === 'login' && 'Acesso restrito · Gestão de Almoxarifado e Inventários'}
-            {modo === 'esqueci' && 'Enviaremos um link de redefinição para o seu e-mail'}
+            {modo === 'esqueci' &&
+              (recuperacaoEnviada
+                ? 'Verifique sua caixa de entrada para continuar'
+                : 'Enviaremos um link de redefinição para o seu e-mail')}
             {modo === 'nova_senha' && 'Cadastre sua nova senha pessoal de acesso'}
-            {modo === 'solicitar' && 'Seu pedido será analisado e liberado pelo Administrador'}
+            {modo === 'solicitar' &&
+              (solicitacaoEnviada
+                ? 'Pedido registrado na fila de aprovação'
+                : 'Seu pedido será analisado e liberado pelo Administrador')}
           </p>
         </div>
 
@@ -248,8 +260,8 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
                   <button
                     type="button"
                     onClick={() => {
-                      setEmailRecuperacao(email)
                       trocarModo('esqueci')
+                      setEmailRecuperacao(email)
                     }}
                     className="text-[11px] font-semibold text-[#f58220] hover:underline cursor-pointer"
                   >
@@ -318,28 +330,45 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
 
         {/* MODO 2: ESQUECI MINHA SENHA */}
         {modo === 'esqueci' && (
-          <form onSubmit={handleEnviarRecuperacao} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
-                Seu E-mail Corporativo
-              </label>
-              <input
-                type="email"
-                required
-                value={emailRecuperacao}
-                onChange={(e) => setEmailRecuperacao(e.target.value)}
-                placeholder="seu.nome@ambarenergia.com.br"
-                className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 outline-none transition-colors"
-              />
-            </div>
+          <div className="flex flex-col gap-3.5">
+            {!recuperacaoEnviada ? (
+              <form onSubmit={handleEnviarRecuperacao} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Seu E-mail Corporativo
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={emailRecuperacao}
+                    onChange={(e) => setEmailRecuperacao(e.target.value)}
+                    placeholder="seu.nome@ambarenergia.com.br"
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 outline-none transition-colors"
+                  />
+                </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-1 w-full py-3.5 px-4 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-[0.12em] transition-all cursor-pointer"
-            >
-              {loading ? 'Enviando link...' : 'Enviar Link para Meu E-mail'}
-            </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="mt-1 w-full py-3.5 px-4 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-[0.12em] transition-all cursor-pointer"
+                >
+                  {loading ? 'Enviando link...' : 'Enviar Link para Meu E-mail'}
+                </button>
+              </form>
+            ) : (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecuperacaoEnviada(false)
+                    setSuccessMsg(null)
+                  }}
+                  className="text-[11px] text-gray-400 hover:text-[#f58220] underline cursor-pointer"
+                >
+                  Não recebeu o e-mail? Enviar novamente
+                </button>
+              </div>
+            )}
 
             <button
               type="button"
@@ -348,7 +377,7 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
             >
               ← Voltar para o Login
             </button>
-          </form>
+          </div>
         )}
 
         {/* MODO 3: DEFINIR NOVA SENHA (APÓS CLICAR NO LINK DO E-MAIL) */}
@@ -407,80 +436,84 @@ export default function LoginScreen({ isRecoveryMode = false, onRecoveryComplete
 
         {/* MODO 4: SOLICITAR PRIMEIRO ACESSO */}
         {modo === 'solicitar' && (
-          <form onSubmit={handleSolicitarAcesso} autoComplete="off" className="flex flex-col gap-3.5">
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
-                Nome Completo *
-              </label>
-              <input
-                type="text"
-                required
-                value={solNome}
-                onChange={(e) => setSolNome(e.target.value)}
-                placeholder="Ex.: Carlos Eduardo Silva"
-                className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
-              />
-            </div>
+          <div className="flex flex-col gap-3.5">
+            {!solicitacaoEnviada && (
+              <form onSubmit={handleSolicitarAcesso} autoComplete="off" className="flex flex-col gap-3.5">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Nome Completo *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={solNome}
+                    onChange={(e) => setSolNome(e.target.value)}
+                    placeholder="Ex.: Carlos Eduardo Silva"
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
-                E-mail Corporativo *
-              </label>
-              <input
-                type="email"
-                required
-                value={solEmail}
-                onChange={(e) => setSolEmail(e.target.value)}
-                placeholder="nome.sobrenome@ambarenergia.com.br"
-                className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
-              />
-            </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    E-mail Corporativo *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={solEmail}
+                    onChange={(e) => setSolEmail(e.target.value)}
+                    placeholder="nome.sobrenome@ambarenergia.com.br"
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
-                Perfil / Cargo *
-              </label>
-              <select
-                value={solCargo}
-                onChange={(e) => setSolCargo(e.target.value)}
-                className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white outline-none"
-              >
-                <option value="supervisor">Supervisor de Almoxarifado</option>
-                <option value="coordenador">Coordenador Regional</option>
-                <option value="gerente">Gerente Corporativo</option>
-              </select>
-            </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Perfil / Cargo *
+                  </label>
+                  <select
+                    value={solCargo}
+                    onChange={(e) => setSolCargo(e.target.value)}
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white outline-none"
+                  >
+                    <option value="supervisor">Supervisor de Almoxarifado</option>
+                    <option value="coordenador">Coordenador Regional</option>
+                    <option value="gerente">Gerente Corporativo</option>
+                  </select>
+                </div>
 
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
-                Região / Usina(s) que atende *
-              </label>
-              <input
-                type="text"
-                required
-                value={solRegiaoUnidade}
-                onChange={(e) => setSolRegiaoUnidade(e.target.value)}
-                placeholder="Ex.: UTE Uruguaiana / Região Sul"
-                className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
-              />
-            </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+                    Região / Usina(s) que atende *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={solRegiaoUnidade}
+                    onChange={(e) => setSolRegiaoUnidade(e.target.value)}
+                    placeholder="Ex.: UTE Uruguaiana / Região Sul"
+                    className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-[#f58220] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none"
+                  />
+                </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 w-full py-3.5 px-4 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-[0.12em] transition-all cursor-pointer"
-            >
-              {loading ? 'Enviando Pedido...' : 'Enviar Pedido para Aprovação'}
-            </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="mt-2 w-full py-3.5 px-4 rounded-xl bg-[#f58220] hover:bg-[#e07112] disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-[0.12em] transition-all cursor-pointer"
+                >
+                  {loading ? 'Enviando Pedido...' : 'Enviar Pedido para Aprovação'}
+                </button>
+              </form>
+            )}
 
             <button
               type="button"
               onClick={() => trocarModo('login')}
               className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#1c1c1c] text-xs font-bold text-gray-300 cursor-pointer"
             >
-              ← Já tenho conta · Voltar ao Login
+              ← Voltar para o Login
             </button>
-          </form>
+          </div>
         )}
 
         <div className="mt-6 pt-4 border-t border-[#1e1e1e] text-center">
