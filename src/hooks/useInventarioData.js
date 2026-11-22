@@ -19,10 +19,16 @@ function toNum(val) {
   return isNaN(n) ? 0 : n
 }
 
+/**
+ * Normaliza o registro do inventário para o formato padrão do sistema
+ * (mesma estrutura que o estoque usa, para o lerDoDiscoPorPerfil funcionar)
+ */
 function normalizeRow(row) {
   return {
     ...row,
-    unidade_almoxarifado: cleanStr(row.unidade_almoxarifado).toUpperCase(),
+    // Mapeia as colunas reais da tabela de inventário para o padrão do sistema
+    unidade_almoxarifado: cleanStr(row.empresa_nome).toUpperCase(),
+    Região: cleanStr(row.regiao_empresa),
     mes_referencia: cleanStr(row.mes_referencia),
     ano_referencia: cleanStr(row.ano_referencia),
     empresa_nome: cleanStr(row.empresa_nome),
@@ -105,10 +111,12 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
           .select('*', { count: 'exact', head: true })
 
         if (!isGlobalRole) {
-          if (unidadesPermitidas.length > 0) {
-            countQuery = countQuery.in('unidade_almoxarifado', unidadesPermitidas)
-          } else if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-            countQuery = countQuery.in('Região', regioesPermitidas)
+          if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
+            // Coordenador: baixa a região inteira. Filtro fino das usinas é feito no cliente.
+            countQuery = countQuery.in('regiao_empresa', regioesPermitidas)
+          } else if (unidadesPermitidas.length > 0) {
+            // Supervisor: filtra direto pelas unidades
+            countQuery = countQuery.in('empresa_nome', unidadesPermitidas)
           }
         }
 
@@ -144,10 +152,10 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
                 .range(from, to)
 
               if (!isGlobalRole) {
-                if (unidadesPermitidas.length > 0) {
-                  fetchQuery = fetchQuery.in('unidade_almoxarifado', unidadesPermitidas)
-                } else if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                  fetchQuery = fetchQuery.in('Região', regioesPermitidas)
+                if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
+                  fetchQuery = fetchQuery.in('regiao_empresa', regioesPermitidas)
+                } else if (unidadesPermitidas.length > 0) {
+                  fetchQuery = fetchQuery.in('empresa_nome', unidadesPermitidas)
                 }
               }
 

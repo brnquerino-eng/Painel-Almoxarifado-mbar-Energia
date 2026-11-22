@@ -158,12 +158,11 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
                 .limit(batchSize)
 
               if (!isGlobalRole) {
-                if (cargo === 'coordenador') {
+                if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
+                  // Coordenador: baixa a região inteira. Filtro fino das usinas é feito no cliente.
                   query = query.in('Região', regioesPermitidas)
-                  if (unidadesPermitidas.length > 0) {
-                    query = query.in('unidade_almoxarifado', unidadesPermitidas)
-                  }
-                } else {
+                } else if (unidadesPermitidas.length > 0) {
+                  // Supervisor: filtra direto pelas unidades
                   query = query.in('unidade_almoxarifado', unidadesPermitidas)
                 }
               }

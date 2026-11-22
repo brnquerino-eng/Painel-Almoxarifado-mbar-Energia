@@ -81,6 +81,17 @@ export async function mergeDiscoCache(key, novosRegistros, isCargaGlobal = false
 }
 
 /**
+ * Normaliza texto para comparação segura (remove acentos + maiúsculo)
+ */
+function normalizeKey(str) {
+  return String(str || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')                 // separa os acentos
+    .replace(/[\u0300-\u036f]/g, '')  // remove os acentos
+}
+
+/**
  * Cabeça de leitura: filtra os registros do disco de acordo com o perfil do usuário logado.
  */
 export function lerDoDiscoPorPerfil(registros = [], isAdmin = false, perfilAcesso = null) {
@@ -94,10 +105,12 @@ export function lerDoDiscoPorPerfil(registros = [], isAdmin = false, perfilAcess
 
   if (cargo === 'coordenador') {
     const regioesSet = new Set(
-      (perfilAcesso?.regioes_permitidas || []).map((r) => String(r).trim().toUpperCase())
+      (perfilAcesso?.regioes_permitidas || [])
+        .map((r) => normalizeKey(r))
+        .filter(Boolean)
     )
     const unidadesEspecificas = (perfilAcesso?.unidades_permitidas || [])
-      .map((u) => String(u).trim().toUpperCase())
+      .map((u) => normalizeKey(u))
       .filter(Boolean)
     const temFiltroUnidade = unidadesEspecificas.length > 0
     const unidadesSet = new Set(unidadesEspecificas)
@@ -105,25 +118,26 @@ export function lerDoDiscoPorPerfil(registros = [], isAdmin = false, perfilAcess
     if (regioesSet.size === 0) return []
 
     return registros.filter((row) => {
-      const reg = String(row['Região'] || row['regiao'] || '').trim().toUpperCase()
-      const uni = String(row['unidade_almoxarifado'] || '').trim().toUpperCase()
+      const reg = normalizeKey(row['Região'] || row['regiao'] || '')
+      const uni = normalizeKey(row['unidade_almoxarifado'] || '')
+
       if (reg && !regioesSet.has(reg)) return false
       if (temFiltroUnidade && !unidadesSet.has(uni)) return false
       return true
     })
   }
 
-  // Supervisor: lê somente as unidades permitidas (ex.: CANDIOTA ou URUGUAIANA)
+  // Supervisor: lê somente as unidades permitidas
   const unidadesSet = new Set(
     (perfilAcesso?.unidades_permitidas || [])
-      .map((u) => String(u).trim().toUpperCase())
+      .map((u) => normalizeKey(u))
       .filter(Boolean)
   )
 
   if (unidadesSet.size === 0) return []
 
   return registros.filter((row) => {
-    const uni = String(row['unidade_almoxarifado'] || '').trim().toUpperCase()
+    const uni = normalizeKey(row['unidade_almoxarifado'] || '')
     return unidadesSet.has(uni)
   })
 }
