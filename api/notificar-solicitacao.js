@@ -32,8 +32,9 @@ export default async function handler(req, res) {
           }`;
 
     const linkPainel = urlPainel || 'https://painelgetaoalmoxambar.vercel.app';
+    const emailCorporativo = 'bruno.querino@ambarenergia.com.br';
 
-    // Remetente verificado no Brevo
+    // Remetente verificado no Brevo (Gmail)
     const REMETENTE = {
       name: 'Visão Estoque · Âmbar Energia',
       email: 'brnquerino@gmail.com',
@@ -52,8 +53,8 @@ export default async function handler(req, res) {
           to: [{ email: to }],
           subject,
           htmlContent: html,
-          // Melhora a deliverability
-          replyTo: { email: 'brnquerino@gmail.com', name: 'Visão Estoque' },
+          // Reply-To agora aponta para o e-mail corporativo
+          replyTo: { email: emailCorporativo, name: 'Visão Estoque · Âmbar Energia' },
         }),
       });
 
@@ -82,7 +83,8 @@ export default async function handler(req, res) {
               Não é necessário enviar uma nova solicitação.
             </p>
             <p style="font-size:12px;color:#999;margin-top:28px;">
-              Este é um e-mail automático. Em caso de dúvidas, responda esta mensagem.
+              Este é um e-mail automático. <strong>Não responda esta mensagem.</strong><br/>
+              Em caso de dúvidas, entre em contato com: <strong>${emailCorporativo}</strong>
             </p>
           </div>
         </div>
@@ -105,13 +107,12 @@ export default async function handler(req, res) {
                   <strong>Cargo:</strong> ${cargoLabel}<br/>
                   ${escopoHtml}
                 </div>
-                <p style="text-align:center;margin:28px 0;">
-                  <a href="${linkPainel}" style="background:#f58220;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;display:inline-block;">
-                    Abrir Painel para Aprovar
-                  </a>
+                <p style="font-size:14px;margin:20px 0;">
+                  <strong>Acesse o painel para aprovar:</strong><br/>
+                  ${linkPainel}
                 </p>
-                <p style="font-size:12px;color:#999;">
-                  Este é um aviso automático do sistema.
+                <p style="font-size:12px;color:#999;margin-top:28px;">
+                  Este é um aviso automático do sistema. Não responda este e-mail.
                 </p>
               </div>
             </div>
