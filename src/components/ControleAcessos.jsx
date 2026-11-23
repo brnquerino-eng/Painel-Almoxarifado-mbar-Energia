@@ -535,6 +535,22 @@ export default function ControleAcessos({ estoqueData = [], inventarioData = [],
         await carregarSolicitacoes();
       }
 
+      // Envia o e-mail de aprovação com a senha temporária
+      try {
+        await fetch('/api/notificar-aprovacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nome: novoNome.trim() || novoEmail.trim().split('@')[0],
+            email: novoEmail.trim(),
+            senhaTemporaria: novaSenha,
+            urlPainel: window.location.origin,
+          }),
+        });
+      } catch (emailErr) {
+        console.warn('Falha ao enviar e-mail de aprovação:', emailErr);
+      }
+
       setSucesso(
         `Usuário ${novoEmail.trim().toLowerCase()} criado! Ele deverá definir uma senha pessoal no primeiro acesso.`
       );
