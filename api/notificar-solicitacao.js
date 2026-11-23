@@ -33,7 +33,12 @@ export default async function handler(req, res) {
 
     const linkPainel = urlPainel || 'https://painelgetaoalmoxambar.vercel.app';
 
-    // Função auxiliar para enviar e-mail via Brevo
+    // Remetente verificado no Brevo
+    const REMETENTE = {
+      name: 'Visão Estoque · Âmbar Energia',
+      email: 'brnquerino@gmail.com',
+    };
+
     const enviarEmailBrevo = async ({ to, subject, html }) => {
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -43,13 +48,12 @@ export default async function handler(req, res) {
           Accept: 'application/json',
         },
         body: JSON.stringify({
-          sender: {
-            name: 'Visão Estoque · Âmbar Energia',
-            email: 'bruno.querino@ambarenergia.com.br', // pode trocar depois se quiser
-          },
+          sender: REMETENTE,
           to: [{ email: to }],
           subject,
           htmlContent: html,
+          // Melhora a deliverability
+          replyTo: { email: 'brnquerino@gmail.com', name: 'Visão Estoque' },
         }),
       });
 
@@ -60,27 +64,25 @@ export default async function handler(req, res) {
     // 1. E-mail para o solicitante
     const envioSolicitante = enviarEmailBrevo({
       to: email,
-      subject: 'Solicitação de Acesso Recebida · Visão Estoque Âmbar Energia',
+      subject: 'Solicitação de Acesso Recebida · Visão Estoque',
       html: `
-        <div style="background:#080808;color:#ffffff;font-family:Arial,sans-serif;padding:32px 20px;">
-          <div style="max-width:540px;margin:0 auto;background:#111111;border:1px solid #262626;border-radius:16px;padding:28px;">
-            <div style="border-bottom:1px solid #222;padding-bottom:16px;margin-bottom:20px;">
-              <span style="color:#f58220;font-size:11px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">Âmbar Energia</span>
-              <h2 style="margin:6px 0 0;font-size:20px;color:#ffffff;">Solicitação de Acesso Recebida</h2>
-            </div>
-            <p style="font-size:14px;color:#d4d4d4;line-height:1.6;">
-              Olá, <strong style="color:#ffffff;">${nome}</strong>!
-            </p>
-            <p style="font-size:14px;color:#d4d4d4;line-height:1.6;">
-              Recebemos seu pedido de liberação de acesso ao painel <strong style="color:#f58220;">Visão Estoque</strong>. Sua solicitação já está na fila de avaliação do Administrador.
-            </p>
-            <div style="background:#0b0b0b;border:1px solid #242424;border-radius:12px;padding:16px;margin:20px 0;font-size:13px;color:#cccccc;line-height:1.6;">
+        <div style="background:#f9f9f9;color:#333333;font-family:Arial,Helvetica,sans-serif;padding:24px;line-height:1.5;">
+          <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:8px;padding:28px;">
+            <h2 style="margin:0 0 16px;font-size:20px;color:#111;">Solicitação de Acesso Recebida</h2>
+            <p>Olá, <strong>${nome}</strong>,</p>
+            <p>Recebemos sua solicitação de acesso ao painel <strong>Visão Estoque</strong> da Âmbar Energia.</p>
+            <p>Seu pedido está na fila de avaliação do administrador.</p>
+            <div style="background:#f5f5f5;border-radius:6px;padding:16px;margin:20px 0;font-size:14px;">
               <strong>Perfil solicitado:</strong> ${cargoLabel}<br/>
               ${escopoHtml}<br/>
-              <strong>Status atual:</strong> <span style="color:#f58220;font-weight:bold;">EM AVALIAÇÃO</span>
+              <strong>Status:</strong> Em avaliação
             </div>
-            <p style="font-size:13px;color:#9ca3af;line-height:1.6;">
-              Assim que o acesso for aprovado e sua senha provisória for liberada, você poderá entrar diretamente pelo painel. Não é necessário enviar uma nova solicitação.
+            <p style="font-size:13px;color:#666;">
+              Assim que o acesso for liberado, você receberá as instruções para o primeiro login.
+              Não é necessário enviar uma nova solicitação.
+            </p>
+            <p style="font-size:12px;color:#999;margin-top:28px;">
+              Este é um e-mail automático. Em caso de dúvidas, responda esta mensagem.
             </p>
           </div>
         </div>
@@ -91,28 +93,26 @@ export default async function handler(req, res) {
     const envioAdmin = ADMIN_EMAIL
       ? enviarEmailBrevo({
           to: ADMIN_EMAIL,
-          subject: `[Novo Pedido de Acesso] ${nome} (${cargoLabel})`,
+          subject: `[Nova Solicitação] ${nome} – ${cargoLabel}`,
           html: `
-            <div style="background:#080808;color:#ffffff;font-family:Arial,sans-serif;padding:32px 20px;">
-              <div style="max-width:540px;margin:0 auto;background:#111111;border:1px solid #f58220;border-radius:16px;padding:28px;">
-                <div style="border-bottom:1px solid #222;padding-bottom:16px;margin-bottom:20px;">
-                  <span style="color:#f58220;font-size:11px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">Administração · Visão Estoque</span>
-                  <h2 style="margin:6px 0 0;font-size:20px;color:#ffffff;">Nova Solicitação de Acesso Pendente</h2>
-                </div>
-                <p style="font-size:14px;color:#d4d4d4;line-height:1.6;">
-                  Um colaborador solicitou liberação de acesso e está aguardando sua aprovação no módulo <strong>Controle de Acessos</strong>:
-                </p>
-                <div style="background:#0b0b0b;border:1px solid #242424;border-radius:12px;padding:16px;margin:20px 0;font-size:13px;color:#cccccc;line-height:1.7;">
+            <div style="background:#f9f9f9;color:#333333;font-family:Arial,Helvetica,sans-serif;padding:24px;line-height:1.5;">
+              <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:8px;padding:28px;">
+                <h2 style="margin:0 0 16px;font-size:20px;color:#111;">Nova Solicitação de Acesso</h2>
+                <p>Um colaborador solicitou acesso ao painel Visão Estoque:</p>
+                <div style="background:#f5f5f5;border-radius:6px;padding:16px;margin:20px 0;font-size:14px;">
                   <strong>Nome:</strong> ${nome}<br/>
                   <strong>E-mail:</strong> ${email}<br/>
                   <strong>Cargo:</strong> ${cargoLabel}<br/>
                   ${escopoHtml}
                 </div>
-                <div style="text-align:center;margin-top:24px;">
-                  <a href="${linkPainel}" style="display:inline-block;background:#f58220;color:#000000;font-weight:bold;font-size:13px;text-decoration:none;padding:12px 24px;border-radius:10px;text-transform:uppercase;">
+                <p style="text-align:center;margin:28px 0;">
+                  <a href="${linkPainel}" style="background:#f58220;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;display:inline-block;">
                     Abrir Painel para Aprovar
                   </a>
-                </div>
+                </p>
+                <p style="font-size:12px;color:#999;">
+                  Este é um aviso automático do sistema.
+                </p>
               </div>
             </div>
           `,
