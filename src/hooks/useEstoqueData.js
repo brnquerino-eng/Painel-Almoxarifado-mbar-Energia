@@ -6,6 +6,7 @@ import {
   mergeDiscoCache,
   lerDoDiscoPorPerfil,
 } from '../lib/cacheUtils'
+import { resolverUnidadesExatas } from '../lib/unidadesOficiais'
 
 const COLS = [
   'id',
@@ -106,26 +107,17 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
         return
       }
 
-      const regioesPermitidas = (perfilAcesso?.regioes_permitidas || [])
-        .map((r) => cleanStr(r))
-        .filter(Boolean)
       const unidadesPermitidas = (perfilAcesso?.unidades_permitidas || [])
         .map((u) => cleanStr(u))
         .filter(Boolean)
 
-      if (!isGlobalRole) {
-        if (cargo === 'coordenador' && regioesPermitidas.length === 0) {
-          setData([])
-          setProgress(100)
-          setLoading(false)
-          return
-        }
-        if (cargo === 'supervisor' && unidadesPermitidas.length === 0) {
-          setData([])
-          setProgress(100)
-          setLoading(false)
-          return
-        }
+      const unidadesExatas = resolverUnidadesExatas(unidadesPermitidas)
+
+      if (!isGlobalRole && unidadesExatas.length === 0) {
+        setData([])
+        setProgress(100)
+        setLoading(false)
+        return
       }
 
       setLoading(true)
@@ -154,13 +146,9 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
                 .gt('id', lastId)
                 .limit(batchSize)
 
-              // Admin / Gerente / Coordenador / Supervisor:
-              // Baixamos sem filtro de unidade no servidor para evitar timeout.
-              // O filtro fino (unidades do perfil) é feito no cliente pelo lerDoDiscoPorPerfil.
-              if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                query = query.in('Região', regioesPermitidas)
+              if (!isGlobalRole && unidadesExatas.length > 0) {
+                query = query.in('unidade_almoxarifado', unidadesExatas)
               }
-              // Supervisor: não filtra no servidor (evita timeout com ilike)
 
               const { data: rows, error: fetchErr } = await query
 

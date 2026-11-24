@@ -6,6 +6,7 @@ import {
   mergeDiscoCache,
   lerDoDiscoPorPerfil,
 } from '../lib/cacheUtils'
+import { resolverUnidadesExatas } from '../lib/unidadesOficiais'
 
 function cleanStr(val) {
   if (val == null) return ''
@@ -72,26 +73,17 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
         return
       }
 
-      const regioesPermitidas = (perfilAcesso?.regioes_permitidas || [])
-        .map((r) => cleanStr(r))
-        .filter(Boolean)
       const unidadesPermitidas = (perfilAcesso?.unidades_permitidas || [])
         .map((u) => cleanStr(u))
         .filter(Boolean)
 
-      if (!isGlobalRole) {
-        if (cargo === 'coordenador' && regioesPermitidas.length === 0 && unidadesPermitidas.length === 0) {
-          setData([])
-          setProgress(100)
-          setLoading(false)
-          return
-        }
-        if (cargo === 'supervisor' && unidadesPermitidas.length === 0) {
-          setData([])
-          setProgress(100)
-          setLoading(false)
-          return
-        }
+      const unidadesExatas = resolverUnidadesExatas(unidadesPermitidas)
+
+      if (!isGlobalRole && unidadesExatas.length === 0) {
+        setData([])
+        setProgress(100)
+        setLoading(false)
+        return
       }
 
       setLoading(true)
@@ -103,10 +95,9 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
           .from(TABLE_INVENTARIO)
           .select('*', { count: 'exact', head: true })
 
-        if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
-          countQuery = countQuery.in('regiao_empresa', regioesPermitidas)
+        if (!isGlobalRole && unidadesExatas.length > 0) {
+          countQuery = countQuery.in('empresa_nome', unidadesExatas)
         }
-        // Supervisor: sem filtro no servidor
 
         const { count, error: countErr } = await countQuery
         if (countErr) throw countErr
@@ -139,10 +130,9 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
                 .order('id', { ascending: true })
                 .range(from, to)
 
-              if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                fetchQuery = fetchQuery.in('regiao_empresa', regioesPermitidas)
+              if (!isGlobalRole && unidadesExatas.length > 0) {
+                fetchQuery = fetchQuery.in('empresa_nome', unidadesExatas)
               }
-              // Supervisor: sem filtro no servidor
 
               const { data: rows, error: fetchErr } = await fetchQuery
 
