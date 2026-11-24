@@ -154,18 +154,13 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
                 .gt('id', lastId)
                 .limit(batchSize)
 
-              if (!isGlobalRole) {
-                if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                  // Coordenador: baixa a região inteira
-                  query = query.in('Região', regioesPermitidas)
-                } else if (unidadesPermitidas.length > 0) {
-                  // Supervisor: filtro case-insensitive nas unidades
-                  const orFilter = unidadesPermitidas
-                    .map((u) => `unidade_almoxarifado.ilike.${u}`)
-                    .join(',')
-                  query = query.or(orFilter)
-                }
+              // Admin / Gerente / Coordenador / Supervisor:
+              // Baixamos sem filtro de unidade no servidor para evitar timeout.
+              // O filtro fino (unidades do perfil) é feito no cliente pelo lerDoDiscoPorPerfil.
+              if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
+                query = query.in('Região', regioesPermitidas)
               }
+              // Supervisor: não filtra no servidor (evita timeout com ilike)
 
               const { data: rows, error: fetchErr } = await query
 

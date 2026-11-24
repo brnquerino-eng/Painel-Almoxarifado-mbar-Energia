@@ -103,16 +103,10 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
           .from(TABLE_INVENTARIO)
           .select('*', { count: 'exact', head: true })
 
-        if (!isGlobalRole) {
-          if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-            countQuery = countQuery.in('regiao_empresa', regioesPermitidas)
-          } else if (unidadesPermitidas.length > 0) {
-            const orFilter = unidadesPermitidas
-              .map((u) => `empresa_nome.ilike.${u}`)
-              .join(',')
-            countQuery = countQuery.or(orFilter)
-          }
+        if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
+          countQuery = countQuery.in('regiao_empresa', regioesPermitidas)
         }
+        // Supervisor: sem filtro no servidor
 
         const { count, error: countErr } = await countQuery
         if (countErr) throw countErr
@@ -145,16 +139,10 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
                 .order('id', { ascending: true })
                 .range(from, to)
 
-              if (!isGlobalRole) {
-                if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                  fetchQuery = fetchQuery.in('regiao_empresa', regioesPermitidas)
-                } else if (unidadesPermitidas.length > 0) {
-                  const orFilter = unidadesPermitidas
-                    .map((u) => `empresa_nome.ilike.${u}`)
-                    .join(',')
-                  fetchQuery = fetchQuery.or(orFilter)
-                }
+              if (!isGlobalRole && cargo === 'coordenador' && regioesPermitidas.length > 0) {
+                fetchQuery = fetchQuery.in('regiao_empresa', regioesPermitidas)
               }
+              // Supervisor: sem filtro no servidor
 
               const { data: rows, error: fetchErr } = await fetchQuery
 
