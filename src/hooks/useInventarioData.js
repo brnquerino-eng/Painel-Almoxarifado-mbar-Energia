@@ -19,14 +19,9 @@ function toNum(val) {
   return isNaN(n) ? 0 : n
 }
 
-/**
- * Normaliza o registro do inventário para o formato padrão do sistema
- * (mesma estrutura que o estoque usa, para o lerDoDiscoPorPerfil funcionar)
- */
 function normalizeRow(row) {
   return {
     ...row,
-    // Mapeia as colunas reais da tabela de inventário para o padrão do sistema
     unidade_almoxarifado: cleanStr(row.empresa_nome).toUpperCase(),
     Região: cleanStr(row.regiao_empresa),
     mes_referencia: cleanStr(row.mes_referencia),
@@ -62,7 +57,6 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
       const cargo = isAdmin ? 'admin' : perfilAcesso?.cargo || 'supervisor'
       const isGlobalRole = isAdmin || cargo === 'gerente'
 
-      // 1. Leitura do Disco Compartilhado (filtrada pelo login ativo)
       if (!forceReload) {
         setLoading(true)
         const discoBruto = await getDiscoCache(GLOBAL_CACHE_KEYS.INVENTARIO)
@@ -78,7 +72,6 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
         return
       }
 
-      // 2. Atualização Manual ("Atualizar Dados")
       const regioesPermitidas = (perfilAcesso?.regioes_permitidas || [])
         .map((r) => cleanStr(r))
         .filter(Boolean)
@@ -112,11 +105,12 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
 
         if (!isGlobalRole) {
           if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-            // Coordenador: baixa a região inteira. Filtro fino das usinas é feito no cliente.
             countQuery = countQuery.in('regiao_empresa', regioesPermitidas)
           } else if (unidadesPermitidas.length > 0) {
-            // Supervisor: filtra direto pelas unidades
-            countQuery = countQuery.in('empresa_nome', unidadesPermitidas)
+            const orFilter = unidadesPermitidas
+              .map((u) => `empresa_nome.ilike.${u}`)
+              .join(',')
+            countQuery = countQuery.or(orFilter)
           }
         }
 
@@ -155,7 +149,10 @@ export function useInventarioData({ userId, isAdmin = false, perfilAcesso = null
                 if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
                   fetchQuery = fetchQuery.in('regiao_empresa', regioesPermitidas)
                 } else if (unidadesPermitidas.length > 0) {
-                  fetchQuery = fetchQuery.in('empresa_nome', unidadesPermitidas)
+                  const orFilter = unidadesPermitidas
+                    .map((u) => `empresa_nome.ilike.${u}`)
+                    .join(',')
+                  fetchQuery = fetchQuery.or(orFilter)
                 }
               }
 

@@ -82,7 +82,6 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
       const cargo = isAdmin ? 'admin' : perfilAcesso?.cargo || 'supervisor'
       const isGlobalRole = isAdmin || cargo === 'gerente'
 
-      // 1. Leitura do Disco Compartilhado (sem baixar do Supabase)
       if (!forceReload) {
         setLoading(true)
         const discoBruto = await getDiscoCache(GLOBAL_CACHE_KEYS.ESTOQUE)
@@ -96,7 +95,6 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
           ('Região' in discoBruto[0] || 'regiao' in discoBruto[0])
 
         if (isValidCache) {
-          // A cabeça de leitura filtra o disco exclusivamente para o login ativo
           const fatiaAutorizada = lerDoDiscoPorPerfil(discoBruto, isAdmin, perfilAcesso)
           setData(fatiaAutorizada)
           setProgress(100)
@@ -108,7 +106,6 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
         return
       }
 
-      // 2. Atualização Manual ("Atualizar Dados"): baixa apenas o escopo permitido e grava no disco
       const regioesPermitidas = (perfilAcesso?.regioes_permitidas || [])
         .map((r) => cleanStr(r))
         .filter(Boolean)
@@ -159,11 +156,14 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
 
               if (!isGlobalRole) {
                 if (cargo === 'coordenador' && regioesPermitidas.length > 0) {
-                  // Coordenador: baixa a região inteira. Filtro fino das usinas é feito no cliente.
+                  // Coordenador: baixa a região inteira
                   query = query.in('Região', regioesPermitidas)
                 } else if (unidadesPermitidas.length > 0) {
-                  // Supervisor: filtra direto pelas unidades
-                  query = query.in('unidade_almoxarifado', unidadesPermitidas)
+                  // Supervisor: filtro case-insensitive nas unidades
+                  const orFilter = unidadesPermitidas
+                    .map((u) => `unidade_almoxarifado.ilike.${u}`)
+                    .join(',')
+                  query = query.or(orFilter)
                 }
               }
 
@@ -198,7 +198,6 @@ export function useEstoqueData({ userId, isAdmin = false, perfilAcesso = null } 
           }
         }
 
-        // Grava/mescla no disco compartilhado e entrega apenas a fatia deste login
         const discoAtualizado = await mergeDiscoCache(
           GLOBAL_CACHE_KEYS.ESTOQUE,
           all,
