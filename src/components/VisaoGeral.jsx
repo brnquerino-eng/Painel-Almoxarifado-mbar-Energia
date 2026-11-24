@@ -670,6 +670,12 @@ export default function VisaoGeral({ data }) {
     <div className="space-y-6 animate-fade-in bg-[#080808] min-h-screen p-2 sm:p-4 text-white relative">
       <style>{`
         .js-plotly-plot .plotly .cursor-crosshair { cursor: pointer !important; }
+        .js-plotly-plot, 
+        .js-plotly-plot .plot-container, 
+        .js-plotly-plot .svg-container {
+          overflow: hidden !important;
+          max-width: 100% !important;
+        }
         div:focus, table:focus, tbody:focus, tr:focus, td:focus, [role="button"]:focus { 
           outline: none !important; 
           box-shadow: none !important;
@@ -816,7 +822,7 @@ export default function VisaoGeral({ data }) {
           })}
         </div>
 
-        <div className="pt-2 z-10 relative">
+        <div className="pt-2 z-10 relative" style={{ height: '380px', width: '100%', overflow: 'hidden' }}>
           <Plot
             data={[
               { x: timeSeriesAgg.total.map((d) => d.periodo), y: timeSeriesAgg.total.map(() => maxValorGlobal * 1.3), type: 'bar', name: 'clickArea', marker: { color: 'rgba(245, 130, 32, 0.02)' }, hoverinfo: 'none', showlegend: false, cliponaxis: false },
@@ -919,7 +925,7 @@ export default function VisaoGeral({ data }) {
               hovermode: 'closest', 
               height: 350, 
               bargap: 0, 
-              margin: { l: 20, r: 20, t: 40, b: 45 }, 
+              margin: { l: 50, r: 20, t: 40, b: 50 }, 
               shapes: chartShapes, 
               annotations: chartAnnotations, 
               xaxis: { 
@@ -934,12 +940,13 @@ export default function VisaoGeral({ data }) {
                   return isSelected ? `<span style="color: #f58220; font-weight: 900;">• ${label} •</span>` : label
                 }), 
                 tickpad: 12, 
-                automargin: true, 
+                automargin: false, 
+                fixedrange: true, 
                 range: [-0.8, Math.max(timeSeriesAgg.total.length - 0.2, 1)] 
               }, 
-              yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } 
+              yaxis: { showgrid: true, gridcolor: '#222222', zeroline: false, showticklabels: false, fixedrange: true, range: [-(maxValorGlobal * 0.15), maxValorGlobal * 1.3] } 
             }}
-            config={{ displayModeBar: false, responsive: true }} style={{ width: '100%', minHeight: 280, cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
+            config={{ displayModeBar: false, responsive: true, scrollZoom: false, doubleClick: false, showTips: false }} style={{ width: '100%', height: '100%', cursor: 'pointer' }} useResizeHandler onClick={handleChartClick}
           />
         </div>
 
