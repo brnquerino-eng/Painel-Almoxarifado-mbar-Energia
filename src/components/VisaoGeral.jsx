@@ -180,11 +180,20 @@ export default function VisaoGeral({ data }) {
     fecharModalFS, dispatch
   ])
 
-  // Resize effect
-  useEffect(() => {
-    const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
-    return () => cancelAnimationFrame(id)
-  }, [granularidade, abaCompraConsumo, abaRankingUnidade])
+// Resize effect controlado para evitar que o gráfico trave expandido após abrir dropdowns
+useEffect(() => {
+  let timerId = null
+  const id = requestAnimationFrame(() => {
+    window.dispatchEvent(new Event('resize'))
+    timerId = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 180)
+  })
+  return () => {
+    cancelAnimationFrame(id)
+    if (timerId) clearTimeout(timerId)
+  }
+}, [granularidade, abaCompraConsumo, abaRankingUnidade])
 
   // -------------------------------------------------------------------------
   // LISTAS FILTRADAS PARA TELA CHEIA / GAVETAS
@@ -710,25 +719,25 @@ export default function VisaoGeral({ data }) {
 
         </div>
       </div>
-      {/* --- FILTROS E GRÁFICO PRINCIPAL --- */}
-      <div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative overflow-hidden transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group">
+{/* --- FILTROS E GRÁFICO PRINCIPAL --- */}
+<div className="bg-[#161616] border border-[#2A2A2A] border-t-[#383838] rounded-2xl p-4 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)] relative transition-all duration-300 hover:border-accent/50 hover:shadow-[0_15px_40px_rgba(245,130,32,0.2)] group w-full max-w-full min-w-0">
         <div className="absolute top-0 left-1/4 right-1/4 h-[0.5px] opacity-30 bg-gradient-to-r from-transparent via-accent/50 to-transparent pointer-events-none" />
 
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#2A2A2A]">
-          <div className="shrink-0">
+        <div className="flex flex-col gap-4 mb-4 pb-4 border-b border-[#2A2A2A] min-w-0">
+          <div className="min-w-0">
             <div className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase mb-1 flex items-center gap-3">Painel Gerencial Âmbar Energia</div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide">
+            <h2 className="text-base font-bold text-white flex items-center gap-2.5 tracking-wide flex-wrap">
               <svg className="w-5 h-5 text-accent shrink-0 drop-shadow-[0_0_8px_rgba(245,130,32,0.6)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-              EVOLUÇÃO TEMPORAL DO ESTOQUE (R$) [{granularidade.toUpperCase()}]
+              <span>EVOLUÇÃO TEMPORAL DO ESTOQUE (R$) [{granularidade.toUpperCase()}]</span>
             </h2>
           </div>
 
-          <div className="flex flex-row flex-wrap items-end justify-end gap-3 z-30 shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 z-30 w-full min-w-0">
             {/* Ordem: Categoria → Segmento → Unidade → Região → Usina → Ano
                 A cascata funciona em qualquer sequência de clique (cada lista
                 monta opções com base em TODOS os outros filtros). */}
-            <div className="min-w-[140px]">
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Categoria</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Categoria</label>
               <CyberMultiSelect 
                 options={tiposEstoqueOpcoes} 
                 selected={tiposEstoqueSel} 
@@ -737,8 +746,8 @@ export default function VisaoGeral({ data }) {
               />
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Segmento</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Segmento</label>
               <CyberMultiSelect 
                 options={segmentosOpcoes} 
                 selected={segmentosSel} 
@@ -747,8 +756,8 @@ export default function VisaoGeral({ data }) {
               />
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Unidade</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Unidade</label>
               <CyberMultiSelect 
                 options={escoposOpcoes} 
                 selected={escoposSel} 
@@ -757,8 +766,8 @@ export default function VisaoGeral({ data }) {
               />
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Região</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Região</label>
               <CyberMultiSelect 
                 options={regioesOpcoes} 
                 selected={regioesSel} 
@@ -767,8 +776,8 @@ export default function VisaoGeral({ data }) {
               />
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Usina</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Usina</label>
               <CyberMultiSelect 
                 options={opcoesUnid} 
                 selected={unidadesSel} 
@@ -777,8 +786,8 @@ export default function VisaoGeral({ data }) {
               />
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold tracking-widest text-[#8c9ba5] uppercase mb-1 flex items-center gap-1.5">Ano</label>
+            <div className="min-w-0">
+              <label className="text-[9px] font-bold tracking-wider text-[#8c9ba5] uppercase mb-1 flex items-center gap-1 truncate">Ano</label>
               <CyberMultiSelect 
                 options={anoOpcoesCascata} 
                 selected={anosSel} 
@@ -809,8 +818,9 @@ export default function VisaoGeral({ data }) {
           })}
         </div>
 
-        <div className="pt-2 z-10 relative" style={{ height: '380px', width: '100%', overflow: 'hidden' }}>
+        <div className="pt-2 z-10 relative w-full max-w-full min-w-0 overflow-hidden" style={{ height: '380px' }}>
           <Plot
+            key={`plot-mestre-${granularidade}-${vis.total}-${vis.operacional}-${vis.critico}-${vis.obsoleto}-${vis.obra}-${vis.insumo}`}
             data={[
               { x: timeSeriesAgg.total.map((d) => d.periodo), y: timeSeriesAgg.total.map(() => maxValorGlobal * 1.3), type: 'bar', name: 'clickArea', marker: { color: 'rgba(245, 130, 32, 0.02)' }, hoverinfo: 'none', showlegend: false, cliponaxis: false },
               vis.total && { 
