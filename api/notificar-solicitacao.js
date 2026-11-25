@@ -31,7 +31,7 @@ export default async function handler(req, res) {
             unidades.join(', ') || 'Nenhuma'
           }`;
 
-    const linkPainel = urlPainel || 'https://painelgetaoalmoxambar.vercel.app';
+          const linkPainel = urlPainel || 'https://gestao-estoque-ambar.vercel.app';
     const emailCorporativo = 'bruno.querino@ambarenergia.com.br';
 
     // Remetente verificado no Brevo (Gmail)

@@ -16,7 +16,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Dados obrigatórios ausentes (nome, email, senhaTemporaria).' });
       }
   
-      const linkPainel = urlPainel || 'https://painelgetaoalmoxambar.vercel.app';
+      const linkPainel = urlPainel || 'https://gestao-estoque-ambar.vercel.app';
       const emailCorporativo = 'bruno.querino@ambarenergia.com.br';
   
       const REMETENTE = {
